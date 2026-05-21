@@ -13,10 +13,13 @@ export type AuthState = {
 
 type AuthSessionData = {
   role?: AuthRole;
+  expiresAt?: number;
 };
 
 const AUTH_COOKIE_NAME = "tb_auth";
-const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+const TEAM_SESSION_MAX_AGE_SECONDS = 60 * 60 * 12;
+const ADMIN_SESSION_MAX_AGE_SECONDS = 60 * 60 * 2;
+const COOKIE_MAX_AGE_SECONDS = TEAM_SESSION_MAX_AGE_SECONDS;
 
 const loginInput = z.object({
   password: z.string().min(1).max(256),
@@ -93,13 +96,13 @@ async function getAuthSession() {
   return useSession<AuthSessionData>({
     name: AUTH_COOKIE_NAME,
     password: await sessionSecret(),
-    maxAge: SESSION_MAX_AGE_SECONDS,
+    maxAge: COOKIE_MAX_AGE_SECONDS,
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: SESSION_MAX_AGE_SECONDS,
+      maxAge: COOKIE_MAX_AGE_SECONDS,
     },
   });
 }
@@ -108,15 +111,34 @@ function normalizeRole(value: unknown): AuthRole | null {
   return value === "team" || value === "admin" ? value : null;
 }
 
+function getRoleSessionMaxAge(role: AuthRole) {
+  return role === "admin" ? ADMIN_SESSION_MAX_AGE_SECONDS : TEAM_SESSION_MAX_AGE_SECONDS;
+}
+
+function getSessionExpiry(role: AuthRole) {
+  return Date.now() + getRoleSessionMaxAge(role) * 1000;
+}
+
+function isValidExpiry(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > Date.now();
+}
+
 async function readAuthState(): Promise<AuthState> {
   const session = await getAuthSession();
   const role = normalizeRole(session.data.role);
+  const sessionExpired = role !== null && !isValidExpiry(session.data.expiresAt);
   const { setupReady, setupIssue } = readAuthEnv();
 
+  if (sessionExpired) {
+    await session.clear();
+  }
+
+  const activeRole = sessionExpired ? null : role;
+
   return {
-    isAuthenticated: role !== null,
-    isAdmin: role === "admin",
-    role,
+    isAuthenticated: activeRole !== null,
+    isAdmin: activeRole === "admin",
+    role: activeRole,
     setupReady,
     setupIssue,
   };
@@ -152,7 +174,7 @@ export const loginToDashboard = createServerFn({ method: "POST" })
     }
 
     const session = await getAuthSession();
-    await session.update({ role });
+    await session.update({ role, expiresAt: getSessionExpiry(role) });
 
     return {
       ok: true as const,
