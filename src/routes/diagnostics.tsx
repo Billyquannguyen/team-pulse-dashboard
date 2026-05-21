@@ -315,6 +315,99 @@ function ActiveBrandsDiagnosticsCard({
   );
 }
 
+function NotionKnowledgeDiagnosticsCard({
+  diagnostics,
+}: {
+  diagnostics: GoogleSheetsDiagnostics["notion"];
+}) {
+  if (!diagnostics) return null;
+
+  return (
+    <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Billy GPT Notion knowledge</h3>
+          <p className="text-xs text-muted-foreground">
+            This checks the private Notion handbook index used by Billy GPT.
+          </p>
+        </div>
+        <StatusPill
+          ok={diagnostics.setupReady && diagnostics.isSynced && diagnostics.errors.length === 0}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <MetricBox label="Notion token" value={diagnostics.tokenExists ? "Present" : "Missing"} />
+        <MetricBox
+          label="Root page ID"
+          value={diagnostics.rootPageIdExists ? "Present" : "Missing"}
+        />
+        <MetricBox label="Root access" value={diagnostics.rootPageAccess} />
+        <MetricBox label="Synced" value={diagnostics.isSynced ? "Yes" : "No"} />
+        <MetricBox label="Pages indexed" value={diagnostics.pagesIndexed} />
+        <MetricBox label="Chunks indexed" value={diagnostics.chunksIndexed} />
+        <MetricBox
+          label="Last sync"
+          value={
+            diagnostics.lastSyncTime ? new Date(diagnostics.lastSyncTime).toLocaleString() : "-"
+          }
+        />
+      </div>
+
+      <div className="mt-4 rounded-2xl bg-muted/45 p-4 text-sm">
+        <div className="font-semibold">Sync status</div>
+        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+          <div>Checked: {new Date(diagnostics.checkedAt).toLocaleString()}</div>
+          <div>Setup ready: {diagnostics.setupReady ? "Yes" : "No"}</div>
+          <div>Token env: {diagnostics.tokenEnvName}</div>
+          <div>Last duration: {diagnostics.lastDurationMs ?? "-"}ms</div>
+          <div>
+            Storage: private server-side index. Page contents are not shown in diagnostics.
+          </div>
+          <div>
+            Web provider: {diagnostics.web.provider}
+            {diagnostics.web.braveConfigured ? " with Brave key" : " public fallback"}
+          </div>
+        </div>
+      </div>
+
+      {(diagnostics.setupIssue || diagnostics.rootPageError) && (
+        <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <div className="mb-1 flex items-center gap-2 font-bold">
+            <AlertTriangle className="h-4 w-4" />
+            Notion setup issue
+          </div>
+          <p className="break-words text-xs leading-relaxed">
+            {diagnostics.setupIssue ?? diagnostics.rootPageError}
+          </p>
+        </div>
+      )}
+
+      {diagnostics.errors.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <div className="mb-2 font-bold">Notion errors</div>
+          <ul className="space-y-1 text-xs">
+            {diagnostics.errors.map((error) => (
+              <li key={error}>{error}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {diagnostics.warnings.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
+          <div className="mb-2 font-bold">Notion warnings</div>
+          <ul className="space-y-1 text-xs">
+            {diagnostics.warnings.slice(0, 20).map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnostics }) {
   return (
     <div className="space-y-6">
@@ -456,6 +549,8 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
       <TeamAssetsDiagnosticsCard diagnostics={diagnostics.teamAssets} />
 
       <ActiveBrandsDiagnosticsCard diagnostics={diagnostics.activeBrands} />
+
+      <NotionKnowledgeDiagnosticsCard diagnostics={diagnostics.notion} />
 
       <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3">

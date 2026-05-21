@@ -107,7 +107,7 @@ function RootComponent() {
             </main>
           </div>
           <MobileNav />
-          <AssistantPanel />
+          <AssistantPanel authRole={auth.role} />
         </div>
       ) : (
         <TeamLoginScreen auth={auth} />

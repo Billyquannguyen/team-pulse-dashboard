@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireAdminAuth } from "@/lib/auth";
 import type { ActiveBrandsDataFlowDiagnostics } from "@/lib/active-brands";
+import type { NotionKnowledgeDiagnostics } from "@/lib/notion-knowledge";
 import type { DashboardDataFlowDiagnostics } from "@/lib/sheets-public";
 import type { TeamAssetsDataFlowDiagnostics } from "@/lib/team-assets";
 
@@ -41,6 +42,7 @@ export type GoogleSheetsDiagnostics = {
   dataFlow: DashboardDataFlowDiagnostics | null;
   teamAssets: TeamAssetsDataFlowDiagnostics | null;
   activeBrands: ActiveBrandsDataFlowDiagnostics | null;
+  notion: NotionKnowledgeDiagnostics | null;
 };
 
 const DIAGNOSTICS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -56,7 +58,8 @@ function logDiagnostics(message: string, details?: Record<string, unknown>) {
 
 async function getEnvStatus(): Promise<EnvDiagnostic[]> {
   const googleSheets = await import("@/lib/google-sheets.server");
-  return googleSheets.getGoogleEnvPresence();
+  const notionKnowledge = await import("@/lib/notion-knowledge");
+  return [...googleSheets.getGoogleEnvPresence(), ...notionKnowledge.getNotionEnvDiagnostics()];
 }
 
 async function checkAuthStatus(): Promise<GoogleSheetsDiagnostics["auth"]> {
@@ -169,20 +172,26 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       dataFlow: null,
       teamAssets: null,
       activeBrands: null,
+      notion: null,
     } satisfies GoogleSheetsDiagnostics;
   }
 
   if (diagnosticsCache && diagnosticsCache.expiresAt > Date.now()) {
+    const notionKnowledge = await import("@/lib/notion-knowledge");
     logDiagnostics("returning cached diagnostics", {
       expiresAt: new Date(diagnosticsCache.expiresAt).toISOString(),
     });
-    return diagnosticsCache.data;
+    return {
+      ...diagnosticsCache.data,
+      notion: notionKnowledge.getNotionKnowledgeDiagnostics(),
+    };
   }
 
   const sheetsPublic = await import("@/lib/sheets-public");
   const activeBrands = await import("@/lib/active-brands");
   const teamAssets = await import("@/lib/team-assets");
-  const [env, auth, teamSheet, creatorSheet, dataFlow, teamAssetsFlow, activeBrandsFlow] =
+  const notionKnowledge = await import("@/lib/notion-knowledge");
+  const [env, auth, teamSheet, creatorSheet, dataFlow, teamAssetsFlow, activeBrandsFlow, notion] =
     await Promise.all([
       getEnvStatus(),
       checkAuthStatus(),
@@ -191,6 +200,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       sheetsPublic.getDashboardDataFlowDiagnostics(),
       teamAssets.getTeamAssetsDataFlowDiagnostics(),
       activeBrands.getActiveBrandsDataFlowDiagnostics(),
+      notionKnowledge.getNotionKnowledgeDiagnostics(),
     ]);
 
   logDiagnostics("full diagnostics complete", {
@@ -204,6 +214,9 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     teamAssetsConfigured: teamAssetsFlow.spreadsheet.configured,
     activeBrandsSource: activeBrandsFlow.source,
     activeBrandsConfigured: activeBrandsFlow.spreadsheet.configured,
+    notionSetupReady: notion.setupReady,
+    notionPagesIndexed: notion.pagesIndexed,
+    notionChunksIndexed: notion.chunksIndexed,
   });
 
   const diagnostics = {
@@ -215,6 +228,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     dataFlow,
     teamAssets: teamAssetsFlow,
     activeBrands: activeBrandsFlow,
+    notion,
   } satisfies GoogleSheetsDiagnostics;
 
   diagnosticsCache = {

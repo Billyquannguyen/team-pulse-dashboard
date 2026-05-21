@@ -31,6 +31,13 @@ type ActiveBrandsReadResult = {
   cacheExpiresAt: string | null;
 };
 
+export type ActiveBrandsKnowledgeMatch = {
+  source: "sheets";
+  title: string;
+  text: string;
+  score: number;
+};
+
 export type ActiveBrandsSheetData = {
   headers: string[];
   rows: string[][];
@@ -106,6 +113,14 @@ function normalizeKey(value: string) {
     .replace(/[^\p{L}\p{N} ]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function tokenize(value: string) {
+  return (
+    normalizeKey(value)
+      .match(/[\p{L}\p{N}]{2,}/gu)
+      ?.filter((term) => !["the", "and", "for", "with", "this", "that"].includes(term)) ?? []
+  );
 }
 
 function normalizeSheetKey(value: string) {
@@ -462,6 +477,57 @@ export const fetchActiveBrandsData = createServerFn({ method: "GET" }).handler(a
     return emptyActiveBrandsData(message, links);
   }
 });
+
+export async function getActiveBrandsKnowledgeMatches(
+  question: string,
+): Promise<ActiveBrandsKnowledgeMatch[]> {
+  const googleSheets = await getGoogleSheetsServer();
+  const queryTerms = Array.from(new Set(tokenize(question)));
+
+  if (queryTerms.length === 0) return [];
+
+  try {
+    const result = await getActiveBrandsWithServerCache(googleSheets.getGoogleSheetsConfig(), {
+      allowStaleCache: true,
+    });
+
+    if (result.data.source === "error" || result.data.rows.length === 0) {
+      return [];
+    }
+
+    return result.data.rows
+      .map((row) => {
+        const labelledCells = result.data.headers
+          .map((header, index) => {
+            const value = row[index]?.trim();
+            return value ? `${header || `Column ${index + 1}`}: ${value}` : "";
+          })
+          .filter(Boolean);
+        const text = labelledCells.join(" | ");
+        const normalizedText = normalizeKey(text);
+        const score = queryTerms.reduce(
+          (total, term) => total + (normalizedText.includes(term) ? 1 : 0),
+          0,
+        );
+        const title = row.find((cell) => cell.trim())?.trim() || "Active brand row";
+
+        return {
+          source: "sheets" as const,
+          title,
+          text,
+          score,
+        };
+      })
+      .filter((match) => match.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 3);
+  } catch (error) {
+    logActiveBrands("active brands knowledge lookup failed", {
+      reason: errorMessage(error),
+    });
+    return [];
+  }
+}
 
 export const activeBrandsQuery = {
   queryKey: ["team-billion-active-brands", "active-contacts-v1"],
