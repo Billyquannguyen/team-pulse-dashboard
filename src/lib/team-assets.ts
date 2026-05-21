@@ -1,9 +1,19 @@
-import { createServerFn } from "@tanstack/react-start";
-import { fallbackAssetLinks, type AssetIconName, type AssetLink } from "@/data/assets";
-import { requireDashboardAuth } from "@/lib/auth";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
+import { z } from "zod";
+import {
+  fallbackAssetLinks,
+  type AssetColorName,
+  type AssetIconName,
+  type AssetLink,
+} from "@/data/assets";
+import { requireAdminAuth, requireDashboardAuth } from "@/lib/auth";
 
-type GoogleSheetsServer = typeof import("@/lib/google-sheets.server");
-type GoogleSheetsConfig = ReturnType<GoogleSheetsServer["getGoogleSheetsConfig"]>;
+type GoogleSheetsConfig = {
+  serviceAccountEmail: string;
+  privateKey: string;
+  teamSpreadsheetId: string;
+  creatorSourcingSpreadsheetId: string;
+};
 
 type TeamAssetsCacheStatus = "hit" | "miss" | "stale" | "refreshing";
 
@@ -45,6 +55,17 @@ type TeamAssetField =
   | "category"
   | "enabled"
   | "sortOrder";
+
+type TeamAssetsWorksheet = {
+  sheet: {
+    memberName: string;
+    sheetName: string;
+    gid?: string;
+  };
+  availableTabs: string[];
+  headers: string[];
+  rows: string[][];
+};
 
 export type TeamAssetsSheetData = {
   assets: AssetLink[];
@@ -145,6 +166,34 @@ const COLOR_ACCENTS = {
   yellow: "from-yellow-500/20 to-amber-500/20",
 } as const;
 
+const ASSET_ICON_NAMES = [
+  "book",
+  "calendar",
+  "database",
+  "discord",
+  "document",
+  "drive",
+  "folder",
+  "link",
+  "notion",
+  "slack",
+  "spreadsheet",
+] as const;
+
+const ASSET_COLOR_NAMES = [
+  "amber",
+  "blue",
+  "green",
+  "pink",
+  "purple",
+  "rose",
+  "slate",
+  "yellow",
+] as const;
+
+export const assetIconOptions = [...ASSET_ICON_NAMES];
+export const assetColorOptions = [...ASSET_COLOR_NAMES];
+
 const DEFAULT_COLOR_SEQUENCE = [
   COLOR_ACCENTS.purple,
   COLOR_ACCENTS.blue,
@@ -155,6 +204,27 @@ const DEFAULT_COLOR_SEQUENCE = [
   COLOR_ACCENTS.yellow,
   COLOR_ACCENTS.pink,
 ];
+
+const teamAssetInput = z.object({
+  title: z.string().trim().min(1).max(120),
+  subtitle: z.string().trim().max(240).optional().default(""),
+  url: z.string().trim().min(1).max(1000),
+  icon: z.enum(ASSET_ICON_NAMES).default("link"),
+  color: z.enum(ASSET_COLOR_NAMES).default("purple"),
+  category: z.string().trim().max(80).optional().default("Team"),
+  enabled: z.boolean().default(true),
+  sortOrder: z.number().finite().default(100),
+});
+
+const updateTeamAssetInput = teamAssetInput.extend({
+  rowNumber: z.number().int().min(2),
+});
+
+const removeTeamAssetInput = z.object({
+  rowNumber: z.number().int().min(2),
+});
+
+type TeamAssetInput = z.infer<typeof teamAssetInput>;
 
 let teamAssetsCache: TeamAssetsCacheEntry | null = null;
 let teamAssetsRefreshPromise: Promise<TeamAssetsCacheEntry> | null = null;
@@ -256,10 +326,16 @@ function normalizeIcon(value: string): AssetIconName {
   return ICON_ALIASES[normalizeKey(value)] ?? "link";
 }
 
+function normalizeColor(value: string, index: number): AssetColorName {
+  const normalized = normalizeKey(value) as AssetColorName;
+  return ASSET_COLOR_NAMES.includes(normalized)
+    ? normalized
+    : ASSET_COLOR_NAMES[index % ASSET_COLOR_NAMES.length];
+}
+
 function normalizeAccent(value: string, index: number) {
-  const normalized = normalizeKey(value);
   return (
-    COLOR_ACCENTS[normalized as keyof typeof COLOR_ACCENTS] ??
+    COLOR_ACCENTS[normalizeColor(value, index)] ??
     DEFAULT_COLOR_SEQUENCE[index % DEFAULT_COLOR_SEQUENCE.length]
   );
 }
@@ -326,15 +402,17 @@ function normalizeAssetRows(headers: string[], rows: string[][], debug: TeamAsse
     }
 
     assets.push({
-      id: slugify(title, index),
+      id: `${index + 2}-${slugify(title, index)}`,
       title,
       description: getCell(row, lookup, "subtitle") || "Team resource",
       url,
       icon: normalizeIcon(getCell(row, lookup, "icon")),
+      color: normalizeColor(getCell(row, lookup, "color"), index),
       accent: normalizeAccent(getCell(row, lookup, "color"), index),
       category: getCell(row, lookup, "category") || "Team",
       enabled,
       sortOrder: parseSortOrder(getCell(row, lookup, "sortOrder"), index),
+      sourceRowNumber: index + 2,
     });
   });
 
@@ -346,9 +424,7 @@ function normalizeAssetRows(headers: string[], rows: string[][], debug: TeamAsse
   return assets;
 }
 
-async function getGoogleSheetsServer() {
-  return import("@/lib/google-sheets.server");
-}
+const getGoogleSheetsServer = createServerOnlyFn(async () => import("@/lib/google-sheets.server"));
 
 function getTeamAssetsSpreadsheetId() {
   return process.env[TEAM_ASSETS_SPREADSHEET_ENV]?.trim() ?? "";
@@ -362,21 +438,17 @@ async function getTeamAssetsLinks(spreadsheetId: string) {
   };
 }
 
-async function readTeamAssetsSheetData(
+async function loadTeamAssetsWorksheet(
   config: GoogleSheetsConfig,
   spreadsheetId: string,
-  debug: TeamAssetsReadDebug,
-): Promise<TeamAssetsSheetData> {
+): Promise<TeamAssetsWorksheet> {
   const googleSheets = await getGoogleSheetsServer();
-  const links = await getTeamAssetsLinks(spreadsheetId);
 
   if (!spreadsheetId) {
     throw new Error(`Missing required Google Sheets env var: ${TEAM_ASSETS_SPREADSHEET_ENV}`);
   }
 
-  debug.configured = true;
   const tabs = await googleSheets.fetchSpreadsheetTabs(config, spreadsheetId);
-  debug.availableTabs = tabs.map((tab) => tab.sheetName);
   const expectedKey = normalizeSheetKey(TEAM_ASSETS_TAB_NAME);
   const matchedTab = tabs.find((tab) => normalizeSheetKey(tab.sheetName) === expectedKey);
 
@@ -386,18 +458,97 @@ async function readTeamAssetsSheetData(
     );
   }
 
-  debug.foundTabName = matchedTab.sheetName;
-  const [sheetRows] = await googleSheets.fetchSheetRowsBatch(config, spreadsheetId, [
-    {
-      memberName: TEAM_ASSETS_TAB_NAME,
-      sheetName: matchedTab.sheetName,
-      gid: matchedTab.gid,
-    },
-  ]);
-  const assets = normalizeAssetRows(sheetRows?.headers ?? [], sheetRows?.rows ?? [], debug);
+  const sheet = {
+    memberName: TEAM_ASSETS_TAB_NAME,
+    sheetName: matchedTab.sheetName,
+    gid: matchedTab.gid,
+  };
+  const [sheetRows] = await googleSheets.fetchSheetRowsBatch(config, spreadsheetId, [sheet]);
+
+  return {
+    sheet,
+    availableTabs: tabs.map((tab) => tab.sheetName),
+    headers: sheetRows?.headers ?? [],
+    rows: sheetRows?.rows ?? [],
+  };
+}
+
+function getWriteValue(field: TeamAssetField, input: TeamAssetInput) {
+  if (field === "title") return input.title;
+  if (field === "subtitle") return input.subtitle ?? "";
+  if (field === "url") return normalizeUrl(input.url);
+  if (field === "icon") return input.icon;
+  if (field === "color") return input.color;
+  if (field === "category") return input.category || "Team";
+  if (field === "enabled") return input.enabled ? "TRUE" : "FALSE";
+  return String(input.sortOrder);
+}
+
+function buildTeamAssetWriteRow(headers: string[], existingRow: string[], input: TeamAssetInput) {
+  const lookup = buildColumnLookup(headers);
+  const missingRequired = (["title", "url"] as const).filter(
+    (field) => lookup[field] === undefined,
+  );
+  const url = normalizeUrl(input.url);
+
+  if (missingRequired.length > 0) {
+    throw new Error(
+      `${TEAM_ASSETS_TAB_NAME} tab is missing required column(s): ${missingRequired.join(", ")}`,
+    );
+  }
+
+  if (!url) {
+    throw new Error("Enter a valid http, https, or mailto URL.");
+  }
+
+  const row = [...existingRow];
+  while (row.length < headers.length) row.push("");
+
+  (Object.keys(TEAM_ASSET_COLUMN_ALIASES) as TeamAssetField[]).forEach((field) => {
+    const index = lookup[field];
+    if (index !== undefined) {
+      row[index] = field === "url" ? url : getWriteValue(field, input);
+    }
+  });
+
+  return row;
+}
+
+function buildDisabledRow(headers: string[], existingRow: string[]) {
+  const lookup = buildColumnLookup(headers);
+  const enabledIndex = lookup.enabled;
+
+  if (enabledIndex === undefined) {
+    throw new Error(`${TEAM_ASSETS_TAB_NAME} tab needs an enabled column to remove links.`);
+  }
+
+  const row = [...existingRow];
+  while (row.length < headers.length) row.push("");
+  row[enabledIndex] = "FALSE";
+
+  return row;
+}
+
+function invalidateTeamAssetsCache() {
+  teamAssetsCache = null;
+  teamAssetsRefreshPromise = null;
+}
+
+async function readTeamAssetsSheetData(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  debug: TeamAssetsReadDebug,
+): Promise<TeamAssetsSheetData> {
+  const links = await getTeamAssetsLinks(spreadsheetId);
+
+  debug.configured = true;
+  const worksheet = await loadTeamAssetsWorksheet(config, spreadsheetId);
+  debug.availableTabs = worksheet.availableTabs;
+  debug.foundTabName = worksheet.sheet.sheetName;
+  const assets = normalizeAssetRows(worksheet.headers, worksheet.rows, debug);
 
   logTeamAssets("team assets loaded from google sheets", {
-    sheetName: matchedTab.sheetName,
+    sheetName: worksheet.sheet.sheetName,
     rowCount: debug.rowCount,
     assetCount: assets.length,
   });
@@ -635,6 +786,66 @@ export const fetchTeamAssetsData = createServerFn({ method: "GET" }).handler(asy
     return emptyTeamAssetsData(message, links);
   }
 });
+
+export const addTeamAssetLink = createServerFn({ method: "POST" })
+  .inputValidator(teamAssetInput)
+  .handler(async ({ data }) => {
+    await requireAdminAuth();
+    const googleSheets = await getGoogleSheetsServer();
+    const config = googleSheets.getGoogleSheetsConfig();
+    const spreadsheetId = getTeamAssetsSpreadsheetId();
+    const worksheet = await loadTeamAssetsWorksheet(config, spreadsheetId);
+    const row = buildTeamAssetWriteRow(worksheet.headers, [], data);
+
+    await googleSheets.appendSheetRow(config, spreadsheetId, worksheet.sheet, row);
+    invalidateTeamAssetsCache();
+
+    return { ok: true as const };
+  });
+
+export const updateTeamAssetLink = createServerFn({ method: "POST" })
+  .inputValidator(updateTeamAssetInput)
+  .handler(async ({ data }) => {
+    await requireAdminAuth();
+    const googleSheets = await getGoogleSheetsServer();
+    const config = googleSheets.getGoogleSheetsConfig();
+    const spreadsheetId = getTeamAssetsSpreadsheetId();
+    const worksheet = await loadTeamAssetsWorksheet(config, spreadsheetId);
+    const existingRow = worksheet.rows[data.rowNumber - 2];
+
+    if (!existingRow) {
+      throw new Error(`Could not find Team Assets row ${data.rowNumber}. Refresh and try again.`);
+    }
+
+    const row = buildTeamAssetWriteRow(worksheet.headers, existingRow, data);
+
+    await googleSheets.updateSheetRow(config, spreadsheetId, worksheet.sheet, data.rowNumber, row);
+    invalidateTeamAssetsCache();
+
+    return { ok: true as const };
+  });
+
+export const removeTeamAssetLink = createServerFn({ method: "POST" })
+  .inputValidator(removeTeamAssetInput)
+  .handler(async ({ data }) => {
+    await requireAdminAuth();
+    const googleSheets = await getGoogleSheetsServer();
+    const config = googleSheets.getGoogleSheetsConfig();
+    const spreadsheetId = getTeamAssetsSpreadsheetId();
+    const worksheet = await loadTeamAssetsWorksheet(config, spreadsheetId);
+    const existingRow = worksheet.rows[data.rowNumber - 2];
+
+    if (!existingRow) {
+      throw new Error(`Could not find Team Assets row ${data.rowNumber}. Refresh and try again.`);
+    }
+
+    const row = buildDisabledRow(worksheet.headers, existingRow);
+
+    await googleSheets.updateSheetRow(config, spreadsheetId, worksheet.sheet, data.rowNumber, row);
+    invalidateTeamAssetsCache();
+
+    return { ok: true as const };
+  });
 
 export const teamAssetsQuery = {
   queryKey: ["team-billion-team-assets", "google-sheet-v1"],

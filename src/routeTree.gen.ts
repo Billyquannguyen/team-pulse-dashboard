@@ -15,6 +15,7 @@ import { Route as DiagnosticsRouteImport } from './routes/diagnostics'
 import { Route as DealsRouteImport } from './routes/deals'
 import { Route as CreatorsRouteImport } from './routes/creators'
 import { Route as AssetsRouteImport } from './routes/assets'
+import { Route as ActiveBrandsRouteImport } from './routes/active-brands'
 import { Route as IndexRouteImport } from './routes/index'
 
 const LeaderboardRoute = LeaderboardRouteImport.update({
@@ -47,6 +48,11 @@ const AssetsRoute = AssetsRouteImport.update({
   path: '/assets',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ActiveBrandsRoute = ActiveBrandsRouteImport.update({
+  id: '/active-brands',
+  path: '/active-brands',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -55,6 +61,7 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/active-brands': typeof ActiveBrandsRoute
   '/assets': typeof AssetsRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
@@ -64,6 +71,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/active-brands': typeof ActiveBrandsRoute
   '/assets': typeof AssetsRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
@@ -74,6 +82,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/active-brands': typeof ActiveBrandsRoute
   '/assets': typeof AssetsRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
@@ -85,6 +94,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/active-brands'
     | '/assets'
     | '/creators'
     | '/deals'
@@ -94,6 +104,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/active-brands'
     | '/assets'
     | '/creators'
     | '/deals'
@@ -103,6 +114,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/active-brands'
     | '/assets'
     | '/creators'
     | '/deals'
@@ -113,6 +125,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ActiveBrandsRoute: typeof ActiveBrandsRoute
   AssetsRoute: typeof AssetsRoute
   CreatorsRoute: typeof CreatorsRoute
   DealsRoute: typeof DealsRoute
@@ -165,6 +178,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssetsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/active-brands': {
+      id: '/active-brands'
+      path: '/active-brands'
+      fullPath: '/active-brands'
+      preLoaderRoute: typeof ActiveBrandsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -177,6 +197,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ActiveBrandsRoute: ActiveBrandsRoute,
   AssetsRoute: AssetsRoute,
   CreatorsRoute: CreatorsRoute,
   DealsRoute: DealsRoute,

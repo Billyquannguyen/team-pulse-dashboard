@@ -223,6 +223,96 @@ function TeamAssetsDiagnosticsCard({
   );
 }
 
+function ActiveBrandsDiagnosticsCard({
+  diagnostics,
+}: {
+  diagnostics: GoogleSheetsDiagnostics["activeBrands"];
+}) {
+  if (!diagnostics) return null;
+
+  return (
+    <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Active Brands data flow</h3>
+          <p className="text-xs text-muted-foreground">
+            This checks the Google Sheet used by the Active Brands page.
+          </p>
+        </div>
+        <StatusPill ok={diagnostics.source === "google-sheet"} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <MetricBox label="Source" value={diagnostics.source} />
+        <MetricBox
+          label="Env configured"
+          value={diagnostics.spreadsheet.configured ? "Yes" : "No"}
+        />
+        <MetricBox label="Tab found" value={diagnostics.tab.found ? "Yes" : "No"} />
+        <MetricBox label="Headers" value={diagnostics.counts.headers} />
+        <MetricBox label="Rows" value={diagnostics.counts.rows} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+          <div className="font-semibold">Sheet</div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>Env var: {diagnostics.spreadsheet.envVar}</div>
+            <div>Readable: {diagnostics.spreadsheet.readable ? "Yes" : "No"}</div>
+            <div>Expected tab: {diagnostics.tab.expectedName}</div>
+            <div>Matched tab: {diagnostics.tab.sheetName ?? "-"}</div>
+          </div>
+        </div>
+        <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+          <div className="font-semibold">Caching check</div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>Query stale time: {diagnostics.cache.queryStaleTimeMs}ms</div>
+            <div>Query refetch interval: {diagnostics.cache.queryRefetchIntervalMs}ms</div>
+            <div>Server cache TTL: {diagnostics.cache.serverCacheTtlMs}ms</div>
+            <div>Server cache status: {diagnostics.cache.serverCacheStatus}</div>
+            <div>Server cache expires: {diagnostics.cache.serverCacheExpiresAt ?? "-"}</div>
+            <div>Google fetch cache: {diagnostics.cache.googleFetchCache}</div>
+          </div>
+        </div>
+      </div>
+
+      {diagnostics.tab.availableTabs.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {diagnostics.tab.availableTabs.slice(0, 20).map((tab) => (
+            <span
+              key={tab}
+              className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary"
+            >
+              {tab}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {diagnostics.fallbackReason && (
+        <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <div className="mb-1 flex items-center gap-2 font-bold">
+            <AlertTriangle className="h-4 w-4" />
+            Active Brands error reason
+          </div>
+          <p className="break-words text-xs leading-relaxed">{diagnostics.fallbackReason}</p>
+        </div>
+      )}
+
+      {diagnostics.warnings.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
+          <div className="mb-2 font-bold">Active Brands warnings</div>
+          <ul className="space-y-1 text-xs">
+            {diagnostics.warnings.slice(0, 20).map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnostics }) {
   return (
     <div className="space-y-6">
@@ -362,6 +452,8 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
       </div>
 
       <TeamAssetsDiagnosticsCard diagnostics={diagnostics.teamAssets} />
+
+      <ActiveBrandsDiagnosticsCard diagnostics={diagnostics.activeBrands} />
 
       <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3">

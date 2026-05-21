@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireAdminAuth } from "@/lib/auth";
+import type { ActiveBrandsDataFlowDiagnostics } from "@/lib/active-brands";
 import type { DashboardDataFlowDiagnostics } from "@/lib/sheets-public";
 import type { TeamAssetsDataFlowDiagnostics } from "@/lib/team-assets";
 
@@ -39,6 +40,7 @@ export type GoogleSheetsDiagnostics = {
   spreadsheets: SpreadsheetDiagnostic[];
   dataFlow: DashboardDataFlowDiagnostics | null;
   teamAssets: TeamAssetsDataFlowDiagnostics | null;
+  activeBrands: ActiveBrandsDataFlowDiagnostics | null;
 };
 
 const DIAGNOSTICS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -166,6 +168,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       spreadsheets: [],
       dataFlow: null,
       teamAssets: null,
+      activeBrands: null,
     } satisfies GoogleSheetsDiagnostics;
   }
 
@@ -177,15 +180,18 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
   }
 
   const sheetsPublic = await import("@/lib/sheets-public");
+  const activeBrands = await import("@/lib/active-brands");
   const teamAssets = await import("@/lib/team-assets");
-  const [env, auth, teamSheet, creatorSheet, dataFlow, teamAssetsFlow] = await Promise.all([
-    getEnvStatus(),
-    checkAuthStatus(),
-    checkSpreadsheet("Team Billion deal sheet", "TEAM_BILLION_SPREADSHEET_ID"),
-    checkSpreadsheet("Creator sourcing sheet", "CREATOR_SOURCING_SPREADSHEET_ID"),
-    sheetsPublic.getDashboardDataFlowDiagnostics(),
-    teamAssets.getTeamAssetsDataFlowDiagnostics(),
-  ]);
+  const [env, auth, teamSheet, creatorSheet, dataFlow, teamAssetsFlow, activeBrandsFlow] =
+    await Promise.all([
+      getEnvStatus(),
+      checkAuthStatus(),
+      checkSpreadsheet("Team Billion deal sheet", "TEAM_BILLION_SPREADSHEET_ID"),
+      checkSpreadsheet("Creator sourcing sheet", "CREATOR_SOURCING_SPREADSHEET_ID"),
+      sheetsPublic.getDashboardDataFlowDiagnostics(),
+      teamAssets.getTeamAssetsDataFlowDiagnostics(),
+      activeBrands.getActiveBrandsDataFlowDiagnostics(),
+    ]);
 
   logDiagnostics("full diagnostics complete", {
     env,
@@ -196,6 +202,8 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     source: dataFlow.source,
     teamAssetsSource: teamAssetsFlow.source,
     teamAssetsConfigured: teamAssetsFlow.spreadsheet.configured,
+    activeBrandsSource: activeBrandsFlow.source,
+    activeBrandsConfigured: activeBrandsFlow.spreadsheet.configured,
   });
 
   const diagnostics = {
@@ -206,6 +214,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     spreadsheets: [teamSheet, creatorSheet],
     dataFlow,
     teamAssets: teamAssetsFlow,
+    activeBrands: activeBrandsFlow,
   } satisfies GoogleSheetsDiagnostics;
 
   diagnosticsCache = {

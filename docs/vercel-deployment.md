@@ -32,6 +32,7 @@ GOOGLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n
 TEAM_BILLION_SPREADSHEET_ID=1oetKgRHC6ucAAvr4G99UGgqWJyWrNCZcc8mhcDwMULI
 CREATOR_SOURCING_SPREADSHEET_ID=1cE0PlyvZH5-kqyGOBuM6eaWO_kWIhtfJ_jEIOuaPPv4
 TEAM_ASSETS_SPREADSHEET_ID=your-team-assets-spreadsheet-id
+ACTIVE_BRANDS_SPREADSHEET_ID=1U-y2oiob1uenmvNiRGMILhmWWORMTye2mBxi2mgVxvs
 ```
 
 Keep `TEAM_DASHBOARD_PASSWORD` and `ADMIN_PASSWORD` different.
@@ -43,3 +44,7 @@ Google Sheets credentials are also server-side only. Do not add passwords, priva
 After adding or changing env vars in Vercel, redeploy the project.
 
 For Team Assets, the spreadsheet must have a worksheet tab named `Team Assets` with `title` and `url` columns. Optional columns are `subtitle`, `icon`, `color`, `category`, `enabled`, and `sort_order`.
+
+Team Assets admin add/edit/remove writes to Google Sheets server-side. Share the Team Assets spreadsheet with the service account as Editor, not just Viewer.
+
+For Active Brands, the spreadsheet must have a worksheet tab named `Active Contacts`. The app displays that tab as a raw table and does not use it in dashboard totals.

@@ -65,6 +65,13 @@ type BatchValuesResponse = {
   };
 };
 
+type ValuesWriteResponse = {
+  error?: {
+    code?: number;
+    message?: string;
+  };
+};
+
 let cachedToken: { token: string; expiresAt: number } | null = null;
 const GOOGLE_FETCH_MAX_ATTEMPTS = 3;
 
@@ -74,6 +81,7 @@ const GOOGLE_ENV_NAMES = [
   "TEAM_BILLION_SPREADSHEET_ID",
   "CREATOR_SOURCING_SPREADSHEET_ID",
   "TEAM_ASSETS_SPREADSHEET_ID",
+  "ACTIVE_BRANDS_SPREADSHEET_ID",
 ] as const;
 
 function safeErrorMessage(error: unknown) {
@@ -181,6 +189,9 @@ export function getOptionalSheetLinks() {
     teamAssetsSheetUrl: process.env.TEAM_ASSETS_SPREADSHEET_ID
       ? makeSheetUrl(process.env.TEAM_ASSETS_SPREADSHEET_ID)
       : undefined,
+    activeBrandsSheetUrl: process.env.ACTIVE_BRANDS_SPREADSHEET_ID
+      ? makeSheetUrl(process.env.ACTIVE_BRANDS_SPREADSHEET_ID)
+      : undefined,
   };
 }
 
@@ -214,7 +225,7 @@ async function signJwt(config: GoogleSheetsConfig) {
   };
   const payload = {
     iss: config.serviceAccountEmail,
-    scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+    scope: "https://www.googleapis.com/auth/spreadsheets",
     aud: "https://oauth2.googleapis.com/token",
     exp: now + 3600,
     iat: now,
@@ -309,14 +320,20 @@ export async function checkGoogleAuth(config: GoogleSheetsConfig): Promise<Googl
   }
 }
 
-async function googleSheetsFetch<T>(config: GoogleSheetsConfig, url: URL): Promise<T> {
+async function googleSheetsFetch<T>(
+  config: GoogleSheetsConfig,
+  url: URL,
+  init: RequestInit = {},
+): Promise<T> {
   const summary = summarizeUrl(url);
   logGoogleSheets("google sheets api request", summary);
 
   for (let attempt = 0; attempt < GOOGLE_FETCH_MAX_ATTEMPTS; attempt += 1) {
     const response = await fetch(url.toString(), {
+      ...init,
       cache: "no-store",
       headers: {
+        ...init.headers,
         authorization: `Bearer ${await getAccessToken(config)}`,
       },
     });
@@ -362,6 +379,19 @@ function quoteSheetName(sheetName: string) {
 function cellToString(value: unknown) {
   if (value === null || value === undefined) return "";
   return String(value);
+}
+
+function columnName(index: number) {
+  let column = "";
+  let current = index + 1;
+
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    column = String.fromCharCode(65 + remainder) + column;
+    current = Math.floor((current - 1) / 26);
+  }
+
+  return column;
 }
 
 export async function fetchSpreadsheetTabs(
@@ -455,5 +485,83 @@ export async function fetchSheetRowsBatch(
     });
 
     return { headers, rows };
+  });
+}
+
+export async function appendSheetRow(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  sheet: GoogleSheetRef,
+  values: string[],
+) {
+  if (!sheet.sheetName) {
+    throw new Error(`No sheet name was available for ${sheet.memberName}`);
+  }
+
+  const range = `${quoteSheetName(sheet.sheetName)}!A:AZ`;
+  const url = new URL(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
+      range,
+    )}:append`,
+  );
+  url.searchParams.set("valueInputOption", "USER_ENTERED");
+  url.searchParams.set("insertDataOption", "INSERT_ROWS");
+
+  await googleSheetsFetch<ValuesWriteResponse>(config, url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      majorDimension: "ROWS",
+      values: [values],
+    }),
+  });
+
+  logGoogleSheets("sheet row appended", {
+    sheetName: sheet.sheetName,
+    valueCount: values.length,
+  });
+}
+
+export async function updateSheetRow(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  sheet: GoogleSheetRef,
+  rowNumber: number,
+  values: string[],
+) {
+  if (!sheet.sheetName) {
+    throw new Error(`No sheet name was available for ${sheet.memberName}`);
+  }
+
+  if (!Number.isInteger(rowNumber) || rowNumber < 2) {
+    throw new Error("Invalid row number for Google Sheets update.");
+  }
+
+  const endColumn = columnName(Math.max(values.length - 1, 0));
+  const range = `${quoteSheetName(sheet.sheetName)}!A${rowNumber}:${endColumn}${rowNumber}`;
+  const url = new URL(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
+      range,
+    )}`,
+  );
+  url.searchParams.set("valueInputOption", "USER_ENTERED");
+
+  await googleSheetsFetch<ValuesWriteResponse>(config, url, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      majorDimension: "ROWS",
+      values: [values],
+    }),
+  });
+
+  logGoogleSheets("sheet row updated", {
+    sheetName: sheet.sheetName,
+    rowNumber,
+    valueCount: values.length,
   });
 }
