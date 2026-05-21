@@ -123,7 +123,7 @@ function isValidExpiry(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > Date.now();
 }
 
-async function readAuthState(): Promise<AuthState> {
+export async function readAuthState(): Promise<AuthState> {
   const session = await getAuthSession();
   const role = normalizeRole(session.data.role);
   const sessionExpired = role !== null && !isValidExpiry(session.data.expiresAt);
@@ -144,7 +144,7 @@ async function readAuthState(): Promise<AuthState> {
   };
 }
 
-export const getAuthState = createServerFn({ method: "GET" }).handler(readAuthState);
+export const getAuthState = createServerFn({ method: "GET" }).handler(async () => readAuthState());
 
 export const loginToDashboard = createServerFn({ method: "POST" })
   .inputValidator(loginInput)
