@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LeaderboardRouteImport } from './routes/leaderboard'
 import { Route as GoalsRouteImport } from './routes/goals'
+import { Route as DiagnosticsRouteImport } from './routes/diagnostics'
 import { Route as DealsRouteImport } from './routes/deals'
 import { Route as CreatorsRouteImport } from './routes/creators'
 import { Route as AssetsRouteImport } from './routes/assets'
@@ -24,6 +25,11 @@ const LeaderboardRoute = LeaderboardRouteImport.update({
 const GoalsRoute = GoalsRouteImport.update({
   id: '/goals',
   path: '/goals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DiagnosticsRoute = DiagnosticsRouteImport.update({
+  id: '/diagnostics',
+  path: '/diagnostics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DealsRoute = DealsRouteImport.update({
@@ -52,6 +58,7 @@ export interface FileRoutesByFullPath {
   '/assets': typeof AssetsRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
+  '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
 }
@@ -60,6 +67,7 @@ export interface FileRoutesByTo {
   '/assets': typeof AssetsRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
+  '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
 }
@@ -69,6 +77,7 @@ export interface FileRoutesById {
   '/assets': typeof AssetsRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
+  '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
 }
@@ -79,16 +88,25 @@ export interface FileRouteTypes {
     | '/assets'
     | '/creators'
     | '/deals'
+    | '/diagnostics'
     | '/goals'
     | '/leaderboard'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/assets' | '/creators' | '/deals' | '/goals' | '/leaderboard'
+  to:
+    | '/'
+    | '/assets'
+    | '/creators'
+    | '/deals'
+    | '/diagnostics'
+    | '/goals'
+    | '/leaderboard'
   id:
     | '__root__'
     | '/'
     | '/assets'
     | '/creators'
     | '/deals'
+    | '/diagnostics'
     | '/goals'
     | '/leaderboard'
   fileRoutesById: FileRoutesById
@@ -98,6 +116,7 @@ export interface RootRouteChildren {
   AssetsRoute: typeof AssetsRoute
   CreatorsRoute: typeof CreatorsRoute
   DealsRoute: typeof DealsRoute
+  DiagnosticsRoute: typeof DiagnosticsRoute
   GoalsRoute: typeof GoalsRoute
   LeaderboardRoute: typeof LeaderboardRoute
 }
@@ -116,6 +135,13 @@ declare module '@tanstack/react-router' {
       path: '/goals'
       fullPath: '/goals'
       preLoaderRoute: typeof GoalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/diagnostics': {
+      id: '/diagnostics'
+      path: '/diagnostics'
+      fullPath: '/diagnostics'
+      preLoaderRoute: typeof DiagnosticsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/deals': {
@@ -154,6 +180,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssetsRoute: AssetsRoute,
   CreatorsRoute: CreatorsRoute,
   DealsRoute: DealsRoute,
+  DiagnosticsRoute: DiagnosticsRoute,
   GoalsRoute: GoalsRoute,
   LeaderboardRoute: LeaderboardRoute,
 }
