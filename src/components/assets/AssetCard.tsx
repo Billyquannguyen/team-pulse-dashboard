@@ -27,11 +27,18 @@ const assetIcons: Record<AssetIconName, LucideIcon> = {
   spreadsheet: FileSpreadsheet,
 };
 
+function safeAssetHref(value: string) {
+  const trimmed = value.trim();
+  if (/^(https?:|mailto:)/i.test(trimmed)) return trimmed;
+  if (/^[a-z][a-z\d+.-]*:/i.test(trimmed)) return "#";
+  return trimmed ? `https://${trimmed}` : "#";
+}
+
 export function AssetCard({ asset }: { asset: AssetLink }) {
   const Icon = assetIcons[asset.icon] ?? LinkIcon;
   return (
     <a
-      href={asset.url}
+      href={safeAssetHref(asset.url)}
       target="_blank"
       rel="noreferrer"
       className={`tb-hover-lift tb-stat-tile group relative overflow-hidden rounded-3xl bg-gradient-to-br ${asset.accent} p-6 ring-1 ring-border transition hover:-translate-y-0.5 hover:shadow-lg`}

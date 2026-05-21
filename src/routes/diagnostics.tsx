@@ -158,9 +158,9 @@ function TeamAssetsDiagnosticsCard({
       <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         <MetricBox label="Source" value={diagnostics.source} />
         <MetricBox label="Configured" value={diagnostics.spreadsheet.configured ? "Yes" : "No"} />
+        <MetricBox label="Writable" value={diagnostics.spreadsheet.writable ? "Yes" : "No"} />
         <MetricBox label="Tab found" value={diagnostics.tab.found ? "Yes" : "No"} />
         <MetricBox label="Rows" value={diagnostics.counts.rows} />
-        <MetricBox label="Enabled rows" value={diagnostics.counts.enabledRows} />
         <MetricBox label="Active links" value={diagnostics.counts.assets} />
       </div>
 
@@ -169,6 +169,8 @@ function TeamAssetsDiagnosticsCard({
           <div className="font-semibold">Sheet</div>
           <div className="mt-2 space-y-1 text-xs text-muted-foreground">
             <div>Env var: {diagnostics.spreadsheet.envVar}</div>
+            <div>Readable: {diagnostics.spreadsheet.readable ? "Yes" : "No"}</div>
+            <div>Writable: {diagnostics.spreadsheet.writable ? "Yes" : "No"}</div>
             <div>Expected tab: {diagnostics.tab.expectedName}</div>
             <div>Matched tab: {diagnostics.tab.sheetName ?? "-"}</div>
           </div>

@@ -87,6 +87,7 @@ export type TeamAssetsDataFlowDiagnostics = {
     envVar: typeof TEAM_ASSETS_SPREADSHEET_ENV;
     configured: boolean;
     readable: boolean;
+    writable: boolean;
     link: string | null;
   };
   tab: {
@@ -207,8 +208,11 @@ const DEFAULT_COLOR_SEQUENCE = [
 
 const teamAssetInput = z.object({
   title: z.string().trim().min(1).max(120),
-  subtitle: z.string().trim().max(240).optional().default(""),
   url: z.string().trim().min(1).max(1000),
+});
+
+const fullTeamAssetInput = teamAssetInput.extend({
+  subtitle: z.string().trim().max(240).optional().default(""),
   icon: z.enum(ASSET_ICON_NAMES).default("link"),
   color: z.enum(ASSET_COLOR_NAMES).default("purple"),
   category: z.string().trim().max(80).optional().default("Team"),
@@ -224,7 +228,7 @@ const removeTeamAssetInput = z.object({
   rowNumber: z.number().int().min(2),
 });
 
-type TeamAssetInput = z.infer<typeof teamAssetInput>;
+type TeamAssetInput = z.infer<typeof fullTeamAssetInput>;
 
 let teamAssetsCache: TeamAssetsCacheEntry | null = null;
 let teamAssetsRefreshPromise: Promise<TeamAssetsCacheEntry> | null = null;
@@ -280,6 +284,14 @@ function slugify(value: string, index: number) {
   return slug || `asset-${index + 1}`;
 }
 
+function toTitleCase(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b[\p{L}\p{N}]/gu, (letter) => letter.toUpperCase());
+}
+
 function buildColumnLookup(headers: string[]): ColumnLookup {
   const lookup: ColumnLookup = {};
   const normalizedAliases = Object.entries(TEAM_ASSET_COLUMN_ALIASES).map(([field, aliases]) => ({
@@ -308,15 +320,21 @@ function getCell(row: string[], lookup: ColumnLookup, field: TeamAssetField) {
   return index === undefined ? "" : (row[index] ?? "").trim();
 }
 
-function normalizeUrl(value: string) {
+function cleanAssetUrl(value: string) {
   const raw = value.trim();
   if (!raw) return "";
-  const candidate = /^https?:\/\//i.test(raw) || /^mailto:/i.test(raw) ? raw : `https://${raw}`;
+  if (/^(javascript|data|vbscript):/i.test(raw)) return "";
+  return raw;
+}
+
+function domainFromUrl(value: string) {
+  const raw = cleanAssetUrl(value);
+  if (!raw || /^mailto:/i.test(raw)) return "";
+  const candidate = /^[a-z][a-z\d+.-]*:/i.test(raw) ? raw : `https://${raw}`;
 
   try {
     const url = new URL(candidate);
-    if (!["http:", "https:", "mailto:"].includes(url.protocol)) return "";
-    return url.toString();
+    return url.hostname.replace(/^www\./, "");
   } catch {
     return "";
   }
@@ -384,8 +402,8 @@ function normalizeAssetRows(headers: string[], rows: string[][], debug: TeamAsse
   const assets: AssetLink[] = [];
 
   rows.forEach((row, index) => {
-    const title = getCell(row, lookup, "title");
-    const url = normalizeUrl(getCell(row, lookup, "url"));
+    const title = toTitleCase(getCell(row, lookup, "title"));
+    const url = cleanAssetUrl(getCell(row, lookup, "url"));
     const enabled = parseEnabled(getCell(row, lookup, "enabled"));
 
     if (title || url) {
@@ -474,9 +492,9 @@ async function loadTeamAssetsWorksheet(
 }
 
 function getWriteValue(field: TeamAssetField, input: TeamAssetInput) {
-  if (field === "title") return input.title;
+  if (field === "title") return toTitleCase(input.title);
   if (field === "subtitle") return input.subtitle ?? "";
-  if (field === "url") return normalizeUrl(input.url);
+  if (field === "url") return cleanAssetUrl(input.url);
   if (field === "icon") return input.icon;
   if (field === "color") return input.color;
   if (field === "category") return input.category || "Team";
@@ -489,7 +507,7 @@ function buildTeamAssetWriteRow(headers: string[], existingRow: string[], input:
   const missingRequired = (["title", "url"] as const).filter(
     (field) => lookup[field] === undefined,
   );
-  const url = normalizeUrl(input.url);
+  const url = cleanAssetUrl(input.url);
 
   if (missingRequired.length > 0) {
     throw new Error(
@@ -514,6 +532,58 @@ function buildTeamAssetWriteRow(headers: string[], existingRow: string[], input:
   return row;
 }
 
+function nextSortOrder(headers: string[], rows: string[][]) {
+  const lookup = buildColumnLookup(headers);
+  const orderIndex = lookup.sortOrder;
+  const highest = rows.reduce((max, row, index) => {
+    const raw = orderIndex === undefined ? "" : (row[orderIndex] ?? "");
+    return Math.max(max, parseSortOrder(raw, index));
+  }, 0);
+
+  return highest + 10 || 10;
+}
+
+function teamAssetDefaults(input: z.infer<typeof teamAssetInput>, worksheet: TeamAssetsWorksheet) {
+  const domain = domainFromUrl(input.url);
+
+  return {
+    title: input.title,
+    subtitle: domain ? `Open ${domain}` : "",
+    url: input.url,
+    icon: "link",
+    color: "purple",
+    category: "General",
+    enabled: true,
+    sortOrder: nextSortOrder(worksheet.headers, worksheet.rows),
+  } satisfies TeamAssetInput;
+}
+
+function buildTeamAssetNameLinkRow(
+  headers: string[],
+  existingRow: string[],
+  input: z.infer<typeof updateTeamAssetInput>,
+) {
+  const lookup = buildColumnLookup(headers);
+  const titleIndex = lookup.title;
+  const urlIndex = lookup.url;
+  const url = cleanAssetUrl(input.url);
+
+  if (titleIndex === undefined || urlIndex === undefined) {
+    throw new Error(`${TEAM_ASSETS_TAB_NAME} tab is missing required title or url column.`);
+  }
+
+  if (!url) {
+    throw new Error("Enter a valid card link.");
+  }
+
+  const row = [...existingRow];
+  while (row.length < headers.length) row.push("");
+  row[titleIndex] = toTitleCase(input.title);
+  row[urlIndex] = url;
+
+  return row;
+}
+
 function buildDisabledRow(headers: string[], existingRow: string[]) {
   const lookup = buildColumnLookup(headers);
   const enabledIndex = lookup.enabled;
@@ -532,6 +602,19 @@ function buildDisabledRow(headers: string[], existingRow: string[]) {
 function invalidateTeamAssetsCache() {
   teamAssetsCache = null;
   teamAssetsRefreshPromise = null;
+}
+
+async function checkTeamAssetsWriteAccess(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  worksheet: TeamAssetsWorksheet,
+) {
+  const googleSheets = await getGoogleSheetsServer();
+
+  if (worksheet.headers.length === 0) return false;
+
+  await googleSheets.updateSheetRow(config, spreadsheetId, worksheet.sheet, 1, worksheet.headers);
+  return true;
 }
 
 async function readTeamAssetsSheetData(
@@ -697,6 +780,21 @@ export async function getTeamAssetsDataFlowDiagnostics(): Promise<TeamAssetsData
       allowStaleCache: true,
     });
     const debug = result.debug;
+    let writable = false;
+
+    try {
+      const worksheet = await loadTeamAssetsWorksheet(
+        googleSheets.getGoogleSheetsConfig(),
+        spreadsheetId,
+      );
+      writable = await checkTeamAssetsWriteAccess(
+        googleSheets.getGoogleSheetsConfig(),
+        spreadsheetId,
+        worksheet,
+      );
+    } catch (error) {
+      debug.warnings.push(`Team Assets write access check failed: ${errorMessage(error)}`);
+    }
 
     return {
       checkedAt: new Date().toISOString(),
@@ -707,6 +805,7 @@ export async function getTeamAssetsDataFlowDiagnostics(): Promise<TeamAssetsData
         envVar: TEAM_ASSETS_SPREADSHEET_ENV,
         configured: debug.configured,
         readable: result.data.source === "google-sheet",
+        writable,
         link: links.teamAssetsSheetUrl ?? null,
       },
       tab: {
@@ -737,6 +836,7 @@ export async function getTeamAssetsDataFlowDiagnostics(): Promise<TeamAssetsData
         envVar: TEAM_ASSETS_SPREADSHEET_ENV,
         configured: Boolean(spreadsheetId),
         readable: false,
+        writable: false,
         link: links.teamAssetsSheetUrl ?? null,
       },
       tab: {
@@ -795,7 +895,7 @@ export const addTeamAssetLink = createServerFn({ method: "POST" })
     const config = googleSheets.getGoogleSheetsConfig();
     const spreadsheetId = getTeamAssetsSpreadsheetId();
     const worksheet = await loadTeamAssetsWorksheet(config, spreadsheetId);
-    const row = buildTeamAssetWriteRow(worksheet.headers, [], data);
+    const row = buildTeamAssetWriteRow(worksheet.headers, [], teamAssetDefaults(data, worksheet));
 
     await googleSheets.appendSheetRow(config, spreadsheetId, worksheet.sheet, row);
     invalidateTeamAssetsCache();
@@ -817,7 +917,7 @@ export const updateTeamAssetLink = createServerFn({ method: "POST" })
       throw new Error(`Could not find Team Assets row ${data.rowNumber}. Refresh and try again.`);
     }
 
-    const row = buildTeamAssetWriteRow(worksheet.headers, existingRow, data);
+    const row = buildTeamAssetNameLinkRow(worksheet.headers, existingRow, data);
 
     await googleSheets.updateSheetRow(config, spreadsheetId, worksheet.sheet, data.rowNumber, row);
     invalidateTeamAssetsCache();

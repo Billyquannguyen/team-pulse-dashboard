@@ -535,7 +535,7 @@ export async function updateSheetRow(
     throw new Error(`No sheet name was available for ${sheet.memberName}`);
   }
 
-  if (!Number.isInteger(rowNumber) || rowNumber < 2) {
+  if (!Number.isInteger(rowNumber) || rowNumber < 1) {
     throw new Error("Invalid row number for Google Sheets update.");
   }
 
