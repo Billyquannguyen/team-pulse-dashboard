@@ -47,6 +47,26 @@ function fallbackOutreach(): OutreachDashboardData {
   };
 }
 
+function emptyOutreach(): OutreachDashboardData {
+  return {
+    members: [],
+    totals: {
+      totalCreators: 0,
+      contacted: 0,
+      emailed: 0,
+      igOutreach: 0,
+      replies: 0,
+      bookedCalls: 0,
+      signed: 0,
+      ended: 0,
+      replyRate: 0,
+      conversionRate: 0,
+      topNiche: "-",
+    },
+    source: "fallback",
+  };
+}
+
 function formatPercent(value: number) {
   return `${Math.round(value)}%`;
 }
@@ -67,7 +87,8 @@ export function OutreachSummaryCard({
     to: string;
   };
 }) {
-  const outreach = data?.outreach ?? fallbackOutreach();
+  const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+  const outreach = data?.outreach ?? (canUseLocalFallback ? fallbackOutreach() : emptyOutreach());
   const totals = outreach.totals;
   const stats = [
     {

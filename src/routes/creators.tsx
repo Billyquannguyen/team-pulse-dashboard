@@ -27,13 +27,16 @@ function CreatorsPage() {
   const [q, setQ] = useState("");
   const [relationship, setRelationship] = useState<CreatorRelationship | "All">("All");
   const { data } = useQuery(dashboardSheetQuery);
-  const liveCreators = data ? data.creators : creators;
+  const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+  const liveCreators = data ? data.creators : canUseLocalFallback ? creators : [];
   const sourceLabel =
     data?.source === "error"
       ? "Google Sheets connection error"
       : data?.outreach?.source === "google-sheet"
         ? "Live Signed creators tab"
-        : "Demo fallback data";
+        : canUseLocalFallback
+          ? "Demo fallback data"
+          : "Loading Sheet";
   const filtered = useMemo(
     () =>
       liveCreators.filter(

@@ -20,7 +20,8 @@ export function AppSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const { data } = useQuery(dashboardSheetQuery);
   const [settings] = useGoalSettings();
-  const pendingOwed = data?.totals.pendingOwed ?? totalPendingOwed;
+  const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+  const pendingOwed = data?.totals.pendingOwed ?? (canUseLocalFallback ? totalPendingOwed : 0);
   const showGoalCard = !path.startsWith("/goals");
 
   return (

@@ -863,17 +863,18 @@ function GoalsPage() {
   const { data } = useQuery(dashboardSheetQuery);
   const [settings, setSettings] = useGoalSettings();
   const [motivationCard, setMotivationCard] = useState<MotivationCardData | null>(null);
-  const team = data?.team ?? fallbackTeam;
+  const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+  const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
   const totals = data?.totals ?? {
-    totalPaid: totalCommission,
-    paidThisMonth: totalMonthCommission,
-    pendingOwed: totalPendingOwed,
-    dealsClosed: totalDealsClosed,
+    totalPaid: canUseLocalFallback ? totalCommission : 0,
+    paidThisMonth: canUseLocalFallback ? totalMonthCommission : 0,
+    pendingOwed: canUseLocalFallback ? totalPendingOwed : 0,
+    dealsClosed: canUseLocalFallback ? totalDealsClosed : 0,
     totalPricing: 0,
     averageDealSize: 0,
     averageProfitMargin: 0,
-    paidGoal: totalRevenueGoal,
-    dealsGoal: totalDealsGoal,
+    paidGoal: canUseLocalFallback ? totalRevenueGoal : 0,
+    dealsGoal: canUseLocalFallback ? totalDealsGoal : 0,
   };
   const sortedByPending = useMemo(
     () => [...team].sort((a, b) => b.pendingOwed - a.pendingOwed),

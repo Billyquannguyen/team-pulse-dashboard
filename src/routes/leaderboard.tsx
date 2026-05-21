@@ -82,7 +82,8 @@ function MoneyTooltip({
 
 function LeaderboardPage() {
   const { data } = useQuery(dashboardSheetQuery);
-  const team = data?.team ?? fallbackTeam;
+  const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+  const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
   const sorted = [...team].sort((a, b) => b.commission - a.commission);
   const chartData = sorted.map((member) => ({
     name: member.name,
@@ -90,7 +91,7 @@ function LeaderboardPage() {
     paidThisMonth: member.monthCommission,
     pending: member.pendingOwed,
   }));
-  const deals = data?.deals ?? fallbackDeals;
+  const deals = data?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
   const activeDeals = deals.filter((deal) => deal.status !== "Cancelled");
   const topDeals = [...activeDeals]
     .sort((a, b) => b.totalPricingGbp - a.totalPricingGbp)

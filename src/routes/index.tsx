@@ -35,17 +35,18 @@ export const Route = createFileRoute("/")({
 });
 
 function Dashboard() {
-  const { data } = useQuery(dashboardSheetQuery);
+  const { data, isLoading } = useQuery(dashboardSheetQuery);
   const [settings] = useGoalSettings();
-  const team = data?.team ?? fallbackTeam;
+  const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+  const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
   const getProgressionGoal = (member: (typeof team)[number]) =>
     settings.customProgressionGoals[member.id] ?? settings.progressionGoal;
   const progressionGoalTotal = team.reduce((sum, member) => sum + getProgressionGoal(member), 0);
   const totals = data?.totals ?? {
-    totalPaid: totalCommission,
-    paidThisMonth: totalMonthCommission,
-    pendingOwed: totalPendingOwed,
-    dealsClosed: totalDealsClosed,
+    totalPaid: canUseLocalFallback ? totalCommission : 0,
+    paidThisMonth: canUseLocalFallback ? totalMonthCommission : 0,
+    pendingOwed: canUseLocalFallback ? totalPendingOwed : 0,
+    dealsClosed: canUseLocalFallback ? totalDealsClosed : 0,
     totalPricing: 0,
     averageDealSize: 0,
     averageProfitMargin: 0,
@@ -57,7 +58,11 @@ function Dashboard() {
     <div className="space-y-6">
       <AppHeader
         title="Hi, Team Billion 👋"
-        subtitle="Paid commission, pending commission, and deal value in one view."
+        subtitle={
+          isLoading
+            ? "Loading live Google Sheets data..."
+            : "Paid commission, pending commission, and deal value in one view."
+        }
       />
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">

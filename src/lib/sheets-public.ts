@@ -77,6 +77,32 @@ export type OutreachDashboardData = {
   source: "google-sheet" | "fallback";
 };
 
+export type DashboardDataFlowDiagnostics = {
+  checkedAt: string;
+  runtime: {
+    nodeEnv: string;
+    vercel: boolean;
+    productionRuntime: boolean;
+  };
+  source: DashboardSheetData["source"];
+  fallbackActive: boolean;
+  fallbackReason: string | null;
+  counts: {
+    teamMembers: number;
+    deals: number;
+    creators: number;
+    outreachMembers: number;
+    outreachCreators: number;
+  };
+  cache: {
+    queryStaleTimeMs: number;
+    queryRefetchIntervalMs: number;
+    googleFetchCache: "no-store";
+    staticRenderingLikely: boolean;
+    note: string;
+  };
+};
+
 const SUMMARY_LABELS = {
   pendingOwed: ["pending in gbp", "pending"],
   paidThisMonth: ["paid current month in gbp", "paid current month"],
@@ -85,6 +111,8 @@ const SUMMARY_LABELS = {
 
 const DEFAULT_REVENUE_GOAL = 300000;
 const DEFAULT_DEALS_GOAL = 20;
+const QUERY_STALE_TIME_MS = 0;
+const QUERY_REFETCH_INTERVAL_MS = 60_000;
 const BLOCKED_TAB_NAME_WORDS = [
   "archive",
   "asset",
@@ -104,6 +132,10 @@ const BLOCKED_TAB_NAME_WORDS = [
 function parseMoney(value: string) {
   const number = Number(value.replace(/[$£,%A-Z\s,]/gi, ""));
   return Number.isFinite(number) ? number : 0;
+}
+
+function logDashboardDataFlow(message: string, details?: Record<string, unknown>) {
+  console.info("[team-billion:data-flow]", message, details ?? {});
 }
 
 function parsePercent(value: string) {
@@ -532,10 +564,21 @@ async function readCreatorSourcingData(
   creatorSourcingSpreadsheetId: string,
   team: Teammate[],
 ) {
+  logDashboardDataFlow("loading creator sourcing data", {
+    teamMembers: team.length,
+  });
+
   const [outreachRefs, signedCreatorsRef] = await Promise.all([
     discoverCreatorSourcingSheetRefs(config, creatorSourcingSpreadsheetId),
     discoverSignedCreatorsSheetRef(config, creatorSourcingSpreadsheetId),
   ]);
+
+  logDashboardDataFlow("creator sourcing sheet refs discovered", {
+    outreachRefCount: outreachRefs.length,
+    outreachRefs: outreachRefs.map((sheet) => sheet.sheetName),
+    signedCreatorsSheet: signedCreatorsRef.sheetName,
+  });
+
   const [outreachSheets, signedCreatorsRows] = await Promise.all([
     Promise.all(
       outreachRefs.map(async (memberSheet) => ({
@@ -550,6 +593,18 @@ async function readCreatorSourcingData(
     normalizeMemberOutreachRows(memberName, [headers, ...rows]),
   );
   const creators = normalizeCreatorRows([signedCreatorsRows.headers, ...signedCreatorsRows.rows]);
+
+  logDashboardDataFlow("creator sourcing rows normalized", {
+    outreachSheets: outreachSheets.map((sheet) => ({
+      memberName: sheet.memberName,
+      headerCount: sheet.headers.length,
+      rowCount: sheet.rows.length,
+    })),
+    signedCreatorsHeaderCount: signedCreatorsRows.headers.length,
+    signedCreatorsRowCount: signedCreatorsRows.rows.length,
+    normalizedOutreachRows: outreachRows.length,
+    normalizedCreators: creators.length,
+  });
 
   return {
     creators,
@@ -632,20 +687,43 @@ function getGoogleSheetsErrorMessage(error: unknown) {
 
 async function readDashboardSheetData(config: GoogleSheetsConfig): Promise<DashboardSheetData> {
   const { makeSheetUrl } = await getGoogleSheetsServer();
+  logDashboardDataFlow("loading dashboard data from google sheets", {
+    productionRuntime: (await getGoogleSheetsServer()).isProductionRuntime(),
+  });
   const links = {
     dealsSheetUrl: makeSheetUrl(config.teamSpreadsheetId),
     creatorSourcingSheetUrl: makeSheetUrl(config.creatorSourcingSpreadsheetId),
   };
   const sheetRefs = await discoverDealSheetRefs(config, config.teamSpreadsheetId);
+  logDashboardDataFlow("deal sheet refs discovered", {
+    sheetRefCount: sheetRefs.length,
+    sheetRefs: sheetRefs.map((sheet) => sheet.sheetName),
+  });
   const readableSheets = await Promise.all(
     sheetRefs.map(async (memberSheet) => ({
       memberName: memberSheet.memberName,
       ...(await fetchSheetRowsFromApi(config, config.teamSpreadsheetId, memberSheet)),
     })),
   );
+  logDashboardDataFlow("deal sheet rows returned", {
+    sheets: readableSheets.map((sheet) => ({
+      memberName: sheet.memberName,
+      headerCount: sheet.headers.length,
+      rowCount: sheet.rows.length,
+      expectedDealHeaders: isDealWorksheet(sheet.headers),
+    })),
+  });
   const sheets = dedupeSheetsByContent(
     readableSheets.filter((sheet) => isDealWorksheet(sheet.headers)),
   );
+
+  logDashboardDataFlow("deal sheets after expected-header filter", {
+    validDealSheetCount: sheets.length,
+    validDealSheets: sheets.map((sheet) => ({
+      memberName: sheet.memberName,
+      rowCount: sheet.rows.length,
+    })),
+  });
 
   if (!sheets.some((sheet) => sheet.headers.length > 0)) {
     throw new Error("No Google Sheet tabs with the expected deal headers could be read");
@@ -663,43 +741,132 @@ async function readDashboardSheetData(config: GoogleSheetsConfig): Promise<Dashb
     baseTeam,
   );
   const team = enrichTeamWithCreatorCounts(baseTeam, creatorData.creators);
+  const totals = calculateTotals(team, deals);
+
+  logDashboardDataFlow("dashboard data loaded from google sheets", {
+    teamMembers: team.length,
+    deals: deals.length,
+    creators: creatorData.creators.length,
+    outreachMembers: creatorData.outreach.members.length,
+    outreachCreators: creatorData.outreach.totals.totalCreators,
+    totalPaid: totals.totalPaid,
+    pendingOwed: totals.pendingOwed,
+  });
 
   return {
     deals,
     team,
     creators: creatorData.creators,
     outreach: creatorData.outreach,
-    totals: calculateTotals(team, deals),
+    totals,
     source: "google-sheet",
     links,
     updatedAt: new Date().toISOString(),
   };
 }
 
+export async function getDashboardDataFlowDiagnostics(): Promise<DashboardDataFlowDiagnostics> {
+  const googleSheets = await getGoogleSheetsServer();
+  const productionRuntime = googleSheets.isProductionRuntime();
+  const cache = {
+    queryStaleTimeMs: QUERY_STALE_TIME_MS,
+    queryRefetchIntervalMs: QUERY_REFETCH_INTERVAL_MS,
+    googleFetchCache: "no-store" as const,
+    staticRenderingLikely: false,
+    note:
+      "Dashboard data is loaded by a TanStack server function after login. Google API fetches use no-store, and the query refetches on mount, so Vercel static caching should not serve old mock rows.",
+  };
+
+  try {
+    const data = await readDashboardSheetData(googleSheets.getGoogleSheetsConfig());
+
+    return {
+      checkedAt: new Date().toISOString(),
+      runtime: {
+        nodeEnv: process.env.NODE_ENV ?? "missing",
+        vercel: process.env.VERCEL === "1",
+        productionRuntime,
+      },
+      source: data.source,
+      fallbackActive: data.source === "fallback",
+      fallbackReason: data.source === "fallback" ? data.error ?? "Unknown fallback reason" : null,
+      counts: {
+        teamMembers: data.team.length,
+        deals: data.deals.length,
+        creators: data.creators.length,
+        outreachMembers: data.outreach.members.length,
+        outreachCreators: data.outreach.totals.totalCreators,
+      },
+      cache,
+    };
+  } catch (error) {
+    const message = getGoogleSheetsErrorMessage(error);
+
+    return {
+      checkedAt: new Date().toISOString(),
+      runtime: {
+        nodeEnv: process.env.NODE_ENV ?? "missing",
+        vercel: process.env.VERCEL === "1",
+        productionRuntime,
+      },
+      source: productionRuntime ? "error" : "fallback",
+      fallbackActive: !productionRuntime,
+      fallbackReason: productionRuntime ? message : `Local development fallback: ${message}`,
+      counts: {
+        teamMembers: 0,
+        deals: 0,
+        creators: 0,
+        outreachMembers: 0,
+        outreachCreators: 0,
+      },
+      cache,
+    };
+  }
+}
+
 export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler(
   async () => {
+    logDashboardDataFlow("dashboard server function called");
     await requireDashboardAuth();
     const googleSheets = await getGoogleSheetsServer();
     const links = googleSheets.getOptionalSheetLinks();
+    const productionRuntime = googleSheets.isProductionRuntime();
+
+    logDashboardDataFlow("dashboard auth passed", {
+      productionRuntime,
+    });
 
     try {
       return await readDashboardSheetData(googleSheets.getGoogleSheetsConfig());
     } catch (error) {
       const message = getGoogleSheetsErrorMessage(error);
       console.error("Google Sheets dashboard access failed:", error);
+      logDashboardDataFlow("dashboard google sheets load failed", {
+        productionRuntime,
+        fallbackActive: !productionRuntime,
+        reason: message,
+      });
 
-      if (!googleSheets.isProductionRuntime()) {
+      if (!productionRuntime) {
+        logDashboardDataFlow("using local fallback data", {
+          reason: message,
+        });
         return fallbackDashboardData(message, links);
       }
 
+      logDashboardDataFlow("production fallback disabled; returning visible error", {
+        reason: message,
+      });
       return emptyDashboardData(message, links);
     }
   },
 );
 
 export const dashboardSheetQuery = {
-  queryKey: ["team-billion-dashboard-sheet", "creator-sourcing-v1"],
+  queryKey: ["team-billion-dashboard-sheet", "creator-sourcing-v2"],
   queryFn: () => fetchDashboardSheetData(),
-  refetchInterval: 60_000,
-  staleTime: 30_000,
+  refetchInterval: QUERY_REFETCH_INTERVAL_MS,
+  staleTime: QUERY_STALE_TIME_MS,
+  refetchOnMount: "always" as const,
+  refetchOnReconnect: "always" as const,
 };

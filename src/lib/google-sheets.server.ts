@@ -1,5 +1,4 @@
 import "@tanstack/react-start/server-only";
-import { webcrypto } from "node:crypto";
 
 export type GoogleSheetRef = {
   memberName: string;
@@ -12,11 +11,22 @@ export type GoogleSheetRows = {
   rows: string[][];
 };
 
-type GoogleSheetsConfig = {
+export type GoogleSheetsConfig = {
   serviceAccountEmail: string;
   privateKey: string;
   teamSpreadsheetId: string;
   creatorSourcingSpreadsheetId: string;
+};
+
+export type GoogleEnvPresence = {
+  name: string;
+  exists: boolean;
+};
+
+export type GoogleAuthCheck = {
+  ok: boolean;
+  cached: boolean;
+  error: string | null;
 };
 
 type TokenResponse = {
@@ -46,6 +56,41 @@ type ValuesResponse = {
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
+const GOOGLE_ENV_NAMES = [
+  "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+  "GOOGLE_PRIVATE_KEY",
+  "TEAM_BILLION_SPREADSHEET_ID",
+  "CREATOR_SOURCING_SPREADSHEET_ID",
+] as const;
+
+function safeErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function logGoogleSheets(message: string, details?: Record<string, unknown>) {
+  console.info("[team-billion:sheets]", message, details ?? {});
+}
+
+function summarizeUrl(url: URL) {
+  const parts = url.pathname.split("/").filter(Boolean);
+  const valuesIndex = parts.indexOf("values");
+  const endpoint = valuesIndex >= 0 ? "values" : "metadata";
+  const encodedRange = valuesIndex >= 0 ? parts.slice(valuesIndex + 1).join("/") : "";
+
+  return {
+    endpoint,
+    hasSpreadsheetId: parts.includes("spreadsheets"),
+    range: encodedRange ? decodeURIComponent(encodedRange) : undefined,
+  };
+}
+
+export function getGoogleEnvPresence(): GoogleEnvPresence[] {
+  return GOOGLE_ENV_NAMES.map((name) => ({
+    name,
+    exists: Boolean(process.env[name]?.trim()),
+  }));
+}
+
 function requiredEnv(name: string) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`Missing required Google Sheets env var: ${name}`);
@@ -64,6 +109,12 @@ export function isProductionRuntime() {
 }
 
 export function getGoogleSheetsConfig(): GoogleSheetsConfig {
+  logGoogleSheets("environment variable presence", {
+    vars: getGoogleEnvPresence(),
+    nodeEnv: process.env.NODE_ENV ?? "missing",
+    vercel: process.env.VERCEL === "1" ? "present" : "missing",
+  });
+
   return {
     serviceAccountEmail: requiredEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
     privateKey: normalizePrivateKey(requiredEnv("GOOGLE_PRIVATE_KEY")),
@@ -106,7 +157,10 @@ function pemToArrayBuffer(pem: string) {
 }
 
 async function signJwt(config: GoogleSheetsConfig) {
-  const subtle = globalThis.crypto?.subtle ?? webcrypto.subtle;
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    throw new Error("WebCrypto SubtleCrypto is not available in this server runtime.");
+  }
   const now = Math.floor(Date.now() / 1000);
   const header = {
     alg: "RS256",
@@ -140,12 +194,21 @@ async function signJwt(config: GoogleSheetsConfig) {
 
 async function getAccessToken(config: GoogleSheetsConfig) {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
+    logGoogleSheets("google auth using cached token", {
+      cachedUntil: new Date(cachedToken.expiresAt).toISOString(),
+    });
     return cachedToken.token;
   }
+
+  logGoogleSheets("google auth requesting access token", {
+    serviceAccountEmailPresent: Boolean(config.serviceAccountEmail),
+    privateKeyPresent: Boolean(config.privateKey),
+  });
 
   const assertion = await signJwt(config);
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
+    cache: "no-store",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
     },
@@ -157,6 +220,11 @@ async function getAccessToken(config: GoogleSheetsConfig) {
   const result = (await response.json().catch(() => ({}))) as TokenResponse;
 
   if (!response.ok || !result.access_token) {
+    logGoogleSheets("google auth failed", {
+      status: response.status,
+      error: result.error_description ?? result.error ?? "No access token returned",
+    });
+
     throw new Error(
       `Google service account auth failed (${response.status}): ${
         result.error_description ?? result.error ?? "No access token returned"
@@ -169,11 +237,38 @@ async function getAccessToken(config: GoogleSheetsConfig) {
     expiresAt: Date.now() + Math.max(60, result.expires_in ?? 3600) * 1000,
   };
 
+  logGoogleSheets("google auth succeeded", {
+    expiresAt: new Date(cachedToken.expiresAt).toISOString(),
+  });
+
   return cachedToken.token;
 }
 
+export async function checkGoogleAuth(config: GoogleSheetsConfig): Promise<GoogleAuthCheck> {
+  const cached = Boolean(cachedToken && cachedToken.expiresAt > Date.now() + 60_000);
+
+  try {
+    await getAccessToken(config);
+    return {
+      ok: true,
+      cached,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      cached,
+      error: safeErrorMessage(error),
+    };
+  }
+}
+
 async function googleSheetsFetch<T>(config: GoogleSheetsConfig, url: URL): Promise<T> {
+  const summary = summarizeUrl(url);
+  logGoogleSheets("google sheets api request", summary);
+
   const response = await fetch(url.toString(), {
+    cache: "no-store",
     headers: {
       authorization: `Bearer ${await getAccessToken(config)}`,
     },
@@ -181,12 +276,23 @@ async function googleSheetsFetch<T>(config: GoogleSheetsConfig, url: URL): Promi
   const body = (await response.json().catch(() => ({}))) as T & ValuesResponse;
 
   if (!response.ok) {
+    logGoogleSheets("google sheets api request failed", {
+      ...summary,
+      status: response.status,
+      error: body.error?.message ?? response.statusText,
+    });
+
     throw new Error(
       `Google Sheets API failed (${response.status}): ${
         body.error?.message ?? response.statusText
       }`,
     );
   }
+
+  logGoogleSheets("google sheets api request succeeded", {
+    ...summary,
+    status: response.status,
+  });
 
   return body;
 }
@@ -208,8 +314,7 @@ export async function fetchSpreadsheetTabs(
   url.searchParams.set("includeGridData", "false");
   url.searchParams.set("fields", "sheets.properties(sheetId,title,hidden)");
   const metadata = await googleSheetsFetch<SpreadsheetResponse>(config, url);
-
-  return (metadata.sheets ?? [])
+  const tabs = (metadata.sheets ?? [])
     .map((sheet) => sheet.properties)
     .filter((properties) => properties?.title && !properties.hidden)
     .map((properties) => ({
@@ -217,6 +322,13 @@ export async function fetchSpreadsheetTabs(
       sheetName: String(properties?.title ?? ""),
       memberName: String(properties?.title ?? ""),
     }));
+
+  logGoogleSheets("spreadsheet opened", {
+    visibleTabCount: tabs.length,
+    tabs: tabs.map((tab) => tab.sheetName).slice(0, 20),
+  });
+
+  return tabs;
 }
 
 export async function fetchSheetRows(
@@ -240,6 +352,12 @@ export async function fetchSheetRows(
   const values = result.values ?? [];
   const headers = (values[0] ?? []).map(cellToString);
   const rows = values.slice(1).map((row) => row.map(cellToString));
+
+  logGoogleSheets("sheet rows returned", {
+    sheetName: sheet.sheetName,
+    headerCount: headers.length,
+    rowCount: rows.length,
+  });
 
   return { headers, rows };
 }

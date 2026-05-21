@@ -9,12 +9,13 @@ import type { DashboardSheetData } from "@/lib/sheets-public";
 import { Briefcase, CalendarDays, CircleDollarSign, WalletCards } from "lucide-react";
 
 export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
-  const team = data?.team ?? fallbackTeam;
+  const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+  const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
   const totals = data?.totals ?? {
-    totalPaid: totalCommission,
-    paidThisMonth: totalMonthCommission,
-    pendingOwed: totalPendingOwed,
-    dealsClosed: totalDealsClosed,
+    totalPaid: canUseLocalFallback ? totalCommission : 0,
+    paidThisMonth: canUseLocalFallback ? totalMonthCommission : 0,
+    pendingOwed: canUseLocalFallback ? totalPendingOwed : 0,
+    dealsClosed: canUseLocalFallback ? totalDealsClosed : 0,
   };
   const stats = [
     {

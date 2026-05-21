@@ -34,9 +34,126 @@ function StatusPill({ ok }: { ok: boolean }) {
   );
 }
 
+function MetricBox({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-2xl bg-muted/45 p-4">
+      <div className="text-xs font-semibold text-muted-foreground">{label}</div>
+      <div className="mt-1 break-words text-lg font-bold">{value}</div>
+    </div>
+  );
+}
+
 function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnostics }) {
   return (
     <div className="space-y-6">
+      <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">Dashboard data flow</h3>
+            <p className="text-xs text-muted-foreground">
+              This runs the same server-side reader used by the live dashboard.
+            </p>
+          </div>
+          <StatusPill ok={diagnostics.dataFlow?.source === "google-sheet"} />
+        </div>
+
+        {diagnostics.dataFlow ? (
+          <>
+            <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+              <MetricBox label="Source" value={diagnostics.dataFlow.source} />
+              <MetricBox
+                label="Fallback active"
+                value={diagnostics.dataFlow.fallbackActive ? "Yes" : "No"}
+              />
+              <MetricBox label="Team members" value={diagnostics.dataFlow.counts.teamMembers} />
+              <MetricBox label="Deals" value={diagnostics.dataFlow.counts.deals} />
+              <MetricBox label="Creators" value={diagnostics.dataFlow.counts.creators} />
+              <MetricBox
+                label="Outreach rows"
+                value={diagnostics.dataFlow.counts.outreachCreators}
+              />
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+                <div className="font-semibold">Runtime</div>
+                <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  <div>NODE_ENV: {diagnostics.dataFlow.runtime.nodeEnv}</div>
+                  <div>VERCEL: {diagnostics.dataFlow.runtime.vercel ? "Yes" : "No"}</div>
+                  <div>
+                    Production runtime:{" "}
+                    {diagnostics.dataFlow.runtime.productionRuntime ? "Yes" : "No"}
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+                <div className="font-semibold">Caching check</div>
+                <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  <div>Query stale time: {diagnostics.dataFlow.cache.queryStaleTimeMs}ms</div>
+                  <div>
+                    Query refetch interval:{" "}
+                    {diagnostics.dataFlow.cache.queryRefetchIntervalMs}ms
+                  </div>
+                  <div>Google fetch cache: {diagnostics.dataFlow.cache.googleFetchCache}</div>
+                  <div>
+                    Static rendering likely:{" "}
+                    {diagnostics.dataFlow.cache.staticRenderingLikely ? "Yes" : "No"}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {diagnostics.dataFlow.fallbackReason && (
+              <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                <div className="mb-1 flex items-center gap-2 font-bold">
+                  <AlertTriangle className="h-4 w-4" />
+                  Fallback or error reason
+                </div>
+                <p className="break-words text-xs leading-relaxed">
+                  {diagnostics.dataFlow.fallbackReason}
+                </p>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="mt-4 rounded-2xl bg-muted/45 p-4 text-sm font-semibold text-muted-foreground">
+            Data flow diagnostics unavailable.
+          </div>
+        )}
+      </div>
+
+      <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">Google auth</h3>
+            <p className="text-xs text-muted-foreground">
+              This checks whether the service account can get a Google access token.
+            </p>
+          </div>
+          <StatusPill ok={diagnostics.auth.ok} />
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <MetricBox label="Attempted" value={diagnostics.auth.attempted ? "Yes" : "No"} />
+          <MetricBox label="Succeeded" value={diagnostics.auth.ok ? "Yes" : "No"} />
+          <MetricBox label="Used cached token" value={diagnostics.auth.cached ? "Yes" : "No"} />
+        </div>
+        {diagnostics.auth.error && (
+          <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+            <div className="mb-1 flex items-center gap-2 font-bold">
+              <AlertTriangle className="h-4 w-4" />
+              Google auth error
+            </div>
+            <p className="break-words text-xs leading-relaxed">{diagnostics.auth.error}</p>
+          </div>
+        )}
+      </div>
+
       <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -87,6 +204,10 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
                 <span className="font-medium text-muted-foreground">Visible tabs</span>
                 <span className="font-bold">{sheet.tabCount}</span>
               </div>
+              <div className="flex items-center justify-between rounded-2xl bg-muted/45 p-3">
+                <span className="font-medium text-muted-foreground">Rows returned</span>
+                <span className="font-bold">{sheet.totalRows}</span>
+              </div>
             </div>
 
             {sheet.tabs.length > 0 && (
@@ -99,6 +220,33 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
                     {tab}
                   </span>
                 ))}
+              </div>
+            )}
+
+            {sheet.rowCounts.length > 0 && (
+              <div className="mt-4 overflow-hidden rounded-2xl border border-border">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/60 text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">Tab</th>
+                      <th className="px-3 py-2 text-right font-semibold">Headers</th>
+                      <th className="px-3 py-2 text-right font-semibold">Rows</th>
+                      <th className="px-3 py-2 text-right font-semibold">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sheet.rowCounts.slice(0, 20).map((tab) => (
+                      <tr key={tab.sheetName} className="border-t border-border/60">
+                        <td className="px-3 py-2 font-medium">{tab.sheetName}</td>
+                        <td className="px-3 py-2 text-right">{tab.headerCount}</td>
+                        <td className="px-3 py-2 text-right">{tab.rowCount}</td>
+                        <td className="px-3 py-2 text-right">
+                          {tab.readable ? "OK" : tab.error ?? "Error"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
