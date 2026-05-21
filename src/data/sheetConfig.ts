@@ -1,7 +1,3 @@
-export const TEAM_BILLION_SPREADSHEET_ID = "1oetKgRHC6ucAAvr4G99UGgqWJyWrNCZcc8mhcDwMULI";
-export const CREATOR_SOURCING_SPREADSHEET_ID = "1cE0PlyvZH5-kqyGOBuM6eaWO_kWIhtfJ_jEIOuaPPv4";
-export const CREATOR_SOURCING_SHEET_URL =
-  "https://docs.google.com/spreadsheets/d/1cE0PlyvZH5-kqyGOBuM6eaWO_kWIhtfJ_jEIOuaPPv4/edit?usp=sharing";
 export const SIGNED_CREATORS_TAB_NAME = "Signed creators ";
 export const IGNORED_OUTREACH_TAB_NAMES = ["Ex-managers", "Signed creators"];
 export const SHEET_HEADER_ROW_NUMBER = 1;
@@ -12,10 +8,10 @@ export const MEMBER_SUMMARY_CELLS = {
 };
 
 export const FALLBACK_MEMBER_SHEETS = [
-  { name: "KTrang", gid: "13676943" },
-  { name: "HYen", gid: "1179706816" },
-  { name: "BNgan", gid: "872122388" },
-  { name: "LNgoc", gid: "997875421" },
+  { name: "KTrang" },
+  { name: "HYen" },
+  { name: "BNgan" },
+  { name: "LNgoc" },
 ];
 
 export type DashboardDealField =

@@ -1,10 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import {
-  CREATOR_SOURCING_SPREADSHEET_ID,
   FALLBACK_MEMBER_SHEETS,
   IGNORED_OUTREACH_TAB_NAMES,
   SIGNED_CREATORS_TAB_NAME,
-  TEAM_BILLION_SPREADSHEET_ID,
 } from "@/data/sheetConfig";
 import { team as fallbackTeam, type Teammate } from "@/data/team";
 import { deals as fallbackDeals, type Deal } from "@/data/deals";
@@ -19,32 +17,18 @@ import {
 } from "@/lib/sheet-normalizer";
 import { requireDashboardAuth } from "@/lib/auth";
 
-type GvizCell = {
-  v?: string | number | boolean;
-  f?: string;
-};
-
-type GvizResponse = {
-  table: {
-    cols: { label?: string }[];
-    rows: { c?: (GvizCell | null)[] }[];
-  };
-};
-
-type WorksheetFeedResponse = {
-  feed?: {
-    entry?: Array<{
-      title?: {
-        $t?: string;
-      };
-    }>;
-  };
-};
+type GoogleSheetsServer = typeof import("@/lib/google-sheets.server");
+type GoogleSheetsConfig = ReturnType<GoogleSheetsServer["getGoogleSheetsConfig"]>;
 
 type SheetRef = {
   memberName: string;
-  sheetName?: string;
+  sheetName: string;
   gid?: string;
+};
+
+type SpreadsheetLinks = {
+  dealsSheetUrl?: string;
+  creatorSourcingSheetUrl?: string;
 };
 
 export type DashboardSheetData = {
@@ -63,7 +47,9 @@ export type DashboardSheetData = {
     paidGoal: number;
     dealsGoal: number;
   };
-  source: "google-sheet" | "fallback";
+  source: "google-sheet" | "fallback" | "error";
+  error?: string;
+  links: SpreadsheetLinks;
   updatedAt: string;
 };
 
@@ -114,18 +100,6 @@ const BLOCKED_TAB_NAME_WORDS = [
   "summary",
   "template",
 ];
-
-function parseGvizJson(raw: string): GvizResponse {
-  const match = raw.match(/google\.visualization\.Query\.setResponse\((.*)\);?$/s);
-  if (!match) throw new Error("Google Sheets response was not valid GViz JSON.");
-  return JSON.parse(match[1]) as GvizResponse;
-}
-
-function cellToText(cell: GvizCell | null | undefined) {
-  if (!cell) return "";
-  const value = cell.f ?? cell.v ?? "";
-  return String(value);
-}
 
 function parseMoney(value: string) {
   const number = Number(value.replace(/[$£,%A-Z\s,]/gi, ""));
@@ -264,81 +238,32 @@ function getKnownFallback(name: string, index: number): Teammate {
   };
 }
 
-function parseJsonString(value: string) {
-  try {
-    return JSON.parse(`"${value}"`) as string;
-  } catch {
-    return value;
-  }
+async function getGoogleSheetsServer() {
+  return import("@/lib/google-sheets.server");
 }
 
-async function discoverSheetsFromWorksheetFeed(spreadsheetId: string): Promise<SheetRef[]> {
-  const url = new URL(
-    `https://spreadsheets.google.com/feeds/worksheets/${spreadsheetId}/public/basic`,
-  );
-  url.searchParams.set("alt", "json");
+async function discoverAllSheetRefs(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+): Promise<SheetRef[]> {
+  const { fetchSpreadsheetTabs } = await getGoogleSheetsServer();
+  const tabs = await fetchSpreadsheetTabs(config, spreadsheetId);
 
-  const response = await fetch(url.toString());
-  if (!response.ok) throw new Error(`Could not discover worksheets: ${response.status}`);
-
-  const parsed = (await response.json()) as WorksheetFeedResponse;
-  const entries = parsed.feed?.entry ?? [];
-
-  return entries
-    .map((entry) => entry.title?.$t ?? "")
-    .map((sheetName) => ({
-      sheetName,
-      memberName: cleanMemberName(sheetName),
-    }));
+  return tabs.map((tab) => ({
+    ...tab,
+    memberName: cleanMemberName(tab.memberName),
+  }));
 }
 
-function parseSheetsFromHtml(html: string): SheetRef[] {
-  const sheets = new Map<string, SheetRef>();
-  const pairPattern = /\[(\d{1,12}),"((?:\\.|[^"\\]){1,80})"/g;
-  const objectPattern =
-    /"sheetId"\s*:\s*(\d{1,12})[\s\S]{0,400}?"title"\s*:\s*"((?:\\.|[^"\\]){1,80})"/g;
-
-  const addSheet = (gid: string, rawName: string) => {
-    const sheetName = parseJsonString(rawName);
-    const memberName = cleanMemberName(sheetName);
-    sheets.set(gid, { gid, sheetName, memberName });
-  };
-
-  for (const match of html.matchAll(pairPattern)) {
-    addSheet(match[1], match[2]);
-  }
-
-  for (const match of html.matchAll(objectPattern)) {
-    addSheet(match[1], match[2]);
-  }
-
-  return Array.from(sheets.values());
-}
-
-async function discoverSheetsFromHtml(spreadsheetId: string): Promise<SheetRef[]> {
-  const url = new URL(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`);
-  url.searchParams.set("usp", "sharing");
-
-  const response = await fetch(url.toString());
-  if (!response.ok) throw new Error(`Could not discover worksheets from HTML: ${response.status}`);
-
-  return parseSheetsFromHtml(await response.text());
-}
-
-async function discoverAllSheetRefs(spreadsheetId: string): Promise<SheetRef[]> {
-  return (
-    (await discoverSheetsFromWorksheetFeed(spreadsheetId).catch(() =>
-      discoverSheetsFromHtml(spreadsheetId).catch(() => []),
-    )) ?? []
-  );
-}
-
-async function discoverDealSheetRefs(): Promise<SheetRef[]> {
+async function discoverDealSheetRefs(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+): Promise<SheetRef[]> {
   const fallbackRefs = FALLBACK_MEMBER_SHEETS.map((sheet) => ({
-    gid: sheet.gid,
+    sheetName: sheet.name,
     memberName: sheet.name,
   }));
-  const discovered = await discoverAllSheetRefs(TEAM_BILLION_SPREADSHEET_ID);
+  const discovered = await discoverAllSheetRefs(config, spreadsheetId);
   const merged = new Map<string, SheetRef>();
 
   for (const sheet of fallbackRefs) {
@@ -360,8 +285,11 @@ async function discoverDealSheetRefs(): Promise<SheetRef[]> {
   return Array.from(merged.values());
 }
 
-async function discoverCreatorSourcingSheetRefs(): Promise<SheetRef[]> {
-  const discovered = await discoverAllSheetRefs(CREATOR_SOURCING_SPREADSHEET_ID);
+async function discoverCreatorSourcingSheetRefs(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+): Promise<SheetRef[]> {
+  const discovered = await discoverAllSheetRefs(config, spreadsheetId);
   const fallbackRefs = FALLBACK_MEMBER_SHEETS.map((sheet) => ({
     sheetName: sheet.name,
     memberName: sheet.name,
@@ -386,8 +314,11 @@ async function discoverCreatorSourcingSheetRefs(): Promise<SheetRef[]> {
   return Array.from(merged.values());
 }
 
-async function discoverSignedCreatorsSheetRef(): Promise<SheetRef> {
-  const discovered = await discoverAllSheetRefs(CREATOR_SOURCING_SPREADSHEET_ID);
+async function discoverSignedCreatorsSheetRef(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+): Promise<SheetRef> {
+  const discovered = await discoverAllSheetRefs(config, spreadsheetId);
   const found = discovered.find((sheet) =>
     isSignedCreatorsSheet(sheet.sheetName ?? sheet.memberName),
   );
@@ -408,27 +339,13 @@ function getSummaryValue(rows: string[][], labels: string[]) {
   return parseMoney(row?.[18] ?? "");
 }
 
-async function fetchSheetRows(spreadsheetId: string, sheet: SheetRef) {
-  const url = new URL(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq`);
-  url.searchParams.set("tqx", "out:json");
-  if (sheet.gid) {
-    url.searchParams.set("gid", sheet.gid);
-  } else if (sheet.sheetName) {
-    url.searchParams.set("sheet", sheet.sheetName);
-  } else {
-    throw new Error(`No sheet identifier for ${sheet.memberName}`);
-  }
-
-  const response = await fetch(url.toString());
-  if (!response.ok) throw new Error(`Could not read ${sheet.memberName}: ${response.status}`);
-
-  const parsed = parseGvizJson(await response.text());
-  const headers = parsed.table.cols.map((column) => column.label ?? "");
-  const rows = parsed.table.rows.map((row) =>
-    parsed.table.cols.map((_, index) => cellToText(row.c?.[index])),
-  );
-
-  return { headers, rows };
+async function fetchSheetRowsFromApi(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  sheet: SheetRef,
+) {
+  const { fetchSheetRows } = await getGoogleSheetsServer();
+  return fetchSheetRows(config, spreadsheetId, sheet);
 }
 
 function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fallback: Teammate) {
@@ -610,160 +527,173 @@ function buildOutreachDashboardData(
   };
 }
 
-async function readCreatorSourcingData(team: Teammate[]) {
-  try {
-    const [outreachRefs, signedCreatorsRef] = await Promise.all([
-      discoverCreatorSourcingSheetRefs(),
-      discoverSignedCreatorsSheetRef(),
-    ]);
-    const [outreachSheets, signedCreatorsRows] = await Promise.all([
-      Promise.all(
-        outreachRefs.map(async (memberSheet) => {
-          try {
-            return {
-              memberName: memberSheet.memberName,
-              ...(await fetchSheetRows(CREATOR_SOURCING_SPREADSHEET_ID, memberSheet)),
-            };
-          } catch (error) {
-            console.error(`Could not read outreach tab ${memberSheet.memberName}`, error);
-            return {
-              memberName: memberSheet.memberName,
-              headers: [] as string[],
-              rows: [] as string[][],
-            };
-          }
-        }),
-      ),
-      fetchSheetRows(CREATOR_SOURCING_SPREADSHEET_ID, signedCreatorsRef),
-    ]);
+async function readCreatorSourcingData(
+  config: GoogleSheetsConfig,
+  creatorSourcingSpreadsheetId: string,
+  team: Teammate[],
+) {
+  const [outreachRefs, signedCreatorsRef] = await Promise.all([
+    discoverCreatorSourcingSheetRefs(config, creatorSourcingSpreadsheetId),
+    discoverSignedCreatorsSheetRef(config, creatorSourcingSpreadsheetId),
+  ]);
+  const [outreachSheets, signedCreatorsRows] = await Promise.all([
+    Promise.all(
+      outreachRefs.map(async (memberSheet) => ({
+        memberName: memberSheet.memberName,
+        ...(await fetchSheetRowsFromApi(config, creatorSourcingSpreadsheetId, memberSheet)),
+      })),
+    ),
+    fetchSheetRowsFromApi(config, creatorSourcingSpreadsheetId, signedCreatorsRef),
+  ]);
 
-    const outreachRows = outreachSheets.flatMap(({ memberName, headers, rows }) =>
-      normalizeMemberOutreachRows(memberName, [headers, ...rows]),
-    );
-    const creators = normalizeCreatorRows([signedCreatorsRows.headers, ...signedCreatorsRows.rows]);
+  const outreachRows = outreachSheets.flatMap(({ memberName, headers, rows }) =>
+    normalizeMemberOutreachRows(memberName, [headers, ...rows]),
+  );
+  const creators = normalizeCreatorRows([signedCreatorsRows.headers, ...signedCreatorsRows.rows]);
 
-    return {
-      creators,
-      outreach: buildOutreachDashboardData(outreachRows, creators, team),
-    };
-  } catch (error) {
-    console.error("Could not read creator sourcing sheet", error);
-    return {
-      creators: fallbackCreators,
-      outreach: fallbackOutreachData(team),
-    };
-  }
+  return {
+    creators,
+    outreach: buildOutreachDashboardData(outreachRows, creators, team),
+  };
 }
 
-async function readDashboardSheetData(): Promise<DashboardSheetData> {
-  try {
-    const sheetRefs = await discoverDealSheetRefs();
-    const readableSheets = await Promise.all(
-      sheetRefs.map(async (memberSheet) => {
-        try {
-          return {
-            memberName: memberSheet.memberName,
-            ...(await fetchSheetRows(TEAM_BILLION_SPREADSHEET_ID, memberSheet)),
-          };
-        } catch (error) {
-          console.error(`Could not read member tab ${memberSheet.memberName}`, error);
-          return {
-            memberName: memberSheet.memberName,
-            headers: [] as string[],
-            rows: [] as string[][],
-          };
-        }
-      }),
-    );
-    const sheets = dedupeSheetsByContent(
-      readableSheets.filter((sheet) => isDealWorksheet(sheet.headers)),
-    );
+function calculateTotals(team: Teammate[], deals: Deal[]) {
+  const totalPaid = team.reduce((sum, member) => sum + member.commission, 0);
+  const paidThisMonth = team.reduce((sum, member) => sum + member.monthCommission, 0);
+  const pendingOwed = team.reduce((sum, member) => sum + member.pendingOwed, 0);
+  const dealsClosed = deals.length;
+  const totalPricing = deals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
+  const pricedDeals = deals.filter((deal) => deal.totalPricingGbp > 0);
+  const marginValues = deals
+    .map((deal) => parsePercent(deal.profitMargin))
+    .filter((margin) => margin > 0);
 
-    if (!sheets.some((sheet) => sheet.headers.length > 0)) {
-      throw new Error("No Google Sheet tabs could be read.");
-    }
+  return {
+    totalPaid,
+    paidThisMonth,
+    pendingOwed,
+    dealsClosed,
+    totalPricing,
+    averageDealSize: Math.round(totalPricing / Math.max(1, pricedDeals.length)),
+    averageProfitMargin: Math.round(average(marginValues) * 10) / 10,
+    paidGoal: team.reduce((sum, member) => sum + member.revenueGoal, 0),
+    dealsGoal: team.reduce((sum, member) => sum + member.dealsGoal, 0),
+  };
+}
 
-    const deals = sheets.flatMap(({ memberName, headers, rows }) =>
-      normalizeMemberDealRows(memberName, [headers, ...rows]),
-    );
-    const baseTeam = sheets.map(({ memberName, rows }, index) =>
-      buildMemberSummary(memberName, rows, deals, getKnownFallback(memberName, index)),
-    );
-    const creatorData = await readCreatorSourcingData(baseTeam);
-    const team =
-      creatorData.outreach.source === "google-sheet"
-        ? enrichTeamWithCreatorCounts(baseTeam, creatorData.creators)
-        : baseTeam;
-    const totalPaid = team.reduce((sum, member) => sum + member.commission, 0);
-    const paidThisMonth = team.reduce((sum, member) => sum + member.monthCommission, 0);
-    const pendingOwed = team.reduce((sum, member) => sum + member.pendingOwed, 0);
-    const dealsClosed = deals.length;
-    const totalPricing = deals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
-    const pricedDeals = deals.filter((deal) => deal.totalPricingGbp > 0);
-    const marginValues = deals
-      .map((deal) => parsePercent(deal.profitMargin))
-      .filter((margin) => margin > 0);
-    const paidGoal = team.reduce((sum, member) => sum + member.revenueGoal, 0);
-    const dealsGoal = team.reduce((sum, member) => sum + member.dealsGoal, 0);
-
-    return {
-      deals,
-      team,
-      creators: creatorData.creators,
-      outreach: creatorData.outreach,
-      totals: {
-        totalPaid,
-        paidThisMonth,
-        pendingOwed,
-        dealsClosed,
-        totalPricing,
-        averageDealSize: Math.round(totalPricing / Math.max(1, pricedDeals.length)),
-        averageProfitMargin: Math.round(average(marginValues) * 10) / 10,
-        paidGoal,
-        dealsGoal,
-      },
-      source: "google-sheet",
-      updatedAt: new Date().toISOString(),
-    };
-  } catch (error) {
-    console.error(error);
-    const totalPaid = fallbackTeam.reduce((sum, member) => sum + member.commission, 0);
-    const paidThisMonth = fallbackTeam.reduce((sum, member) => sum + member.monthCommission, 0);
-    const pendingOwed = fallbackTeam.reduce((sum, member) => sum + member.pendingOwed, 0);
-    const activeFallbackDeals = fallbackDeals.filter((deal) => deal.status !== "Cancelled");
-    const dealsClosed = activeFallbackDeals.length;
-    const totalPricing = activeFallbackDeals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
-    const pricedFallbackDeals = activeFallbackDeals.filter((deal) => deal.totalPricingGbp > 0);
-    const fallbackMarginValues = activeFallbackDeals
-      .map((deal) => parsePercent(deal.profitMargin))
-      .filter((margin) => margin > 0);
-
-    return {
-      deals: activeFallbackDeals,
-      team: fallbackTeam,
-      creators: fallbackCreators,
-      outreach: fallbackOutreachData(fallbackTeam),
-      totals: {
-        totalPaid,
-        paidThisMonth,
-        pendingOwed,
-        dealsClosed,
-        totalPricing,
-        averageDealSize: Math.round(totalPricing / Math.max(1, pricedFallbackDeals.length)),
-        averageProfitMargin: Math.round(average(fallbackMarginValues) * 10) / 10,
-        paidGoal: fallbackTeam.reduce((sum, member) => sum + member.revenueGoal, 0),
-        dealsGoal: fallbackTeam.reduce((sum, member) => sum + member.dealsGoal, 0),
-      },
+function emptyDashboardData(error: string, links: SpreadsheetLinks): DashboardSheetData {
+  return {
+    deals: [],
+    team: [],
+    creators: [],
+    outreach: {
+      members: [],
+      totals: emptyOutreachTotals(),
       source: "fallback",
-      updatedAt: new Date().toISOString(),
-    };
+    },
+    totals: {
+      totalPaid: 0,
+      paidThisMonth: 0,
+      pendingOwed: 0,
+      dealsClosed: 0,
+      totalPricing: 0,
+      averageDealSize: 0,
+      averageProfitMargin: 0,
+      paidGoal: 0,
+      dealsGoal: 0,
+    },
+    source: "error",
+    error,
+    links,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function fallbackDashboardData(error: string, links: SpreadsheetLinks): DashboardSheetData {
+  const activeFallbackDeals = fallbackDeals.filter((deal) => deal.status !== "Cancelled");
+
+  return {
+    deals: activeFallbackDeals,
+    team: fallbackTeam,
+    creators: fallbackCreators,
+    outreach: fallbackOutreachData(fallbackTeam),
+    totals: calculateTotals(fallbackTeam, activeFallbackDeals),
+    source: "fallback",
+    error,
+    links,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function getGoogleSheetsErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return `${message}. Check Vercel env vars, Google Sheets API access, and whether both Sheets are shared with the service account email.`;
+}
+
+async function readDashboardSheetData(config: GoogleSheetsConfig): Promise<DashboardSheetData> {
+  const { makeSheetUrl } = await getGoogleSheetsServer();
+  const links = {
+    dealsSheetUrl: makeSheetUrl(config.teamSpreadsheetId),
+    creatorSourcingSheetUrl: makeSheetUrl(config.creatorSourcingSpreadsheetId),
+  };
+  const sheetRefs = await discoverDealSheetRefs(config, config.teamSpreadsheetId);
+  const readableSheets = await Promise.all(
+    sheetRefs.map(async (memberSheet) => ({
+      memberName: memberSheet.memberName,
+      ...(await fetchSheetRowsFromApi(config, config.teamSpreadsheetId, memberSheet)),
+    })),
+  );
+  const sheets = dedupeSheetsByContent(
+    readableSheets.filter((sheet) => isDealWorksheet(sheet.headers)),
+  );
+
+  if (!sheets.some((sheet) => sheet.headers.length > 0)) {
+    throw new Error("No Google Sheet tabs with the expected deal headers could be read");
   }
+
+  const deals = sheets.flatMap(({ memberName, headers, rows }) =>
+    normalizeMemberDealRows(memberName, [headers, ...rows]),
+  );
+  const baseTeam = sheets.map(({ memberName, rows }, index) =>
+    buildMemberSummary(memberName, rows, deals, getKnownFallback(memberName, index)),
+  );
+  const creatorData = await readCreatorSourcingData(
+    config,
+    config.creatorSourcingSpreadsheetId,
+    baseTeam,
+  );
+  const team = enrichTeamWithCreatorCounts(baseTeam, creatorData.creators);
+
+  return {
+    deals,
+    team,
+    creators: creatorData.creators,
+    outreach: creatorData.outreach,
+    totals: calculateTotals(team, deals),
+    source: "google-sheet",
+    links,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler(
   async () => {
     await requireDashboardAuth();
-    return readDashboardSheetData();
+    const googleSheets = await getGoogleSheetsServer();
+    const links = googleSheets.getOptionalSheetLinks();
+
+    try {
+      return await readDashboardSheetData(googleSheets.getGoogleSheetsConfig());
+    } catch (error) {
+      const message = getGoogleSheetsErrorMessage(error);
+      console.error("Google Sheets dashboard access failed:", error);
+
+      if (!googleSheets.isProductionRuntime()) {
+        return fallbackDashboardData(message, links);
+      }
+
+      return emptyDashboardData(message, links);
+    }
   },
 );
 

@@ -1,32 +1,56 @@
 # Google Sheets Setup
 
-This dashboard is set up to use this Team Billion workbook:
+This dashboard reads Google Sheets through a server-side Google service account.
 
-`1oetKgRHC6ucAAvr4G99UGgqWJyWrNCZcc8mhcDwMULI`
+The existing sheet IDs are:
 
-For the current prototype, the Sheet is read from the public "anyone with the link can view" share setting. The production setup should use a Google service account, not a public spreadsheet link.
+```text
+Team Billion deal sheet:
+1oetKgRHC6ucAAvr4G99UGgqWJyWrNCZcc8mhcDwMULI
+
+Creator sourcing sheet:
+1cE0PlyvZH5-kqyGOBuM6eaWO_kWIhtfJ_jEIOuaPPv4
+```
+
+These IDs belong in Vercel Environment Variables, not frontend code.
 
 ## Recommended Access Model
 
 1. Create a Google Cloud service account.
 2. Enable the Google Sheets API for that Google Cloud project.
 3. Copy the service account email.
-4. Share the Team Billion Google Sheet with that service account email.
-5. Store the service account credentials as private environment variables in the app host.
-6. Let the app server read the Sheet and send cleaned dashboard data to the frontend.
+4. Share both Google Sheets with that service account email as Viewer.
+5. Create a JSON key for the service account.
+6. Store the email, private key, and sheet IDs in Vercel Environment Variables.
+7. Let the app server read the Sheets and send cleaned dashboard data to the frontend.
+
+## Vercel Environment Variables
+
+Add these in Vercel Project Settings:
+
+```text
+GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n
+TEAM_BILLION_SPREADSHEET_ID=1oetKgRHC6ucAAvr4G99UGgqWJyWrNCZcc8mhcDwMULI
+CREATOR_SOURCING_SPREADSHEET_ID=1cE0PlyvZH5-kqyGOBuM6eaWO_kWIhtfJ_jEIOuaPPv4
+```
+
+Keep `GOOGLE_PRIVATE_KEY` server-side only. Do not put it in `VITE_*` env vars, markdown knowledge files, Billy GPT files, Notion exports, or vector stores.
+
+If Google Sheets access fails on Vercel, the dashboard shows a clear connection error instead of silently showing mock data. Local development can still fall back to demo data when these env vars are missing.
 
 ## Current Workbook Assumption
 
 Each closer/team member has their own worksheet tab.
 
-Current fallback member tabs:
+Current member tabs:
 
-- `KTrang` using sheet ID `13676943`
-- `HYen` using sheet ID `1179706816`
-- `BNgan` using sheet ID `872122388`
-- `LNgoc` using sheet ID `997875421`
+- `KTrang`
+- `HYen`
+- `BNgan`
+- `LNgoc`
 
-The app now auto-discovers worksheet tabs from the workbook, cleans hidden whitespace in tab names, and only treats tabs with the deal-sheet headers as member tabs. If discovery fails, it falls back to the sheet IDs above.
+The app auto-discovers worksheet tabs from the workbook, cleans hidden whitespace in tab names, and only treats tabs with the deal-sheet headers as member tabs.
 
 The header row is row `1` on each member tab.
 
@@ -69,19 +93,19 @@ The dashboard should read every member tab, combine the rows, then calculate:
 
 `src/data/sheetConfig.ts`
 
-This holds the spreadsheet ID, fallback member sheet IDs, and column aliases.
+This holds tab-name assumptions and column aliases. Spreadsheet IDs now come from Vercel Environment Variables.
 
 `src/lib/sheet-normalizer.ts`
 
 This converts raw Sheet rows into dashboard data. It is intentionally flexible, so headers like `Deal Value`, `Revenue`, or `Amount` can all map into the same dashboard field.
 
+`src/lib/google-sheets.server.ts`
+
+This creates a short-lived Google access token using the service account and calls the official Google Sheets API. It is server-only.
+
 `src/lib/sheets-public.ts`
 
-This auto-discovers public member tabs, combines the real deal rows, skips cancelled deals, and pulls member summary values from `S2`, `S4`, and `S6`.
-
-## Needed From Anh Quan
-
-If there is a separate creator/database tab, paste that tab name and header row too.
+This auto-discovers member tabs through the server-side API, combines the real deal rows, skips cancelled deals, and pulls member summary values from `S2`, `S4`, and `S6`.
 
 ## Admin Goals
 

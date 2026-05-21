@@ -117,7 +117,11 @@ export function OutreachSummaryCard({
         </div>
         <div className="flex items-center gap-2">
           <div className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-            {outreach.source === "google-sheet" ? "Live sourcing sheet" : "Demo fallback"}
+            {data?.source === "error"
+              ? "Sheets error"
+              : outreach.source === "google-sheet"
+                ? "Live sourcing sheet"
+                : "Demo fallback"}
           </div>
           {action && (
             <Link

@@ -12,7 +12,7 @@ export function GoalProgressCard({
   paidThisMonth?: number;
   pendingOwed?: number;
 }) {
-  const pct = Math.min(100, Math.round((current / target) * 100));
+  const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
   const remaining = Math.max(0, target - current);
   return (
     <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">

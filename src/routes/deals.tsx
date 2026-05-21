@@ -96,6 +96,8 @@ function DealsPage() {
   const sourceLabel =
     data?.source === "google-sheet"
       ? "Live Google Sheet"
+      : data?.source === "error"
+        ? "Google Sheets connection error"
       : data?.source === "fallback"
         ? "Demo fallback data"
         : "Loading Sheet";
@@ -199,14 +201,24 @@ function DealsPage() {
               </div>
             </div>
           </div>
-          <a
-            href="https://docs.google.com/spreadsheets/d/1oetKgRHC6ucAAvr4G99UGgqWJyWrNCZcc8mhcDwMULI/edit?usp=sharing"
-            target="_blank"
-            rel="noreferrer"
-            className="tb-action tb-link-arrow inline-flex items-center gap-1.5 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
-          >
-            Open in Sheets <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+          {data?.links.dealsSheetUrl ? (
+            <a
+              href={data.links.dealsSheetUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="tb-action tb-link-arrow inline-flex items-center gap-1.5 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
+            >
+              Open in Sheets <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="inline-flex items-center gap-1.5 rounded-2xl bg-muted px-4 py-2 text-sm font-semibold text-muted-foreground"
+            >
+              Sheet link unavailable
+            </button>
+          )}
         </div>
 
         <div className="mt-5 space-y-4">

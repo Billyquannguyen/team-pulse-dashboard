@@ -5,7 +5,6 @@ import { ExternalLink, Search, Users } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { OutreachSummaryCard } from "@/components/dashboard/OutreachSummaryCard";
 import { creators, type CreatorRelationship } from "@/data/creators";
-import { CREATOR_SOURCING_SHEET_URL } from "@/data/sheetConfig";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
 
@@ -28,9 +27,13 @@ function CreatorsPage() {
   const [q, setQ] = useState("");
   const [relationship, setRelationship] = useState<CreatorRelationship | "All">("All");
   const { data } = useQuery(dashboardSheetQuery);
-  const liveCreators = data?.creators?.length ? data.creators : creators;
+  const liveCreators = data ? data.creators : creators;
   const sourceLabel =
-    data?.outreach?.source === "google-sheet" ? "Live Signed creators tab" : "Demo fallback data";
+    data?.source === "error"
+      ? "Google Sheets connection error"
+      : data?.outreach?.source === "google-sheet"
+        ? "Live Signed creators tab"
+        : "Demo fallback data";
   const filtered = useMemo(
     () =>
       liveCreators.filter(
@@ -73,14 +76,24 @@ function CreatorsPage() {
               </div>
             </div>
           </div>
-          <a
-            href={CREATOR_SOURCING_SHEET_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="tb-action tb-link-arrow inline-flex items-center gap-1.5 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
-          >
-            Open in Sheets <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+          {data?.links.creatorSourcingSheetUrl ? (
+            <a
+              href={data.links.creatorSourcingSheetUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="tb-action tb-link-arrow inline-flex items-center gap-1.5 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
+            >
+              Open in Sheets <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="inline-flex items-center gap-1.5 rounded-2xl bg-muted px-4 py-2 text-sm font-semibold text-muted-foreground"
+            >
+              Sheet link unavailable
+            </button>
+          )}
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-2">
