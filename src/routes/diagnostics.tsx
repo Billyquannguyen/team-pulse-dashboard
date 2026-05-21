@@ -49,6 +49,99 @@ function MetricBox({
   );
 }
 
+function TabMatchCard({
+  title,
+  diagnostic,
+}: {
+  title: string;
+  diagnostic: NonNullable<GoogleSheetsDiagnostics["dataFlow"]>["tabs"]["deals"];
+}) {
+  if (!diagnostic) return null;
+
+  return (
+    <div className="rounded-2xl border border-border p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold">{title}</h4>
+          <p className="text-xs text-muted-foreground">
+            Available tabs are matched to member names before rows are requested.
+          </p>
+        </div>
+        <StatusPill ok={diagnostic.missingExpectedMembers.length === 0} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <MetricBox label="Available tabs" value={diagnostic.availableTabs.length} />
+        <MetricBox label="Matched members" value={diagnostic.matchedMembers.length} />
+        <MetricBox label="Missing expected" value={diagnostic.missingExpectedMembers.length} />
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            Matched
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {diagnostic.matchedMembers.length > 0 ? (
+              diagnostic.matchedMembers.map((item) => (
+                <span
+                  key={`${item.memberName}-${item.sheetName}`}
+                  className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary"
+                >
+                  {item.memberName} -&gt; {item.sheetName}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground">No member tabs matched.</span>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            Missing
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {diagnostic.missingExpectedMembers.length > 0 ? (
+              diagnostic.missingExpectedMembers.map((memberName) => (
+                <span
+                  key={memberName}
+                  className="rounded-full bg-destructive/10 px-3 py-1 text-xs font-semibold text-destructive"
+                >
+                  {memberName}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground">No expected members missing.</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {diagnostic.skippedTabs.length > 0 && (
+        <div className="mt-4 overflow-hidden rounded-2xl border border-border">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/60 text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-left font-semibold">Skipped tab</th>
+                <th className="px-3 py-2 text-left font-semibold">Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {diagnostic.skippedTabs.slice(0, 20).map((item) => (
+                <tr key={`${item.sheetName}-${item.reason}`} className="border-t border-border/60">
+                  <td className="px-3 py-2 font-medium">{item.sheetName}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{item.reason}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnostics }) {
   return (
     <div className="space-y-6">
@@ -120,6 +213,58 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
                 </p>
               </div>
             )}
+
+            <div className="mt-4 space-y-4">
+              <TabMatchCard title="Deal tab matching" diagnostic={diagnostics.dataFlow.tabs.deals} />
+              <TabMatchCard
+                title="Outreach tab matching"
+                diagnostic={diagnostics.dataFlow.tabs.outreach}
+              />
+
+              {diagnostics.dataFlow.tabs.signedCreators && (
+                <div className="rounded-2xl border border-border p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold">Signed creators tab</h4>
+                      <p className="text-xs text-muted-foreground">
+                        This is used for the Signed & Partnered page.
+                      </p>
+                    </div>
+                    <StatusPill ok={diagnostics.dataFlow.tabs.signedCreators.found} />
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <MetricBox
+                      label="Expected"
+                      value={diagnostics.dataFlow.tabs.signedCreators.expectedName}
+                    />
+                    <MetricBox
+                      label="Found"
+                      value={diagnostics.dataFlow.tabs.signedCreators.found ? "Yes" : "No"}
+                    />
+                    <MetricBox
+                      label="Matched tab"
+                      value={diagnostics.dataFlow.tabs.signedCreators.sheetName ?? "-"}
+                    />
+                  </div>
+                  {diagnostics.dataFlow.tabs.signedCreators.warning && (
+                    <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-xs font-semibold text-destructive">
+                      {diagnostics.dataFlow.tabs.signedCreators.warning}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {diagnostics.dataFlow.tabs.warnings.length > 0 && (
+                <div className="rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
+                  <div className="mb-2 font-bold">Tab warnings</div>
+                  <ul className="space-y-1 text-xs">
+                    {diagnostics.dataFlow.tabs.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </>
         ) : (
           <div className="mt-4 rounded-2xl bg-muted/45 p-4 text-sm font-semibold text-muted-foreground">
