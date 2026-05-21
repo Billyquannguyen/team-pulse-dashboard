@@ -54,7 +54,19 @@ type ValuesResponse = {
   };
 };
 
+type BatchValuesResponse = {
+  valueRanges?: Array<{
+    range?: string;
+    values?: unknown[][];
+  }>;
+  error?: {
+    code?: number;
+    message?: string;
+  };
+};
+
 let cachedToken: { token: string; expiresAt: number } | null = null;
+const GOOGLE_FETCH_MAX_ATTEMPTS = 3;
 
 const GOOGLE_ENV_NAMES = [
   "GOOGLE_SERVICE_ACCOUNT_EMAIL",
@@ -67,6 +79,23 @@ function safeErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+export class GoogleSheetsApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(`Google Sheets API failed (${status}): ${message}`);
+    this.name = "GoogleSheetsApiError";
+    this.status = status;
+  }
+}
+
+export function isGoogleSheetsRateLimitError(error: unknown) {
+  return (
+    error instanceof GoogleSheetsApiError &&
+    error.status === 429
+  ) || (error instanceof Error && /Google Sheets API failed \(429\)|Quota exceeded/i.test(error.message));
+}
+
 function logGoogleSheets(message: string, details?: Record<string, unknown>) {
   console.info("[team-billion:sheets]", message, details ?? {});
 }
@@ -74,7 +103,11 @@ function logGoogleSheets(message: string, details?: Record<string, unknown>) {
 function summarizeUrl(url: URL) {
   const parts = url.pathname.split("/").filter(Boolean);
   const valuesIndex = parts.indexOf("values");
-  const endpoint = valuesIndex >= 0 ? "values" : "metadata";
+  const endpoint = url.pathname.includes("values:batchGet")
+    ? "values:batchGet"
+    : valuesIndex >= 0
+      ? "values"
+      : "metadata";
   const encodedRange = valuesIndex >= 0 ? parts.slice(valuesIndex + 1).join("/") : "";
 
   return {
@@ -82,6 +115,21 @@ function summarizeUrl(url: URL) {
     hasSpreadsheetId: parts.includes("spreadsheets"),
     range: encodedRange ? decodeURIComponent(encodedRange) : undefined,
   };
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryDelayMs(response: Response, attempt: number) {
+  const retryAfter = response.headers.get("retry-after");
+  const retryAfterSeconds = retryAfter ? Number(retryAfter) : NaN;
+
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+    return Math.min(5000, retryAfterSeconds * 1000);
+  }
+
+  return Math.min(5000, 500 * 2 ** attempt);
 }
 
 export function getGoogleEnvPresence(): GoogleEnvPresence[] {
@@ -267,34 +315,46 @@ async function googleSheetsFetch<T>(config: GoogleSheetsConfig, url: URL): Promi
   const summary = summarizeUrl(url);
   logGoogleSheets("google sheets api request", summary);
 
-  const response = await fetch(url.toString(), {
-    cache: "no-store",
-    headers: {
-      authorization: `Bearer ${await getAccessToken(config)}`,
-    },
-  });
-  const body = (await response.json().catch(() => ({}))) as T & ValuesResponse;
+  for (let attempt = 0; attempt < GOOGLE_FETCH_MAX_ATTEMPTS; attempt += 1) {
+    const response = await fetch(url.toString(), {
+      cache: "no-store",
+      headers: {
+        authorization: `Bearer ${await getAccessToken(config)}`,
+      },
+    });
+    const body = (await response.json().catch(() => ({}))) as T & ValuesResponse;
 
-  if (!response.ok) {
+    if (response.ok) {
+      logGoogleSheets("google sheets api request succeeded", {
+        ...summary,
+        status: response.status,
+      });
+
+      return body;
+    }
+
+    const message = body.error?.message ?? response.statusText;
     logGoogleSheets("google sheets api request failed", {
       ...summary,
       status: response.status,
-      error: body.error?.message ?? response.statusText,
+      attempt: attempt + 1,
+      error: message,
     });
 
-    throw new Error(
-      `Google Sheets API failed (${response.status}): ${
-        body.error?.message ?? response.statusText
-      }`,
-    );
+    if (response.status === 429 && attempt < GOOGLE_FETCH_MAX_ATTEMPTS - 1) {
+      const delay = retryDelayMs(response, attempt);
+      logGoogleSheets("google sheets api rate limited; backing off", {
+        ...summary,
+        delayMs: delay,
+      });
+      await sleep(delay);
+      continue;
+    }
+
+    throw new GoogleSheetsApiError(response.status, message);
   }
 
-  logGoogleSheets("google sheets api request succeeded", {
-    ...summary,
-    status: response.status,
-  });
-
-  return body;
+  throw new GoogleSheetsApiError(429, "Quota exceeded after retries");
 }
 
 function quoteSheetName(sheetName: string) {
@@ -360,4 +420,42 @@ export async function fetchSheetRows(
   });
 
   return { headers, rows };
+}
+
+export async function fetchSheetRowsBatch(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  sheets: GoogleSheetRef[],
+): Promise<GoogleSheetRows[]> {
+  if (sheets.length === 0) return [];
+
+  const url = new URL(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet`,
+  );
+
+  for (const sheet of sheets) {
+    if (!sheet.sheetName) {
+      throw new Error(`No sheet name was available for ${sheet.memberName}`);
+    }
+    url.searchParams.append("ranges", `${quoteSheetName(sheet.sheetName)}!A:AZ`);
+  }
+
+  url.searchParams.set("majorDimension", "ROWS");
+  url.searchParams.set("valueRenderOption", "FORMATTED_VALUE");
+  const result = await googleSheetsFetch<BatchValuesResponse>(config, url);
+  const valueRanges = result.valueRanges ?? [];
+
+  return sheets.map((sheet, index) => {
+    const values = valueRanges[index]?.values ?? [];
+    const headers = (values[0] ?? []).map(cellToString);
+    const rows = values.slice(1).map((row) => row.map(cellToString));
+
+    logGoogleSheets("batch sheet rows returned", {
+      sheetName: sheet.sheetName,
+      headerCount: headers.length,
+      rowCount: rows.length,
+    });
+
+    return { headers, rows };
+  });
 }

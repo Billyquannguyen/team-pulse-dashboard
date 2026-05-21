@@ -6,12 +6,15 @@ export function DataSourceBanner() {
   const { data, error, isError } = useQuery(dashboardSheetQuery);
 
   if (!data && !isError) return null;
-  if (data?.source === "google-sheet") return null;
+  if (data?.source === "google-sheet" && !data.warning) return null;
 
   const isConnectionError = isError || data?.source === "error";
+  const isWarning = Boolean(data?.warning) && !isConnectionError;
   const message =
     error instanceof Error
       ? error.message
+      : data?.warning
+        ? data.warning
       : data?.error ??
         "Google Sheets is not configured in local development, so the dashboard is showing mock data.";
 
@@ -33,7 +36,11 @@ export function DataSourceBanner() {
         </div>
         <div>
           <div className="font-bold">
-            {isConnectionError ? "Google Sheets connection needs attention" : "Using local demo data"}
+            {isConnectionError
+              ? "Google Sheets connection needs attention"
+              : isWarning
+                ? "Using cached Google Sheets data"
+                : "Using local demo data"}
           </div>
           <p className="mt-1 text-xs leading-relaxed opacity-85">{message}</p>
         </div>

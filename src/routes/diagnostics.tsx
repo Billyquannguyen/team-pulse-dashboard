@@ -193,6 +193,11 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
                     Query refetch interval:{" "}
                     {diagnostics.dataFlow.cache.queryRefetchIntervalMs}ms
                   </div>
+                  <div>Server cache TTL: {diagnostics.dataFlow.cache.serverCacheTtlMs}ms</div>
+                  <div>Server cache status: {diagnostics.dataFlow.cache.serverCacheStatus}</div>
+                  <div>
+                    Server cache expires: {diagnostics.dataFlow.cache.serverCacheExpiresAt ?? "-"}
+                  </div>
                   <div>Google fetch cache: {diagnostics.dataFlow.cache.googleFetchCache}</div>
                   <div>
                     Static rendering likely:{" "}

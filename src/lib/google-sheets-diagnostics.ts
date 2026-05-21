@@ -39,6 +39,9 @@ export type GoogleSheetsDiagnostics = {
   dataFlow: DashboardDataFlowDiagnostics | null;
 };
 
+const DIAGNOSTICS_CACHE_TTL_MS = 5 * 60 * 1000;
+let diagnosticsCache: { data: GoogleSheetsDiagnostics; expiresAt: number } | null = null;
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -107,41 +110,13 @@ async function checkSpreadsheet(
     const googleSheets = await import("@/lib/google-sheets.server");
     const config = googleSheets.getGoogleSheetsConfig();
     const tabs = await googleSheets.fetchSpreadsheetTabs(config, spreadsheetId);
-    const rowCounts = await Promise.all(
-      tabs.map(async (tab) => {
-        try {
-          const rows = await googleSheets.fetchSheetRows(config, spreadsheetId, tab);
-
-          return {
-            sheetName: tab.sheetName,
-            readable: true,
-            headerCount: rows.headers.length,
-            rowCount: rows.rows.length,
-            error: null,
-          };
-        } catch (error) {
-          const message = errorMessage(error);
-          console.error(`Google Sheets row diagnostic failed for ${name}/${tab.sheetName}:`, error);
-
-          return {
-            sheetName: tab.sheetName,
-            readable: false,
-            headerCount: 0,
-            rowCount: 0,
-            error: message,
-          };
-        }
-      }),
-    );
-    const totalRows = rowCounts.reduce((sum, tab) => sum + tab.rowCount, 0);
 
     logDiagnostics("spreadsheet diagnostic complete", {
       name,
       configured: true,
       readable: true,
       tabCount: tabs.length,
-      totalRows,
-      failedRowTabs: rowCounts.filter((tab) => !tab.readable).map((tab) => tab.sheetName),
+      note: "Row reads are skipped here to avoid Google Sheets quota pressure.",
     });
 
     return {
@@ -151,8 +126,8 @@ async function checkSpreadsheet(
       readable: true,
       tabCount: tabs.length,
       tabs: tabs.map((tab) => tab.sheetName).slice(0, 20),
-      totalRows,
-      rowCounts,
+      totalRows: 0,
+      rowCounts: [],
       error: null,
     };
   } catch (error) {
@@ -191,6 +166,13 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     } satisfies GoogleSheetsDiagnostics;
   }
 
+  if (diagnosticsCache && diagnosticsCache.expiresAt > Date.now()) {
+    logDiagnostics("returning cached diagnostics", {
+      expiresAt: new Date(diagnosticsCache.expiresAt).toISOString(),
+    });
+    return diagnosticsCache.data;
+  }
+
   const sheetsPublic = await import("@/lib/sheets-public");
   const [env, auth, teamSheet, creatorSheet, dataFlow] = await Promise.all([
     getEnvStatus(),
@@ -209,7 +191,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     source: dataFlow.source,
   });
 
-  return {
+  const diagnostics = {
     checkedAt: new Date().toISOString(),
     authorized: true,
     env,
@@ -217,4 +199,11 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     spreadsheets: [teamSheet, creatorSheet],
     dataFlow,
   } satisfies GoogleSheetsDiagnostics;
+
+  diagnosticsCache = {
+    data: diagnostics,
+    expiresAt: Date.now() + DIAGNOSTICS_CACHE_TTL_MS,
+  };
+
+  return diagnostics;
 });

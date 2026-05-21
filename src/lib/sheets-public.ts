@@ -73,6 +73,22 @@ type DashboardReadDebug = {
   warnings: string[];
 };
 
+type DashboardCacheStatus = "hit" | "miss" | "stale" | "refreshing";
+
+type DashboardReadResult = {
+  data: DashboardSheetData;
+  debug: DashboardReadDebug;
+  cacheStatus: DashboardCacheStatus;
+  cacheExpiresAt: string | null;
+};
+
+type DashboardCacheEntry = {
+  data: DashboardSheetData;
+  debug: DashboardReadDebug;
+  cachedAt: number;
+  expiresAt: number;
+};
+
 type SpreadsheetLinks = {
   dealsSheetUrl?: string;
   creatorSourcingSheetUrl?: string;
@@ -96,6 +112,7 @@ export type DashboardSheetData = {
   };
   source: "google-sheet" | "fallback" | "error";
   error?: string;
+  warning?: string;
   links: SpreadsheetLinks;
   updatedAt: string;
 };
@@ -150,6 +167,9 @@ export type DashboardDataFlowDiagnostics = {
   cache: {
     queryStaleTimeMs: number;
     queryRefetchIntervalMs: number;
+    serverCacheTtlMs: number;
+    serverCacheStatus: DashboardCacheStatus;
+    serverCacheExpiresAt: string | null;
     googleFetchCache: "no-store";
     staticRenderingLikely: boolean;
     note: string;
@@ -164,8 +184,11 @@ const SUMMARY_LABELS = {
 
 const DEFAULT_REVENUE_GOAL = 300000;
 const DEFAULT_DEALS_GOAL = 20;
-const QUERY_STALE_TIME_MS = 0;
-const QUERY_REFETCH_INTERVAL_MS = 60_000;
+const SERVER_DATA_CACHE_TTL_MS = 5 * 60 * 1000;
+const QUERY_STALE_TIME_MS = SERVER_DATA_CACHE_TTL_MS;
+const QUERY_REFETCH_INTERVAL_MS = SERVER_DATA_CACHE_TTL_MS;
+let dashboardCache: DashboardCacheEntry | null = null;
+let dashboardRefreshPromise: Promise<DashboardCacheEntry> | null = null;
 const BLOCKED_TAB_NAME_WORDS = [
   "archive",
   "asset",
@@ -189,6 +212,30 @@ function parseMoney(value: string) {
 
 function logDashboardDataFlow(message: string, details?: Record<string, unknown>) {
   console.info("[team-billion:data-flow]", message, details ?? {});
+}
+
+function isRateLimitError(error: unknown) {
+  return error instanceof Error && /Google Sheets API failed \(429\)|Quota exceeded/i.test(error.message);
+}
+
+function cacheExpiresAtLabel(entry: DashboardCacheEntry | null) {
+  return entry ? new Date(entry.expiresAt).toISOString() : null;
+}
+
+function cloneDebug(debug: DashboardReadDebug): DashboardReadDebug {
+  return {
+    dealTabs: debug.dealTabs,
+    outreachTabs: debug.outreachTabs,
+    signedCreatorsTab: debug.signedCreatorsTab,
+    warnings: [...debug.warnings],
+  };
+}
+
+function withDashboardWarning(data: DashboardSheetData, warning: string): DashboardSheetData {
+  return {
+    ...data,
+    warning: data.warning ? `${data.warning} ${warning}` : warning,
+  };
 }
 
 function parsePercent(value: string) {
@@ -460,59 +507,6 @@ async function discoverDealSheetRefs(
   });
 }
 
-async function discoverCreatorSourcingSheetRefs(
-  config: GoogleSheetsConfig,
-  spreadsheetId: string,
-): Promise<SheetDiscoveryResult> {
-  const discovered = await discoverAllSheetRefs(config, spreadsheetId);
-
-  return createSheetDiscoveryResult({
-    spreadsheet: "creator-sourcing",
-    discovered,
-    includeSheet: (sheet, memberName) => {
-      if (isIgnoredOutreachSheet(sheet.sheetName ?? "")) {
-        return "Ignored creator sourcing system tab.";
-      }
-      if (!isOutreachWorksheetName(memberName)) {
-        return "Tab name does not look like a member outreach tab.";
-      }
-      return null;
-    },
-  });
-}
-
-async function discoverSignedCreatorsSheetRef(
-  config: GoogleSheetsConfig,
-  spreadsheetId: string,
-): Promise<SignedCreatorsDiscoveryResult> {
-  const discovered = await discoverAllSheetRefs(config, spreadsheetId);
-  const found = discovered.find((sheet) =>
-    isSignedCreatorsSheet(sheet.sheetName ?? sheet.memberName),
-  );
-  const diagnostics = {
-    availableTabs: discovered.map((sheet) => sheet.sheetName),
-    expectedName: cleanMemberName(SIGNED_CREATORS_TAB_NAME),
-    found: Boolean(found),
-    sheetName: found?.sheetName ?? null,
-    warning: found ? null : "Signed creators tab was not found, so creator roster rows were skipped.",
-  };
-
-  if (!found) {
-    logDashboardDataFlow("signed creators tab missing", diagnostics);
-    return { ref: null, diagnostics };
-  }
-
-  logDashboardDataFlow("signed creators tab matched", diagnostics);
-
-  return {
-    ref: {
-      ...found,
-      memberName: cleanMemberName(SIGNED_CREATORS_TAB_NAME),
-    },
-    diagnostics,
-  };
-}
-
 function getSummaryValue(rows: string[][], labels: string[]) {
   const row = rows.find((item) => {
     const label = item[17]?.toLowerCase().trim() ?? "";
@@ -521,43 +515,47 @@ function getSummaryValue(rows: string[][], labels: string[]) {
   return parseMoney(row?.[18] ?? "");
 }
 
-async function fetchSheetRowsFromApi(
+async function fetchSheetRowsBatchFromApi(
   config: GoogleSheetsConfig,
   spreadsheetId: string,
-  sheet: SheetRef,
+  sheets: SheetRef[],
 ) {
-  const { fetchSheetRows } = await getGoogleSheetsServer();
-  return fetchSheetRows(config, spreadsheetId, sheet);
+  const { fetchSheetRowsBatch } = await getGoogleSheetsServer();
+  return fetchSheetRowsBatch(config, spreadsheetId, sheets);
 }
 
-async function fetchMemberSheetRowsSafely(
+async function fetchMemberSheetsRowsBatchSafely(
   config: GoogleSheetsConfig,
   spreadsheetId: string,
-  sheet: SheetRef,
+  sheets: SheetRef[],
   debug?: DashboardReadDebug,
-): Promise<ReadableMemberSheet | null> {
+): Promise<ReadableMemberSheet[]> {
+  if (sheets.length === 0) return [];
+
   try {
-    return {
+    const rows = await fetchSheetRowsBatchFromApi(config, spreadsheetId, sheets);
+
+    return sheets.map((sheet, index) => ({
       memberName: sheet.memberName,
-      ...(await fetchSheetRowsFromApi(config, spreadsheetId, sheet)),
-    };
+      headers: rows[index]?.headers ?? [],
+      rows: rows[index]?.rows ?? [],
+    }));
   } catch (error) {
+    if (isRateLimitError(error)) throw error;
+
     const message = error instanceof Error ? error.message : String(error);
-    const warning = `Skipped tab "${sheet.sheetName}" for ${sheet.memberName}: ${message}`;
+    const warning = `Skipped ${sheets.length} tabs after batch read failed: ${message}`;
 
     debug?.warnings.push(warning);
-    logDashboardDataFlow("skipping unreadable member tab", {
-      memberName: sheet.memberName,
-      sheetName: sheet.sheetName,
+    logDashboardDataFlow("batch member tab read failed", {
+      spreadsheetIdPresent: Boolean(spreadsheetId),
+      sheetCount: sheets.length,
+      sheets: sheets.map((sheet) => sheet.sheetName),
       reason: message,
     });
 
-    return null;
+    return [];
   }
-}
-
-function compactSheets<T>(sheets: Array<T | null>): T[] {
-  return sheets.filter((sheet): sheet is T => sheet !== null);
 }
 
 function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fallback: Teammate) {
@@ -749,10 +747,40 @@ async function readCreatorSourcingData(
     teamMembers: team.length,
   });
 
-  const [outreachDiscovery, signedCreatorsDiscovery] = await Promise.all([
-    discoverCreatorSourcingSheetRefs(config, creatorSourcingSpreadsheetId),
-    discoverSignedCreatorsSheetRef(config, creatorSourcingSpreadsheetId),
-  ]);
+  const discoveredCreatorTabs = await discoverAllSheetRefs(config, creatorSourcingSpreadsheetId);
+  const outreachDiscovery = createSheetDiscoveryResult({
+    spreadsheet: "creator-sourcing",
+    discovered: discoveredCreatorTabs,
+    includeSheet: (sheet, memberName) => {
+      if (isIgnoredOutreachSheet(sheet.sheetName ?? "")) {
+        return "Ignored creator sourcing system tab.";
+      }
+      if (!isOutreachWorksheetName(memberName)) {
+        return "Tab name does not look like a member outreach tab.";
+      }
+      return null;
+    },
+  });
+  const signedCreatorsFound = discoveredCreatorTabs.find((sheet) =>
+    isSignedCreatorsSheet(sheet.sheetName ?? sheet.memberName),
+  );
+  const signedCreatorsDiscovery: SignedCreatorsDiscoveryResult = {
+    ref: signedCreatorsFound
+      ? {
+          ...signedCreatorsFound,
+          memberName: cleanMemberName(SIGNED_CREATORS_TAB_NAME),
+        }
+      : null,
+    diagnostics: {
+      availableTabs: discoveredCreatorTabs.map((sheet) => sheet.sheetName),
+      expectedName: cleanMemberName(SIGNED_CREATORS_TAB_NAME),
+      found: Boolean(signedCreatorsFound),
+      sheetName: signedCreatorsFound?.sheetName ?? null,
+      warning: signedCreatorsFound
+        ? null
+        : "Signed creators tab was not found, so creator roster rows were skipped.",
+    },
+  };
   const outreachRefs = outreachDiscovery.refs;
   const signedCreatorsRef = signedCreatorsDiscovery.ref;
 
@@ -771,28 +799,33 @@ async function readCreatorSourcingData(
     signedCreatorsSheet: signedCreatorsRef?.sheetName ?? null,
   });
 
-  const [outreachSheets, signedCreatorsRows] = await Promise.all([
-    Promise.all(
-      outreachRefs.map((memberSheet) =>
-        fetchMemberSheetRowsSafely(config, creatorSourcingSpreadsheetId, memberSheet, debug),
-      ),
-    ),
-    signedCreatorsRef
-      ? fetchSheetRowsFromApi(config, creatorSourcingSpreadsheetId, signedCreatorsRef).catch(
-          (error) => {
-            const message = error instanceof Error ? error.message : String(error);
-            const warning = `Skipped signed creators tab "${signedCreatorsRef.sheetName}": ${message}`;
-            debug?.warnings.push(warning);
-            logDashboardDataFlow("skipping unreadable signed creators tab", {
-              sheetName: signedCreatorsRef.sheetName,
-              reason: message,
-            });
-            return { headers: [], rows: [] };
-          },
-        )
-      : Promise.resolve({ headers: [], rows: [] }),
-  ]);
-  const readableOutreachSheets = compactSheets(outreachSheets);
+  const creatorSheetRefs = signedCreatorsRef ? [...outreachRefs, signedCreatorsRef] : outreachRefs;
+  const creatorSheetRows = await fetchSheetRowsBatchFromApi(
+    config,
+    creatorSourcingSpreadsheetId,
+    creatorSheetRefs,
+  ).catch((error) => {
+    if (isRateLimitError(error)) throw error;
+
+    const message = error instanceof Error ? error.message : String(error);
+    const warning = `Skipped creator sourcing rows after batch read failed: ${message}`;
+    debug?.warnings.push(warning);
+    logDashboardDataFlow("creator sourcing batch read failed", {
+      sheetCount: creatorSheetRefs.length,
+      sheets: creatorSheetRefs.map((sheet) => sheet.sheetName),
+      reason: message,
+    });
+    return [];
+  });
+  const readableOutreachSheets = outreachRefs.map((sheet, index) => ({
+    memberName: sheet.memberName,
+    headers: creatorSheetRows[index]?.headers ?? [],
+    rows: creatorSheetRows[index]?.rows ?? [],
+  }));
+  const signedCreatorsRows =
+    signedCreatorsRef && creatorSheetRows[outreachRefs.length]
+      ? creatorSheetRows[outreachRefs.length]
+      : { headers: [], rows: [] };
 
   const outreachRows = readableOutreachSheets.flatMap(({ memberName, headers, rows }) =>
     normalizeMemberOutreachRows(memberName, [headers, ...rows]),
@@ -912,12 +945,12 @@ async function readDashboardSheetData(
     sheetRefCount: sheetRefs.length,
     sheetRefs: sheetRefs.map((sheet) => sheet.sheetName),
   });
-  const readableSheetResults = await Promise.all(
-    sheetRefs.map((memberSheet) =>
-      fetchMemberSheetRowsSafely(config, config.teamSpreadsheetId, memberSheet, debug),
-    ),
+  const readableSheets = await fetchMemberSheetsRowsBatchSafely(
+    config,
+    config.teamSpreadsheetId,
+    sheetRefs,
+    debug,
   );
-  const readableSheets = compactSheets(readableSheetResults);
   logDashboardDataFlow("deal sheet rows returned", {
     sheets: readableSheets.map((sheet) => ({
       memberName: sheet.memberName,
@@ -979,21 +1012,125 @@ async function readDashboardSheetData(
   };
 }
 
+async function refreshDashboardCache(config: GoogleSheetsConfig): Promise<DashboardCacheEntry> {
+  const debug: DashboardReadDebug = { warnings: [] };
+  const data = await readDashboardSheetData(config, debug);
+  const entry = {
+    data,
+    debug,
+    cachedAt: Date.now(),
+    expiresAt: Date.now() + SERVER_DATA_CACHE_TTL_MS,
+  };
+
+  dashboardCache = entry;
+  logDashboardDataFlow("dashboard server cache refreshed", {
+    expiresAt: new Date(entry.expiresAt).toISOString(),
+    deals: data.deals.length,
+    creators: data.creators.length,
+  });
+
+  return entry;
+}
+
+async function getDashboardDataWithServerCache(
+  config: GoogleSheetsConfig,
+  options: { allowStaleCache?: boolean } = {},
+): Promise<DashboardReadResult> {
+  const currentCache = dashboardCache;
+
+  if (currentCache && currentCache.expiresAt > Date.now()) {
+    logDashboardDataFlow("dashboard server cache hit", {
+      expiresAt: cacheExpiresAtLabel(currentCache),
+    });
+
+    return {
+      data: currentCache.data,
+      debug: cloneDebug(currentCache.debug),
+      cacheStatus: "hit",
+      cacheExpiresAt: cacheExpiresAtLabel(currentCache),
+    };
+  }
+
+  if (options.allowStaleCache && currentCache) {
+    logDashboardDataFlow("dashboard stale cache reused for diagnostics", {
+      expiredAt: cacheExpiresAtLabel(currentCache),
+    });
+
+    return {
+      data: withDashboardWarning(
+        currentCache.data,
+        "Showing cached Google Sheets data to avoid extra diagnostic reads.",
+      ),
+      debug: cloneDebug(currentCache.debug),
+      cacheStatus: "stale",
+      cacheExpiresAt: cacheExpiresAtLabel(currentCache),
+    };
+  }
+
+  try {
+    if (!dashboardRefreshPromise) {
+      logDashboardDataFlow("dashboard server cache miss; refreshing");
+      dashboardRefreshPromise = refreshDashboardCache(config).finally(() => {
+        dashboardRefreshPromise = null;
+      });
+    } else {
+      logDashboardDataFlow("dashboard server cache refresh already in flight");
+    }
+
+    const entry = await dashboardRefreshPromise;
+
+    return {
+      data: entry.data,
+      debug: cloneDebug(entry.debug),
+      cacheStatus: "miss",
+      cacheExpiresAt: cacheExpiresAtLabel(entry),
+    };
+  } catch (error) {
+    if (isRateLimitError(error) && dashboardCache) {
+      const warning =
+        "Google Sheets rate limit was hit, so this dashboard is showing the last cached data.";
+
+      logDashboardDataFlow("google sheets rate limited; serving cached dashboard data", {
+        expiredAt: cacheExpiresAtLabel(dashboardCache),
+        reason: error instanceof Error ? error.message : String(error),
+      });
+
+      return {
+        data: withDashboardWarning(dashboardCache.data, warning),
+        debug: cloneDebug(dashboardCache.debug),
+        cacheStatus: "stale",
+        cacheExpiresAt: cacheExpiresAtLabel(dashboardCache),
+      };
+    }
+
+    throw error;
+  }
+}
+
 export async function getDashboardDataFlowDiagnostics(): Promise<DashboardDataFlowDiagnostics> {
   const googleSheets = await getGoogleSheetsServer();
   const productionRuntime = googleSheets.isProductionRuntime();
-  const debug: DashboardReadDebug = { warnings: [] };
-  const cache = {
+  const makeCacheDiagnostics = (
+    cacheStatus: DashboardCacheStatus,
+    cacheExpiresAt: string | null,
+  ) => ({
     queryStaleTimeMs: QUERY_STALE_TIME_MS,
     queryRefetchIntervalMs: QUERY_REFETCH_INTERVAL_MS,
+    serverCacheTtlMs: SERVER_DATA_CACHE_TTL_MS,
+    serverCacheStatus: cacheStatus,
+    serverCacheExpiresAt: cacheExpiresAt,
     googleFetchCache: "no-store" as const,
     staticRenderingLikely: false,
     note:
-      "Dashboard data is loaded by a TanStack server function after login. Google API fetches use no-store, and the query refetches on mount, so Vercel static caching should not serve old mock rows.",
-  };
+      "Dashboard data is loaded by a TanStack server function after login. The parsed Google Sheets result is cached server-side for 5 minutes, Google API fetches use no-store, and the client query also stays fresh for 5 minutes.",
+  });
 
   try {
-    const data = await readDashboardSheetData(googleSheets.getGoogleSheetsConfig(), debug);
+    const result = await getDashboardDataWithServerCache(googleSheets.getGoogleSheetsConfig(), {
+      allowStaleCache: true,
+    });
+    const data = result.data;
+    const debug = result.debug;
 
     return {
       checkedAt: new Date().toISOString(),
@@ -1018,10 +1155,11 @@ export async function getDashboardDataFlowDiagnostics(): Promise<DashboardDataFl
         signedCreators: debug.signedCreatorsTab ?? null,
         warnings: debug.warnings,
       },
-      cache,
+      cache: makeCacheDiagnostics(result.cacheStatus, result.cacheExpiresAt),
     };
   } catch (error) {
     const message = getGoogleSheetsErrorMessage(error);
+    const debug: DashboardReadDebug = { warnings: [] };
 
     return {
       checkedAt: new Date().toISOString(),
@@ -1046,7 +1184,7 @@ export async function getDashboardDataFlowDiagnostics(): Promise<DashboardDataFl
         signedCreators: debug.signedCreatorsTab ?? null,
         warnings: debug.warnings,
       },
-      cache,
+      cache: makeCacheDiagnostics(dashboardCache ? "stale" : "miss", cacheExpiresAtLabel(dashboardCache)),
     };
   }
 }
@@ -1064,7 +1202,8 @@ export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler
     });
 
     try {
-      return await readDashboardSheetData(googleSheets.getGoogleSheetsConfig());
+      const result = await getDashboardDataWithServerCache(googleSheets.getGoogleSheetsConfig());
+      return result.data;
     } catch (error) {
       const message = getGoogleSheetsErrorMessage(error);
       console.error("Google Sheets dashboard access failed:", error);
@@ -1090,7 +1229,7 @@ export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler
 );
 
 export const dashboardSheetQuery = {
-  queryKey: ["team-billion-dashboard-sheet", "creator-sourcing-v2"],
+  queryKey: ["team-billion-dashboard-sheet", "creator-sourcing-v3"],
   queryFn: () => fetchDashboardSheetData(),
   refetchInterval: QUERY_REFETCH_INTERVAL_MS,
   staleTime: QUERY_STALE_TIME_MS,
