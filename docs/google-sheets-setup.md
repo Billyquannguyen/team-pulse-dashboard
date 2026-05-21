@@ -10,6 +10,9 @@ Team Billion deal sheet:
 
 Creator sourcing sheet:
 1cE0PlyvZH5-kqyGOBuM6eaWO_kWIhtfJ_jEIOuaPPv4
+
+Team Assets sheet:
+Use the spreadsheet ID you add as `TEAM_ASSETS_SPREADSHEET_ID`.
 ```
 
 These IDs belong in Vercel Environment Variables, not frontend code.
@@ -19,7 +22,7 @@ These IDs belong in Vercel Environment Variables, not frontend code.
 1. Create a Google Cloud service account.
 2. Enable the Google Sheets API for that Google Cloud project.
 3. Copy the service account email.
-4. Share both Google Sheets with that service account email as Viewer.
+4. Share each Google Sheet used by the dashboard with that service account email as Viewer.
 5. Create a JSON key for the service account.
 6. Store the email, private key, and sheet IDs in Vercel Environment Variables.
 7. Let the app server read the Sheets and send cleaned dashboard data to the frontend.
@@ -33,11 +36,33 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n
 TEAM_BILLION_SPREADSHEET_ID=1oetKgRHC6ucAAvr4G99UGgqWJyWrNCZcc8mhcDwMULI
 CREATOR_SOURCING_SPREADSHEET_ID=1cE0PlyvZH5-kqyGOBuM6eaWO_kWIhtfJ_jEIOuaPPv4
+TEAM_ASSETS_SPREADSHEET_ID=your-team-assets-spreadsheet-id
 ```
 
 Keep `GOOGLE_PRIVATE_KEY` server-side only. Do not put it in `VITE_*` env vars, markdown knowledge files, Billy GPT files, Notion exports, or vector stores.
 
 If Google Sheets access fails on Vercel, the dashboard shows a clear connection error instead of silently showing mock data. Local development can still fall back to demo data when these env vars are missing.
+
+## Team Assets Workbook
+
+The Team Assets page reads a worksheet tab named:
+
+- `Team Assets`
+
+Expected columns:
+
+- `title`
+- `subtitle`
+- `url`
+- `icon`
+- `color`
+- `category`
+- `enabled`
+- `sort_order`
+
+Required columns are `title` and `url`. Empty `enabled` cells count as enabled. Use `false`, `no`, `off`, `hidden`, `inactive`, or `disabled` to hide a row.
+
+The app maps `icon` and `color` through a safe internal list, so raw Tailwind classes or custom SVGs from the Sheet are not trusted by the browser.
 
 ## Current Workbook Assumption
 

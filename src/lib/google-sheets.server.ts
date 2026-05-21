@@ -73,6 +73,7 @@ const GOOGLE_ENV_NAMES = [
   "GOOGLE_PRIVATE_KEY",
   "TEAM_BILLION_SPREADSHEET_ID",
   "CREATOR_SOURCING_SPREADSHEET_ID",
+  "TEAM_ASSETS_SPREADSHEET_ID",
 ] as const;
 
 function safeErrorMessage(error: unknown) {
@@ -91,9 +92,10 @@ export class GoogleSheetsApiError extends Error {
 
 export function isGoogleSheetsRateLimitError(error: unknown) {
   return (
-    error instanceof GoogleSheetsApiError &&
-    error.status === 429
-  ) || (error instanceof Error && /Google Sheets API failed \(429\)|Quota exceeded/i.test(error.message));
+    (error instanceof GoogleSheetsApiError && error.status === 429) ||
+    (error instanceof Error &&
+      /Google Sheets API failed \(429\)|Quota exceeded/i.test(error.message))
+  );
 }
 
 function logGoogleSheets(message: string, details?: Record<string, unknown>) {
@@ -146,10 +148,7 @@ function requiredEnv(name: string) {
 }
 
 function normalizePrivateKey(value: string) {
-  return value
-    .replace(/^"|"$/g, "")
-    .replace(/\\n/g, "\n")
-    .trim();
+  return value.replace(/^"|"$/g, "").replace(/\\n/g, "\n").trim();
 }
 
 export function isProductionRuntime() {
@@ -179,6 +178,9 @@ export function getOptionalSheetLinks() {
     creatorSourcingSheetUrl: process.env.CREATOR_SOURCING_SPREADSHEET_ID
       ? makeSheetUrl(process.env.CREATOR_SOURCING_SPREADSHEET_ID)
       : undefined,
+    teamAssetsSheetUrl: process.env.TEAM_ASSETS_SPREADSHEET_ID
+      ? makeSheetUrl(process.env.TEAM_ASSETS_SPREADSHEET_ID)
+      : undefined,
   };
 }
 
@@ -188,11 +190,7 @@ export function makeSheetUrl(spreadsheetId: string) {
 
 function base64Url(input: string | Uint8Array) {
   const buffer = typeof input === "string" ? Buffer.from(input) : Buffer.from(input);
-  return buffer
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+  return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function pemToArrayBuffer(pem: string) {

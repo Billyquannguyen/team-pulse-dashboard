@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireAdminAuth } from "@/lib/auth";
 import type { DashboardDataFlowDiagnostics } from "@/lib/sheets-public";
+import type { TeamAssetsDataFlowDiagnostics } from "@/lib/team-assets";
 
 type EnvDiagnostic = {
   name: string;
@@ -37,6 +38,7 @@ export type GoogleSheetsDiagnostics = {
   };
   spreadsheets: SpreadsheetDiagnostic[];
   dataFlow: DashboardDataFlowDiagnostics | null;
+  teamAssets: TeamAssetsDataFlowDiagnostics | null;
 };
 
 const DIAGNOSTICS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -163,6 +165,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       },
       spreadsheets: [],
       dataFlow: null,
+      teamAssets: null,
     } satisfies GoogleSheetsDiagnostics;
   }
 
@@ -174,12 +177,14 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
   }
 
   const sheetsPublic = await import("@/lib/sheets-public");
-  const [env, auth, teamSheet, creatorSheet, dataFlow] = await Promise.all([
+  const teamAssets = await import("@/lib/team-assets");
+  const [env, auth, teamSheet, creatorSheet, dataFlow, teamAssetsFlow] = await Promise.all([
     getEnvStatus(),
     checkAuthStatus(),
     checkSpreadsheet("Team Billion deal sheet", "TEAM_BILLION_SPREADSHEET_ID"),
     checkSpreadsheet("Creator sourcing sheet", "CREATOR_SOURCING_SPREADSHEET_ID"),
     sheetsPublic.getDashboardDataFlowDiagnostics(),
+    teamAssets.getTeamAssetsDataFlowDiagnostics(),
   ]);
 
   logDiagnostics("full diagnostics complete", {
@@ -189,6 +194,8 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     creatorSheetReadable: creatorSheet.readable,
     fallbackActive: dataFlow.fallbackActive,
     source: dataFlow.source,
+    teamAssetsSource: teamAssetsFlow.source,
+    teamAssetsConfigured: teamAssetsFlow.spreadsheet.configured,
   });
 
   const diagnostics = {
@@ -198,6 +205,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     auth,
     spreadsheets: [teamSheet, creatorSheet],
     dataFlow,
+    teamAssets: teamAssetsFlow,
   } satisfies GoogleSheetsDiagnostics;
 
   diagnosticsCache = {

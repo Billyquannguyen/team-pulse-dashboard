@@ -34,13 +34,7 @@ function StatusPill({ ok }: { ok: boolean }) {
   );
 }
 
-function MetricBox({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
+function MetricBox({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-2xl bg-muted/45 p-4">
       <div className="text-xs font-semibold text-muted-foreground">{label}</div>
@@ -142,6 +136,93 @@ function TabMatchCard({
   );
 }
 
+function TeamAssetsDiagnosticsCard({
+  diagnostics,
+}: {
+  diagnostics: GoogleSheetsDiagnostics["teamAssets"];
+}) {
+  if (!diagnostics) return null;
+
+  return (
+    <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Team Assets data flow</h3>
+          <p className="text-xs text-muted-foreground">
+            This checks the Google Sheet used by the Team Assets page.
+          </p>
+        </div>
+        <StatusPill ok={diagnostics.source === "google-sheet"} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <MetricBox label="Source" value={diagnostics.source} />
+        <MetricBox label="Configured" value={diagnostics.spreadsheet.configured ? "Yes" : "No"} />
+        <MetricBox label="Tab found" value={diagnostics.tab.found ? "Yes" : "No"} />
+        <MetricBox label="Rows" value={diagnostics.counts.rows} />
+        <MetricBox label="Enabled rows" value={diagnostics.counts.enabledRows} />
+        <MetricBox label="Active links" value={diagnostics.counts.assets} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+          <div className="font-semibold">Sheet</div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>Env var: {diagnostics.spreadsheet.envVar}</div>
+            <div>Expected tab: {diagnostics.tab.expectedName}</div>
+            <div>Matched tab: {diagnostics.tab.sheetName ?? "-"}</div>
+          </div>
+        </div>
+        <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+          <div className="font-semibold">Caching check</div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>Query stale time: {diagnostics.cache.queryStaleTimeMs}ms</div>
+            <div>Query refetch interval: {diagnostics.cache.queryRefetchIntervalMs}ms</div>
+            <div>Server cache TTL: {diagnostics.cache.serverCacheTtlMs}ms</div>
+            <div>Server cache status: {diagnostics.cache.serverCacheStatus}</div>
+            <div>Server cache expires: {diagnostics.cache.serverCacheExpiresAt ?? "-"}</div>
+            <div>Google fetch cache: {diagnostics.cache.googleFetchCache}</div>
+          </div>
+        </div>
+      </div>
+
+      {diagnostics.tab.availableTabs.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {diagnostics.tab.availableTabs.slice(0, 20).map((tab) => (
+            <span
+              key={tab}
+              className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary"
+            >
+              {tab}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {diagnostics.fallbackReason && (
+        <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <div className="mb-1 flex items-center gap-2 font-bold">
+            <AlertTriangle className="h-4 w-4" />
+            Team Assets error reason
+          </div>
+          <p className="break-words text-xs leading-relaxed">{diagnostics.fallbackReason}</p>
+        </div>
+      )}
+
+      {diagnostics.warnings.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
+          <div className="mb-2 font-bold">Team Assets warnings</div>
+          <ul className="space-y-1 text-xs">
+            {diagnostics.warnings.slice(0, 20).map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnostics }) {
   return (
     <div className="space-y-6">
@@ -190,8 +271,7 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
                 <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                   <div>Query stale time: {diagnostics.dataFlow.cache.queryStaleTimeMs}ms</div>
                   <div>
-                    Query refetch interval:{" "}
-                    {diagnostics.dataFlow.cache.queryRefetchIntervalMs}ms
+                    Query refetch interval: {diagnostics.dataFlow.cache.queryRefetchIntervalMs}ms
                   </div>
                   <div>Server cache TTL: {diagnostics.dataFlow.cache.serverCacheTtlMs}ms</div>
                   <div>Server cache status: {diagnostics.dataFlow.cache.serverCacheStatus}</div>
@@ -220,7 +300,10 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
             )}
 
             <div className="mt-4 space-y-4">
-              <TabMatchCard title="Deal tab matching" diagnostic={diagnostics.dataFlow.tabs.deals} />
+              <TabMatchCard
+                title="Deal tab matching"
+                diagnostic={diagnostics.dataFlow.tabs.deals}
+              />
               <TabMatchCard
                 title="Outreach tab matching"
                 diagnostic={diagnostics.dataFlow.tabs.outreach}
@@ -278,6 +361,8 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
         )}
       </div>
 
+      <TeamAssetsDiagnosticsCard diagnostics={diagnostics.teamAssets} />
+
       <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -332,7 +417,10 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
 
       <div className="grid gap-4 lg:grid-cols-2">
         {diagnostics.spreadsheets.map((sheet) => (
-          <div key={sheet.envVar} className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+          <div
+            key={sheet.envVar}
+            className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border"
+          >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-base font-semibold">{sheet.name}</h3>
@@ -391,7 +479,7 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
                         <td className="px-3 py-2 text-right">{tab.headerCount}</td>
                         <td className="px-3 py-2 text-right">{tab.rowCount}</td>
                         <td className="px-3 py-2 text-right">
-                          {tab.readable ? "OK" : tab.error ?? "Error"}
+                          {tab.readable ? "OK" : (tab.error ?? "Error")}
                         </td>
                       </tr>
                     ))}
@@ -423,10 +511,7 @@ function DiagnosticsPage() {
   if (!auth.isAdmin) {
     return (
       <div className="space-y-6">
-        <AppHeader
-          title="Diagnostics"
-          subtitle="Google Sheets connection checks are admin-only."
-        />
+        <AppHeader title="Diagnostics" subtitle="Google Sheets connection checks are admin-only." />
         <div className="rounded-3xl border border-destructive/30 bg-destructive/10 p-6 text-sm font-semibold text-destructive">
           Log in with the admin password to view diagnostics.
         </div>

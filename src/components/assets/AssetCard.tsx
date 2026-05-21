@@ -1,8 +1,34 @@
-import { ExternalLink } from "lucide-react";
-import type { AssetLink } from "@/data/assets";
+import {
+  BookOpen,
+  CalendarDays,
+  Database,
+  ExternalLink,
+  FileSpreadsheet,
+  FileText,
+  FolderOpen,
+  Hash,
+  LinkIcon,
+  MessageCircle,
+  type LucideIcon,
+} from "lucide-react";
+import type { AssetIconName, AssetLink } from "@/data/assets";
+
+const assetIcons: Record<AssetIconName, LucideIcon> = {
+  book: BookOpen,
+  calendar: CalendarDays,
+  database: Database,
+  discord: MessageCircle,
+  document: FileText,
+  drive: FolderOpen,
+  folder: FolderOpen,
+  link: LinkIcon,
+  notion: BookOpen,
+  slack: Hash,
+  spreadsheet: FileSpreadsheet,
+};
 
 export function AssetCard({ asset }: { asset: AssetLink }) {
-  const Icon = asset.icon;
+  const Icon = assetIcons[asset.icon] ?? LinkIcon;
   return (
     <a
       href={asset.url}
