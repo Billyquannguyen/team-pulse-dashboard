@@ -1,15 +1,18 @@
 import { Link } from "@tanstack/react-router";
-import { recentDeals, type DealStatus } from "@/data/deals";
+import { recentDeals, type Deal, type DealStatus } from "@/data/deals";
 import { cn } from "@/lib/utils";
 
 const statusStyles: Record<DealStatus, string> = {
-  Won: "bg-fun-lime text-emerald-900",
+  Posted: "bg-fun-lime text-emerald-900",
   Pending: "bg-fun-yellow text-amber-900",
-  Invoiced: "bg-fun-blue text-sky-900",
   Paid: "bg-fun-purple text-purple-900",
+  Overdue: "bg-fun-pink text-rose-900",
+  Cancelled: "bg-muted text-muted-foreground line-through",
 };
 
-export function RecentDealsCard() {
+export function RecentDealsCard({ deals = recentDeals }: { deals?: Deal[] }) {
+  const rows = deals.slice(0, 8);
+
   return (
     <div className="rounded-3xl bg-card p-6 ring-1 ring-border">
       <div className="flex items-center justify-between">
@@ -22,26 +25,33 @@ export function RecentDealsCard() {
         <table className="w-full text-sm">
           <thead className="text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
-              <th className="px-3 py-2 text-left font-medium">Date</th>
-              <th className="px-3 py-2 text-left font-medium">Closer</th>
+              <th className="px-3 py-2 text-left font-medium">No.</th>
+              <th className="px-3 py-2 text-left font-medium">Member</th>
               <th className="px-3 py-2 text-left font-medium">Brand</th>
               <th className="px-3 py-2 text-left font-medium">Creator</th>
-              <th className="px-3 py-2 text-right font-medium">Value</th>
-              <th className="px-3 py-2 text-right font-medium">Comm.</th>
+              <th className="px-3 py-2 text-right font-medium">Manager total</th>
+              <th className="px-3 py-2 text-right font-medium">Paid month?</th>
               <th className="px-3 py-2 text-left font-medium">Status</th>
             </tr>
           </thead>
           <tbody>
-            {recentDeals.map((d) => (
+            {rows.map((d) => (
               <tr key={d.id} className="border-t border-border/60">
-                <td className="px-3 py-3 text-muted-foreground">{d.date.slice(5)}</td>
-                <td className="px-3 py-3 font-medium">{d.closer}</td>
+                <td className="px-3 py-3 text-muted-foreground">#{d.rowNumber}</td>
+                <td className="px-3 py-3 font-medium">{d.manager}</td>
                 <td className="px-3 py-3">{d.brand}</td>
                 <td className="px-3 py-3 text-muted-foreground">{d.creator}</td>
-                <td className="px-3 py-3 text-right">${d.grossValue.toLocaleString()}</td>
-                <td className="px-3 py-3 text-right font-semibold">${d.commission.toLocaleString()}</td>
+                <td className="px-3 py-3 text-right">£{d.managerTotalGbp.toLocaleString()}</td>
+                <td className="px-3 py-3 text-right font-semibold">
+                  {d.managerPaidCurrentMonth ? "Yes" : "No"}
+                </td>
                 <td className="px-3 py-3">
-                  <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", statusStyles[d.status])}>
+                  <span
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-xs font-medium",
+                      statusStyles[d.status],
+                    )}
+                  >
                     {d.status}
                   </span>
                 </td>

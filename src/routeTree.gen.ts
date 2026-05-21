@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LeaderboardRouteImport } from './routes/leaderboard'
 import { Route as GoalsRouteImport } from './routes/goals'
 import { Route as DealsRouteImport } from './routes/deals'
+import { Route as CreatorsRouteImport } from './routes/creators'
 import { Route as AssetsRouteImport } from './routes/assets'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -30,6 +31,11 @@ const DealsRoute = DealsRouteImport.update({
   path: '/deals',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CreatorsRoute = CreatorsRouteImport.update({
+  id: '/creators',
+  path: '/creators',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AssetsRoute = AssetsRouteImport.update({
   id: '/assets',
   path: '/assets',
@@ -44,6 +50,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/assets': typeof AssetsRoute
+  '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/assets': typeof AssetsRoute
+  '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
@@ -59,21 +67,36 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/assets': typeof AssetsRoute
+  '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/assets' | '/deals' | '/goals' | '/leaderboard'
+  fullPaths:
+    | '/'
+    | '/assets'
+    | '/creators'
+    | '/deals'
+    | '/goals'
+    | '/leaderboard'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/assets' | '/deals' | '/goals' | '/leaderboard'
-  id: '__root__' | '/' | '/assets' | '/deals' | '/goals' | '/leaderboard'
+  to: '/' | '/assets' | '/creators' | '/deals' | '/goals' | '/leaderboard'
+  id:
+    | '__root__'
+    | '/'
+    | '/assets'
+    | '/creators'
+    | '/deals'
+    | '/goals'
+    | '/leaderboard'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AssetsRoute: typeof AssetsRoute
+  CreatorsRoute: typeof CreatorsRoute
   DealsRoute: typeof DealsRoute
   GoalsRoute: typeof GoalsRoute
   LeaderboardRoute: typeof LeaderboardRoute
@@ -102,6 +125,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DealsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/creators': {
+      id: '/creators'
+      path: '/creators'
+      fullPath: '/creators'
+      preLoaderRoute: typeof CreatorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/assets': {
       id: '/assets'
       path: '/assets'
@@ -122,6 +152,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AssetsRoute: AssetsRoute,
+  CreatorsRoute: CreatorsRoute,
   DealsRoute: DealsRoute,
   GoalsRoute: GoalsRoute,
   LeaderboardRoute: LeaderboardRoute,

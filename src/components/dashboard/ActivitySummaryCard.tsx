@@ -1,50 +1,114 @@
-import { weeklyActivity, activityTotals } from "@/data/activity";
-import { Mail, MessageSquare, PhoneCall, FileSignature } from "lucide-react";
+import {
+  team as fallbackTeam,
+  totalCommission,
+  totalDealsClosed,
+  totalMonthCommission,
+  totalPendingOwed,
+} from "@/data/team";
+import type { DashboardSheetData } from "@/lib/sheets-public";
+import { Briefcase, CalendarDays, CircleDollarSign, WalletCards } from "lucide-react";
 
-const max = Math.max(...weeklyActivity.map((d) => d.outreach));
-
-export function ActivitySummaryCard() {
+export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
+  const team = data?.team ?? fallbackTeam;
+  const totals = data?.totals ?? {
+    totalPaid: totalCommission,
+    paidThisMonth: totalMonthCommission,
+    pendingOwed: totalPendingOwed,
+    dealsClosed: totalDealsClosed,
+  };
   const stats = [
-    { label: "Outreach", value: activityTotals.outreach, icon: Mail, tone: "var(--fun-lime)" },
-    { label: "Replies", value: activityTotals.replies, icon: MessageSquare, tone: "var(--fun-yellow)" },
-    { label: "Calls", value: activityTotals.calls, icon: PhoneCall, tone: "var(--fun-pink)" },
-    { label: "Contracts", value: activityTotals.contracts, icon: FileSignature, tone: "var(--fun-purple)" },
+    {
+      label: "Total paid",
+      value: `£${totals.totalPaid.toLocaleString()}`,
+      icon: CircleDollarSign,
+      tone: "var(--fun-lime)",
+    },
+    {
+      label: "Paid this month",
+      value: `£${totals.paidThisMonth.toLocaleString()}`,
+      icon: CalendarDays,
+      tone: "var(--fun-yellow)",
+    },
+    {
+      label: "Pending owed",
+      value: `£${totals.pendingOwed.toLocaleString()}`,
+      icon: WalletCards,
+      tone: "var(--fun-pink)",
+    },
+    {
+      label: "Deals closed",
+      value: totals.dealsClosed.toLocaleString(),
+      icon: Briefcase,
+      tone: "var(--fun-purple)",
+    },
   ];
+
   return (
     <div className="rounded-3xl bg-card p-6 ring-1 ring-border">
-      <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold">Weekly activity</h3>
-        <span className="text-xs text-muted-foreground">Last 7 days</span>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Member payout summary</h3>
+          <p className="text-xs text-muted-foreground">
+            Team totals are calculated from each member sheet.
+          </p>
+        </div>
+        <div className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+          Member totals
+        </div>
       </div>
+
       <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
-        {stats.map((s) => {
-          const Icon = s.icon;
+        {stats.map((stat) => {
+          const Icon = stat.icon;
           return (
-            <div key={s.label} className="rounded-2xl p-3" style={{ background: s.tone }}>
+            <div key={stat.label} className="rounded-2xl p-3" style={{ background: stat.tone }}>
               <div className="flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/60">
                   <Icon className="h-4 w-4" />
                 </div>
-                <div className="text-xs font-medium opacity-80">{s.label}</div>
+                <div className="text-xs font-medium opacity-80">{stat.label}</div>
               </div>
-              <div className="mt-2 text-xl font-bold">{s.value}</div>
+              <div className="mt-2 text-xl font-bold">{stat.value}</div>
             </div>
           );
         })}
       </div>
-      <div className="mt-6 flex h-40 items-end gap-3">
-        {weeklyActivity.map((d) => (
-          <div key={d.day} className="flex flex-1 flex-col items-center gap-2">
-            <div className="flex h-full w-full items-end">
-              <div
-                className="w-full rounded-t-2xl bg-gradient-to-t from-primary to-fun-orange transition-all"
-                style={{ height: `${(d.outreach / max) * 100}%` }}
-                title={`${d.outreach} outreach`}
-              />
-            </div>
-            <span className="text-xs text-muted-foreground">{d.day}</span>
-          </div>
-        ))}
+
+      <div className="mt-5 overflow-x-auto rounded-2xl border border-border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2.5 text-left font-medium">Member</th>
+              <th className="px-3 py-2.5 text-right font-medium">Total paid</th>
+              <th className="px-3 py-2.5 text-right font-medium">Paid this month</th>
+              <th className="px-3 py-2.5 text-right font-medium">Pending owed</th>
+              <th className="px-3 py-2.5 text-right font-medium">Deals</th>
+            </tr>
+          </thead>
+          <tbody>
+            {team.map((member) => (
+              <tr key={member.id} className="border-t border-border/60 hover:bg-muted/40">
+                <td className="px-3 py-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-fun-blue text-xs font-semibold">
+                      {member.initials}
+                    </div>
+                    <div>
+                      <div className="font-medium">{member.name}</div>
+                      <div className="text-xs text-muted-foreground">{member.role}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-3 py-3 text-right font-semibold">
+                  £{member.commission.toLocaleString()}
+                </td>
+                <td className="px-3 py-3 text-right">£{member.monthCommission.toLocaleString()}</td>
+                <td className="px-3 py-3 text-right">£{member.pendingOwed.toLocaleString()}</td>
+                <td className="px-3 py-3 text-right">{member.dealsClosed.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
