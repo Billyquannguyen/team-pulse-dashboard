@@ -12,6 +12,8 @@ Add these in Vercel Project Settings:
 NOTION_API_TOKEN=secret_from_your_notion_internal_integration
 NOTION_HANDBOOK_ROOT_PAGE_ID=your_handbook_root_page_id
 BRAVE_SEARCH_API_KEY=optional_for_stronger_live_web_search
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_CONTRACT_REVIEW_MODEL=gpt-5.4-mini
 ```
 
 Do not put either value in frontend code, markdown knowledge files, Google Sheets, or browser storage.
@@ -51,6 +53,21 @@ Source priority:
 If Billy GPT cannot find an internal answer in the handbook, it says that clearly instead of pretending the answer is internal.
 
 For web search, the app uses `BRAVE_SEARCH_API_KEY` when present. If that key is missing, it falls back to a limited public web lookup. Add Brave later if you want stronger trend and news-style answers.
+
+## Contract PDF Review
+
+Billy GPT can review influencer or brand contract PDFs from the chat panel.
+
+Flow:
+
+1. A logged-in team member uploads a PDF in Billy GPT.
+2. The server extracts readable text from the PDF in memory.
+3. The server retrieves relevant Notion handbook context first.
+4. The server adds Active Brands sheet context and optional web context where useful.
+5. The server sends only extracted contract text and source-labeled context to OpenAI.
+6. Billy GPT returns summary, risky clauses, suggested edits/redlines, brand questions, and negotiation notes.
+
+The app does not permanently store uploaded PDFs. Scanned/image-only PDFs may not extract enough text; use a text-based PDF for best results.
 
 ## Current Storage Note
 

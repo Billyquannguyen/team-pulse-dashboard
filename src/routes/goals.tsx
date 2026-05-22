@@ -643,28 +643,15 @@ function AdminGoalControls({
       </div>
 
       {editDialogOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/30 p-3 backdrop-blur-sm sm:p-5">
-          <div className="flex max-h-[85vh] w-full max-w-[760px] flex-col overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border">
-            <div className="shrink-0 border-b border-border bg-card p-4 sm:p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h4 className="text-lg font-semibold">Edit goals</h4>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {isAdmin
-                      ? "Change the targets below. Values save in this browser."
-                      : "Enter the admin password to unlock goal editing."}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={closeEditDialog}
-                  className="tb-action rounded-full p-2 hover:bg-accent"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
+        <GoalModal
+          title="Edit goals"
+          description={
+            isAdmin
+              ? "Change the targets below. Values save in this browser."
+              : "Enter the admin password to unlock goal editing."
+          }
+          onClose={closeEditDialog}
+        >
             {!isAdmin ? (
               <form onSubmit={submitPassword} className="flex min-h-0 flex-1 flex-col">
                 <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
@@ -880,9 +867,43 @@ function AdminGoalControls({
                 </div>
               </div>
             )}
+        </GoalModal>
+      )}
+    </div>
+  );
+}
+
+function GoalModal({
+  title,
+  description,
+  children,
+  onClose,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/30 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[85vh] w-full max-w-[760px] flex-col overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border">
+        <div className="shrink-0 border-b border-border bg-card p-5 md:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h4 className="text-base font-semibold">{title}</h4>
+              <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="tb-action rounded-full p-2 hover:bg-accent"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         </div>
-      )}
+        {children}
+      </div>
     </div>
   );
 }

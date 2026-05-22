@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { Bot, RefreshCw, Send, Sparkles, X } from "lucide-react";
+import { Bot, FileText, RefreshCw, Send, Sparkles, X } from "lucide-react";
 import type { AuthRole } from "@/lib/auth";
+import { reviewContractPdf } from "@/lib/contract-review";
 import {
   askBillyGpt,
   getBillyGptKnowledgeStatus,
@@ -27,10 +28,12 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
   ]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [reviewingContract, setReviewingContract] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const isAdmin = authRole === "admin";
 
   useEffect(() => {
@@ -79,6 +82,75 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
       ]);
     } finally {
       setThinking(false);
+    }
+  };
+
+  const fileToBase64 = async (file: File) => {
+    const arrayBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = "";
+    const chunkSize = 0x8000;
+
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+    }
+
+    return btoa(binary);
+  };
+
+  const reviewContract = async (file: File | undefined) => {
+    if (!file) return;
+
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: "Please upload a PDF contract. Other file types are not supported yet.",
+        },
+      ]);
+      return;
+    }
+
+    setMessages((m) => [
+      ...m,
+      { role: "user", content: `Uploaded ${file.name} for contract review.` },
+    ]);
+    setReviewingContract(true);
+    setThinking(true);
+
+    try {
+      const fileBase64 = await fileToBase64(file);
+      const result = await reviewContractPdf({
+        data: {
+          fileName: file.name,
+          mimeType: file.type || "application/pdf",
+          fileBase64,
+        },
+      });
+
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: result.ok
+            ? result.review
+            : result.message,
+        },
+      ]);
+    } catch {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content:
+            "I could not review this PDF right now. Try a text-based PDF under 10MB and I’ll take another pass.",
+        },
+      ]);
+    } finally {
+      setReviewingContract(false);
+      setThinking(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -182,7 +254,7 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
               {thinking && (
                 <div className="flex justify-start">
                   <div className="rounded-2xl bg-muted px-4 py-2.5 text-sm text-muted-foreground">
-                    Thinking…
+                    {reviewingContract ? "Reviewing contract..." : "Thinking..."}
                   </div>
                 </div>
               )}
@@ -211,14 +283,31 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
               className="flex items-center gap-2 border-t border-border p-3"
             >
               <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                onChange={(event) => reviewContract(event.target.files?.[0])}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={thinking || reviewingContract}
+                className="tb-action flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-fun-yellow/70 hover:bg-fun-yellow disabled:cursor-not-allowed disabled:opacity-60"
+                title="Upload contract PDF"
+              >
+                <FileText className="h-4 w-4" />
+              </button>
+              <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask anything…"
+                placeholder="Ask anything..."
                 className="tb-search flex-1 rounded-2xl border border-border bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
               />
               <button
                 type="submit"
-                className="tb-action flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground hover:opacity-90"
+                disabled={thinking || input.trim().length === 0}
+                className="tb-action flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Send className="h-4 w-4" />
               </button>

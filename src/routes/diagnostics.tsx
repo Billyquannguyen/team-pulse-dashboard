@@ -408,6 +408,62 @@ function NotionKnowledgeDiagnosticsCard({
   );
 }
 
+function ContractReviewDiagnosticsCard({
+  diagnostics,
+}: {
+  diagnostics: GoogleSheetsDiagnostics["contractReview"];
+}) {
+  if (!diagnostics) return null;
+
+  return (
+    <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Billy GPT contract review</h3>
+          <p className="text-xs text-muted-foreground">
+            This checks PDF upload, extraction, and OpenAI contract review readiness.
+          </p>
+        </div>
+        <StatusPill ok={diagnostics.openAiKeyPresent} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <MetricBox label="OpenAI key" value={diagnostics.openAiKeyPresent ? "Present" : "Missing"} />
+        <MetricBox label="Model" value={diagnostics.modelUsed} />
+        <MetricBox label="Upload status" value={diagnostics.uploadStatus} />
+        <MetricBox label="Extraction" value={diagnostics.extractionStatus} />
+        <MetricBox label="Extracted chars" value={diagnostics.lastExtractedChars} />
+        <MetricBox label="Sent chars" value={diagnostics.lastSentChars} />
+      </div>
+
+      <div className="mt-4 rounded-2xl bg-muted/45 p-4 text-sm">
+        <div className="font-semibold">Cost-safe handling</div>
+        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+          <div>Temporary files: {diagnostics.temporaryFileHandling}</div>
+          <div>Max PDF size: {(diagnostics.maxPdfBytes / 1024 / 1024).toFixed(1)}MB</div>
+          <div>Max contract characters sent: {diagnostics.maxContractCharsSent}</div>
+          <div>Truncated last review: {diagnostics.truncatedForCostSafety ? "Yes" : "No"}</div>
+          <div>
+            Last review:{" "}
+            {diagnostics.lastReviewAt ? new Date(diagnostics.lastReviewAt).toLocaleString() : "-"}
+          </div>
+          <div>Last file: {diagnostics.lastFileName ?? "-"}</div>
+        </div>
+      </div>
+
+      {diagnostics.lastError && (
+        <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <div className="mb-1 flex items-center gap-2 font-bold">
+            <AlertTriangle className="h-4 w-4" />
+            Last contract review issue
+          </div>
+          <p className="break-words text-xs leading-relaxed">{diagnostics.lastError}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnostics }) {
   return (
     <div className="space-y-6">
@@ -551,6 +607,8 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
       <ActiveBrandsDiagnosticsCard diagnostics={diagnostics.activeBrands} />
 
       <NotionKnowledgeDiagnosticsCard diagnostics={diagnostics.notion} />
+
+      <ContractReviewDiagnosticsCard diagnostics={diagnostics.contractReview} />
 
       <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3">

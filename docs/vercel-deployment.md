@@ -36,6 +36,8 @@ ACTIVE_BRANDS_SPREADSHEET_ID=1U-y2oiob1uenmvNiRGMILhmWWORMTye2mBxi2mgVxvs
 NOTION_API_TOKEN=secret_from_your_notion_internal_integration
 NOTION_HANDBOOK_ROOT_PAGE_ID=your_handbook_root_page_id
 BRAVE_SEARCH_API_KEY=optional_for_stronger_live_web_search
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_CONTRACT_REVIEW_MODEL=gpt-5.4-mini
 ```
 
 Keep `TEAM_DASHBOARD_PASSWORD` and `ADMIN_PASSWORD` different.
@@ -46,6 +48,8 @@ Google Sheets credentials are also server-side only. Do not add passwords, priva
 
 Notion credentials are server-side only too. Billy GPT reads the handbook through `NOTION_API_TOKEN`, indexes it on the server, and never sends the token to the browser.
 
+OpenAI credentials are server-side only. Billy GPT uses `OPENAI_API_KEY` for clean assistant responses and PDF contract review. `OPENAI_CONTRACT_REVIEW_MODEL` is optional and defaults to `gpt-5.4-mini`.
+
 After adding or changing env vars in Vercel, redeploy the project.
 
 For Team Assets, the spreadsheet must have a worksheet tab named `Team Assets` with `title` and `url` columns. Optional columns are `subtitle`, `icon`, `color`, `category`, `enabled`, and `sort_order`.
@@ -55,3 +59,5 @@ Team Assets admin add/edit/remove writes to Google Sheets server-side. Share the
 For Active Brands, the spreadsheet must have a worksheet tab named `Active Contacts`. The app displays that tab as a raw table and does not use it in dashboard totals.
 
 For Billy GPT, create a Notion internal integration, share the handbook root page with it, then add the integration secret as `NOTION_API_TOKEN` and the root page ID as `NOTION_HANDBOOK_ROOT_PAGE_ID`. Admins can sync the handbook from the Billy GPT panel after deployment. Billy GPT uses handbook context first, Active Brands Google Sheet context second, and web context only for enrichment. More detail lives in `docs/notion-billy-gpt-setup.md`.
+
+For contract review, Billy GPT accepts PDF uploads in chat, extracts readable text server-side, and sends only extracted text plus source-labeled context to OpenAI. Uploaded PDFs are processed in memory only and are not permanently stored by the app.

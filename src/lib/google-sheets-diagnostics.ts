@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireAdminAuth } from "@/lib/auth";
 import type { ActiveBrandsDataFlowDiagnostics } from "@/lib/active-brands";
+import type { ContractReviewDiagnostics } from "@/lib/contract-review";
 import type { NotionKnowledgeDiagnostics } from "@/lib/notion-knowledge";
 import type { DashboardDataFlowDiagnostics } from "@/lib/sheets-public";
 import type { TeamAssetsDataFlowDiagnostics } from "@/lib/team-assets";
@@ -43,6 +44,7 @@ export type GoogleSheetsDiagnostics = {
   teamAssets: TeamAssetsDataFlowDiagnostics | null;
   activeBrands: ActiveBrandsDataFlowDiagnostics | null;
   notion: NotionKnowledgeDiagnostics | null;
+  contractReview: ContractReviewDiagnostics | null;
 };
 
 const DIAGNOSTICS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -59,7 +61,14 @@ function logDiagnostics(message: string, details?: Record<string, unknown>) {
 async function getEnvStatus(): Promise<EnvDiagnostic[]> {
   const googleSheets = await import("@/lib/google-sheets.server");
   const notionKnowledge = await import("@/lib/notion-knowledge");
-  return [...googleSheets.getGoogleEnvPresence(), ...notionKnowledge.getNotionEnvDiagnostics()];
+  const contractReview = await import("@/lib/contract-review");
+  return [
+    ...googleSheets.getGoogleEnvPresence(),
+    ...notionKnowledge.getNotionEnvDiagnostics(),
+    ...contractReview.getContractReviewEnvDiagnostics(),
+  ].filter(
+    (item, index, items) => items.findIndex((candidate) => candidate.name === item.name) === index,
+  );
 }
 
 async function checkAuthStatus(): Promise<GoogleSheetsDiagnostics["auth"]> {
@@ -173,17 +182,20 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       teamAssets: null,
       activeBrands: null,
       notion: null,
+      contractReview: null,
     } satisfies GoogleSheetsDiagnostics;
   }
 
   if (diagnosticsCache && diagnosticsCache.expiresAt > Date.now()) {
     const notionKnowledge = await import("@/lib/notion-knowledge");
+    const contractReview = await import("@/lib/contract-review");
     logDiagnostics("returning cached diagnostics", {
       expiresAt: new Date(diagnosticsCache.expiresAt).toISOString(),
     });
     return {
       ...diagnosticsCache.data,
       notion: notionKnowledge.getNotionKnowledgeDiagnostics(),
+      contractReview: contractReview.getContractReviewDiagnostics(),
     };
   }
 
@@ -191,8 +203,18 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
   const activeBrands = await import("@/lib/active-brands");
   const teamAssets = await import("@/lib/team-assets");
   const notionKnowledge = await import("@/lib/notion-knowledge");
-  const [env, auth, teamSheet, creatorSheet, dataFlow, teamAssetsFlow, activeBrandsFlow, notion] =
-    await Promise.all([
+  const contractReview = await import("@/lib/contract-review");
+  const [
+    env,
+    auth,
+    teamSheet,
+    creatorSheet,
+    dataFlow,
+    teamAssetsFlow,
+    activeBrandsFlow,
+    notion,
+    contractReviewFlow,
+  ] = await Promise.all([
       getEnvStatus(),
       checkAuthStatus(),
       checkSpreadsheet("Team Billion deal sheet", "TEAM_BILLION_SPREADSHEET_ID"),
@@ -201,6 +223,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       teamAssets.getTeamAssetsDataFlowDiagnostics(),
       activeBrands.getActiveBrandsDataFlowDiagnostics(),
       notionKnowledge.getNotionKnowledgeDiagnostics(),
+      contractReview.getContractReviewDiagnostics(),
     ]);
 
   logDiagnostics("full diagnostics complete", {
@@ -217,6 +240,8 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     notionSetupReady: notion.setupReady,
     notionPagesIndexed: notion.pagesIndexed,
     notionChunksIndexed: notion.chunksIndexed,
+    openAiKeyPresent: contractReviewFlow.openAiKeyPresent,
+    contractReviewModel: contractReviewFlow.modelUsed,
   });
 
   const diagnostics = {
@@ -229,6 +254,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     teamAssets: teamAssetsFlow,
     activeBrands: activeBrandsFlow,
     notion,
+    contractReview: contractReviewFlow,
   } satisfies GoogleSheetsDiagnostics;
 
   diagnosticsCache = {

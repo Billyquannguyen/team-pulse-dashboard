@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { getActiveBrandsKnowledgeMatches } from "@/lib/active-brands";
 import { requireAdminAuth, requireDashboardAuth } from "@/lib/auth";
+import { callOpenAiText, getOpenAiDiagnostics, getOpenAiEnvDiagnostics } from "@/lib/openai.server";
 import {
   getWebKnowledgeDiagnostics,
   getWebKnowledgeEnvDiagnostics,
@@ -74,6 +75,21 @@ type BillyGptAnswer = {
   sourceCount: number;
   syncedAt: string | null;
   sourceTags: Array<"handbook" | "sheets" | "web">;
+};
+
+export type BillyGptContextSource = {
+  source: "handbook" | "sheets" | "web";
+  title: string;
+  text: string;
+  url?: string | null;
+};
+
+export type BillyGptContextBundle = {
+  sources: BillyGptContextSource[];
+  sourceTags: Array<"handbook" | "sheets" | "web">;
+  foundInHandbook: boolean;
+  syncedAt: string | null;
+  warnings: string[];
 };
 
 type NotionApiListResponse<T> = {
@@ -239,6 +255,7 @@ export function getNotionEnvDiagnostics() {
     { name: LEGACY_NOTION_TOKEN_ENV, exists: Boolean(process.env[LEGACY_NOTION_TOKEN_ENV]?.trim()) },
     { name: NOTION_ROOT_PAGE_ID_ENV, exists: env.rootPageIdExists },
     ...getWebKnowledgeEnvDiagnostics(),
+    ...getOpenAiEnvDiagnostics(),
   ];
 }
 
@@ -671,26 +688,100 @@ function isInternalAgencyQuestion(question: string) {
   );
 }
 
-function formatHandbookContext(matches: ReturnType<typeof searchKnowledge>) {
-  return matches.slice(0, 2).map(({ chunk }, index) => {
-    return `${index + 1}. [handbook] ${sourceLabel(chunk)}\n${truncateText(chunk.text)}`;
-  });
-}
-
-function formatSheetContext(matches: Awaited<ReturnType<typeof getActiveBrandsKnowledgeMatches>>) {
-  return matches.slice(0, 2).map((match, index) => {
-    return `${index + 1}. [sheets] ${match.title}\n${truncateText(match.text, 650)}`;
-  });
-}
-
-function formatWebContext(matches: Awaited<ReturnType<typeof searchWebKnowledge>>["sources"]) {
-  return matches.slice(0, 3).map((match, index) => {
-    return `${index + 1}. [web] ${match.title}\n${truncateText(match.snippet, 520)}\n${match.url}`;
-  });
-}
-
 function uniqueSourceTags(tags: Array<"handbook" | "sheets" | "web">) {
   return tags.filter((tag, index) => tags.indexOf(tag) === index);
+}
+
+function contextBundleToModelText(bundle: BillyGptContextBundle) {
+  if (bundle.sources.length === 0) return "No source context found.";
+
+  return bundle.sources
+    .map((source, index) => {
+      const urlLine = source.url ? `\nURL: ${source.url}` : "";
+      return `${index + 1}. [${source.source}] ${source.title}${urlLine}\n${source.text}`;
+    })
+    .join("\n\n");
+}
+
+export async function getBillyGptContextBundle(
+  question: string,
+  options: { includeWeb?: boolean } = {},
+): Promise<BillyGptContextBundle> {
+  const state = getState();
+  const handbookMatches = searchKnowledge(question);
+  const sheetMatches = await getActiveBrandsKnowledgeMatches(question);
+  const useWeb =
+    options.includeWeb ?? shouldUseWebKnowledge(question, sheetMatches.length > 0);
+  const webResult = useWeb
+    ? await searchWebKnowledge(question)
+    : {
+        sources: [],
+        warning: null,
+        provider: getWebKnowledgeDiagnostics().provider,
+        cached: false,
+      };
+  const sources: BillyGptContextSource[] = [
+    ...handbookMatches.slice(0, 4).map(({ chunk }) => ({
+      source: "handbook" as const,
+      title: sourceLabel(chunk),
+      text: truncateText(chunk.text, 1200),
+      url: chunk.pageUrl,
+    })),
+    ...sheetMatches.slice(0, 3).map((match) => ({
+      source: "sheets" as const,
+      title: match.title,
+      text: truncateText(match.text, 800),
+    })),
+    ...webResult.sources.slice(0, 3).map((match) => ({
+      source: "web" as const,
+      title: match.title,
+      text: truncateText(match.snippet, 700),
+      url: match.url,
+    })),
+  ];
+  const sourceTags = uniqueSourceTags(sources.map((source) => source.source));
+
+  return {
+    sources,
+    sourceTags,
+    foundInHandbook: handbookMatches.length > 0,
+    syncedAt: state.syncedAt,
+    warnings: webResult.warning ? [webResult.warning] : [],
+  };
+}
+
+export function formatBillyGptContextForModel(bundle: BillyGptContextBundle) {
+  return contextBundleToModelText(bundle);
+}
+
+function fallbackAnswerFromContext(
+  question: string,
+  bundle: BillyGptContextBundle,
+): BillyGptAnswer {
+  if (bundle.sources.length === 0) {
+    return {
+      answer: isInternalAgencyQuestion(question)
+        ? "I could not find that in the synced Team Billion handbook. I do not want to guess an internal answer, so add it to Notion and sync again."
+        : "I could not find a reliable handbook, sheets, or web source for that. Try asking with a brand name, platform, or more specific topic.",
+      foundInHandbook: false,
+      sourceCount: 0,
+      syncedAt: bundle.syncedAt,
+      sourceTags: [],
+    };
+  }
+
+  const sourceTitles = bundle.sources
+    .slice(0, 4)
+    .map((source) => `[${source.source}] ${source.title}`)
+    .join("\n");
+
+  return {
+    answer: `I found relevant context, but the model is not configured to write a clean answer yet. Add OPENAI_API_KEY in Vercel to enable full Billy GPT responses.\n\nSources found:\n${sourceTitles}`,
+    foundInHandbook: bundle.foundInHandbook,
+    sourceCount: bundle.sources.length,
+    syncedAt: bundle.syncedAt,
+    sourceTags: bundle.sourceTags,
+  };
 }
 
 async function answerFromKnowledge(question: string): Promise<BillyGptAnswer> {
@@ -719,26 +810,8 @@ async function answerFromKnowledge(question: string): Promise<BillyGptAnswer> {
     };
   }
 
-  const handbookMatches = searchKnowledge(question);
-  const sheetMatches = await getActiveBrandsKnowledgeMatches(question);
-  const useWeb = shouldUseWebKnowledge(question, sheetMatches.length > 0);
-  const webResult = useWeb
-    ? await searchWebKnowledge(question)
-    : {
-        sources: [],
-        warning: null,
-        provider: getWebKnowledgeDiagnostics().provider,
-        cached: false,
-      };
-  const handbookSections = formatHandbookContext(handbookMatches);
-  const sheetSections = formatSheetContext(sheetMatches);
-  const webSections = formatWebContext(webResult.sources);
-  const sourceTags = uniqueSourceTags([
-    ...(handbookSections.length > 0 ? (["handbook"] as const) : []),
-    ...(sheetSections.length > 0 ? (["sheets"] as const) : []),
-    ...(webSections.length > 0 ? (["web"] as const) : []),
-  ]);
-  const sourceCount = handbookSections.length + sheetSections.length + webSections.length;
+  const bundle = await getBillyGptContextBundle(question);
+  const sourceCount = bundle.sources.length;
 
   if (sourceCount === 0) {
     return {
@@ -753,26 +826,35 @@ async function answerFromKnowledge(question: string): Promise<BillyGptAnswer> {
     };
   }
 
-  const preface =
-    handbookSections.length > 0
-      ? "I checked the Team Billion handbook first, then added sheets/web context where useful."
-      : "I did not find this in the synced Team Billion handbook, so I am using the best available sheets/web context and flagging that the handbook is missing it.";
-  const sections = [
-    handbookSections.length > 0 ? `Handbook source of truth\n${handbookSections.join("\n\n")}` : "",
-    sheetSections.length > 0 ? `Operational sheet context\n${sheetSections.join("\n\n")}` : "",
-    webSections.length > 0 ? `External web context\n${webSections.join("\n\n")}` : "",
-    webResult.warning ? `Web note\n[web] ${webResult.warning}` : "",
-  ].filter(Boolean);
+  if (!getOpenAiDiagnostics().keyPresent) {
+    return fallbackAnswerFromContext(question, bundle);
+  }
 
-  return {
-    answer: `${preface}\n\n${sections.join(
-      "\n\n",
-    )}\n\nSource tags used: ${sourceTags.map((tag) => `[${tag}]`).join(" ")}`,
-    foundInHandbook: handbookSections.length > 0,
-    sourceCount,
-    syncedAt: state.syncedAt,
-    sourceTags,
-  };
+  try {
+    const response = await callOpenAiText({
+      instructions:
+        "You are Billy GPT, the internal AI assistant for Team Billion, an influencer management agency. Use the provided source-labeled context internally. Prefer [handbook] as the internal source of truth, use [sheets] for live operational context, and use [web] only for external enrichment. Do not dump raw source chunks. If the handbook does not contain an internal policy answer, say that clearly. Keep the answer concise, practical, and directly useful.",
+      input: `User question:\n${question}\n\nSource context:\n${contextBundleToModelText(bundle)}`,
+      maxOutputTokens: 900,
+    });
+
+    return {
+      answer: response.text,
+      foundInHandbook: bundle.foundInHandbook,
+      sourceCount,
+      syncedAt: state.syncedAt,
+      sourceTags: bundle.sourceTags,
+    };
+  } catch {
+    return {
+      answer:
+        "I found source context, but I could not get the AI model to write a clean answer right now. Try again in a moment.",
+      foundInHandbook: bundle.foundInHandbook,
+      sourceCount,
+      syncedAt: state.syncedAt,
+      sourceTags: bundle.sourceTags,
+    };
+  }
 }
 
 export const getBillyGptKnowledgeStatus = createServerFn({ method: "GET" }).handler(async () => {
