@@ -69,19 +69,23 @@ function NotificationCard({
   onDismiss: (item: SlackNotificationItem) => void;
 }) {
   const disabled = workingId === item.id;
+  const initial = item.personName.trim().slice(0, 1).toUpperCase() || "S";
 
   return (
-    <div className="rounded-2xl border border-border bg-background p-4 shadow-sm">
+    <div className="tb-hover-lift rounded-2xl border border-border bg-background p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fun-pink text-xs font-black">
-              {item.personName.slice(0, 1).toUpperCase()}
+              {initial}
             </span>
             <div className="min-w-0">
-              <div className="truncate text-sm font-black">{item.personName}</div>
-              <div className="text-xs font-semibold text-muted-foreground">
-                {formatLastMessageTime(item.lastMessageAt)}
+              <div className="text-sm font-black leading-5">
+                You have not responded to{" "}
+                <span className="text-primary">{item.personName}</span>
+              </div>
+              <div className="mt-0.5 text-xs font-semibold text-muted-foreground">
+                Last message {formatLastMessageTime(item.lastMessageAt)}
               </div>
             </div>
           </div>
@@ -92,9 +96,14 @@ function NotificationCard({
       </div>
 
       {item.snippet && (
-        <p className="mt-3 line-clamp-2 rounded-2xl bg-muted/55 px-3 py-2 text-xs font-medium text-muted-foreground">
-          {item.snippet}
-        </p>
+        <div className="mt-3 rounded-2xl bg-muted/55 px-3 py-2">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+            Message preview
+          </div>
+          <p className="mt-1 line-clamp-2 text-xs font-medium text-muted-foreground">
+            {item.snippet}
+          </p>
+        </div>
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -236,7 +245,8 @@ export function NotificationBell() {
                 </div>
                 <div className="mt-3 text-sm font-black">No current notifications</div>
                 <p className="mt-1 text-xs font-semibold text-muted-foreground">
-                  The hourly checker will add reminders here when something needs a reply.
+                  You are clear right now. Slack follow-ups will appear here when a DM has
+                  waited 24h+ for your reply.
                 </p>
               </div>
             )}

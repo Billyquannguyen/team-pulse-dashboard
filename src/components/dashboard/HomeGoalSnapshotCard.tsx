@@ -2,6 +2,12 @@ import { Link } from "@tanstack/react-router";
 import { Target, UserCheck } from "lucide-react";
 import { team as fallbackTeam, type Teammate } from "@/data/team";
 import type { GoalSettings } from "@/lib/goal-settings";
+import {
+  getMemberExclusiveCreatorGoal,
+  getMemberMonthlyGoal,
+  getTeamExclusiveCreatorGoal,
+  getTeamMonthlyGoal,
+} from "@/lib/goal-targets";
 import { cn } from "@/lib/utils";
 
 function formatMoney(value: number) {
@@ -61,10 +67,8 @@ export function HomeGoalSnapshotCard({
   const teamPending = team.reduce((sum, member) => sum + member.pendingOwed, 0);
   const teamExclusiveCreators = team.reduce((sum, member) => sum + member.exclusiveCreators, 0);
 
-  const getMemberMonthlyGoal = (member: Teammate) =>
-    settings.customMemberMonthlyGoals[member.id] ?? settings.memberMonthlyGoal;
-  const getExclusiveCreatorGoal = (member: Teammate) =>
-    settings.customExclusiveCreatorGoals[member.id] ?? settings.memberExclusiveCreatorGoal;
+  const teamMonthlyGoal = getTeamMonthlyGoal(settings);
+  const teamExclusiveCreatorGoal = getTeamExclusiveCreatorGoal(settings);
 
   return (
     <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
@@ -101,13 +105,13 @@ export function HomeGoalSnapshotCard({
                 <div className="mt-1 text-2xl font-bold">{formatMoney(teamPending)}</div>
               </div>
               <div className="text-right text-sm text-muted-foreground">
-                / {formatMoney(settings.teamMonthlyGoal)}
+                / {formatMoney(teamMonthlyGoal)}
               </div>
             </div>
             <div className="mt-3 h-3 overflow-hidden rounded-full bg-card">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-fun-lime to-fun-yellow"
-                style={{ width: `${getPct(teamPending, settings.teamMonthlyGoal)}%` }}
+                style={{ width: `${getPct(teamPending, teamMonthlyGoal)}%` }}
               />
             </div>
           </div>
@@ -118,7 +122,7 @@ export function HomeGoalSnapshotCard({
                 key={member.id}
                 name={member.name}
                 current={member.pendingOwed}
-                target={getMemberMonthlyGoal(member)}
+                target={getMemberMonthlyGoal(settings, member)}
                 mode="money"
               />
             ))}
@@ -145,14 +149,14 @@ export function HomeGoalSnapshotCard({
                 <div className="mt-1 text-2xl font-bold">{teamExclusiveCreators}</div>
               </div>
               <div className="text-right text-sm text-muted-foreground">
-                / {settings.teamExclusiveCreatorGoal}
+                / {teamExclusiveCreatorGoal}
               </div>
             </div>
             <div className="mt-3 h-3 overflow-hidden rounded-full bg-card">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-fun-pink to-fun-purple"
                 style={{
-                  width: `${getPct(teamExclusiveCreators, settings.teamExclusiveCreatorGoal)}%`,
+                  width: `${getPct(teamExclusiveCreators, teamExclusiveCreatorGoal)}%`,
                 }}
               />
             </div>
@@ -164,7 +168,7 @@ export function HomeGoalSnapshotCard({
                 key={member.id}
                 name={member.name}
                 current={member.exclusiveCreators}
-                target={getExclusiveCreatorGoal(member)}
+                target={getMemberExclusiveCreatorGoal(settings, member)}
                 mode="count"
               />
             ))}

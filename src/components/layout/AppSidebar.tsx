@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { totalPendingOwed } from "@/data/team";
 import { useGoalSettings } from "@/lib/goal-settings";
+import { getTeamMonthlyGoal } from "@/lib/goal-targets";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { TeamMonthlyGoalCard } from "@/components/ui/team-monthly-goal-card";
 
@@ -80,7 +81,7 @@ export function AppSidebar() {
           to="/goals"
           className="mt-auto block outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <TeamMonthlyGoalCard current={pendingOwed} target={settings.teamMonthlyGoal} />
+          <TeamMonthlyGoalCard current={pendingOwed} target={getTeamMonthlyGoal(settings)} />
         </Link>
       )}
     </aside>

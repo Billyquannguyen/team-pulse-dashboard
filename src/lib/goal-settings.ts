@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 export const GOAL_SETTINGS_KEY = "tb_goal_settings_v1";
+export const GOAL_SETTINGS_EVENT = "tb_goal_settings_updated";
 
 export type GoalSettings = {
   teamMonthlyGoal: number;
@@ -63,25 +64,42 @@ export function normalizeSettings(raw: unknown): GoalSettings {
   };
 }
 
+function readStoredGoalSettings() {
+  if (typeof window === "undefined") return DEFAULT_GOAL_SETTINGS;
+  const raw = localStorage.getItem(GOAL_SETTINGS_KEY);
+  if (!raw) return DEFAULT_GOAL_SETTINGS;
+
+  try {
+    return normalizeSettings(JSON.parse(raw));
+  } catch {
+    return DEFAULT_GOAL_SETTINGS;
+  }
+}
+
 export function useGoalSettings() {
-  const [settings, setSettings] = useState<GoalSettings>(DEFAULT_GOAL_SETTINGS);
+  const [settings, setSettings] = useState<GoalSettings>(() => readStoredGoalSettings());
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const raw = localStorage.getItem(GOAL_SETTINGS_KEY);
-    if (!raw) return;
 
-    try {
-      setSettings(normalizeSettings(JSON.parse(raw)));
-    } catch {
-      setSettings(DEFAULT_GOAL_SETTINGS);
-    }
+    const refreshSettings = () => setSettings(readStoredGoalSettings());
+
+    refreshSettings();
+    window.addEventListener("storage", refreshSettings);
+    window.addEventListener(GOAL_SETTINGS_EVENT, refreshSettings);
+
+    return () => {
+      window.removeEventListener("storage", refreshSettings);
+      window.removeEventListener(GOAL_SETTINGS_EVENT, refreshSettings);
+    };
   }, []);
 
   const updateSettings = (next: GoalSettings) => {
-    setSettings(next);
+    const normalized = normalizeSettings(next);
+    setSettings(normalized);
     if (typeof window !== "undefined") {
-      localStorage.setItem(GOAL_SETTINGS_KEY, JSON.stringify(next));
+      localStorage.setItem(GOAL_SETTINGS_KEY, JSON.stringify(normalized));
+      window.dispatchEvent(new Event(GOAL_SETTINGS_EVENT));
     }
   };
 

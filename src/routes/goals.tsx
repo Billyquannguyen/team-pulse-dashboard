@@ -18,14 +18,19 @@ import {
   team as fallbackTeam,
   totalCommission,
   totalDealsClosed,
-  totalDealsGoal,
   totalMonthCommission,
   totalPendingOwed,
-  totalRevenueGoal,
   type Teammate,
 } from "@/data/team";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { type GoalSettings, useGoalSettings } from "@/lib/goal-settings";
+import {
+  getMemberExclusiveCreatorGoal,
+  getMemberMonthlyGoal,
+  getMemberProgressionGoal,
+  getTeamExclusiveCreatorGoal,
+  getTeamMonthlyGoal,
+} from "@/lib/goal-targets";
 import { cn } from "@/lib/utils";
 import { loginToDashboard, type AuthRole } from "@/lib/auth";
 
@@ -974,8 +979,8 @@ function GoalsPage() {
     totalPricing: 0,
     averageDealSize: 0,
     averageProfitMargin: 0,
-    paidGoal: canUseLocalFallback ? totalRevenueGoal : 0,
-    dealsGoal: canUseLocalFallback ? totalDealsGoal : 0,
+    paidGoal: 0,
+    dealsGoal: 0,
   };
   const sortedByPending = useMemo(
     () => [...team].sort((a, b) => b.pendingOwed - a.pendingOwed),
@@ -991,12 +996,10 @@ function GoalsPage() {
   );
   const teamExclusiveCreators = team.reduce((sum, member) => sum + member.exclusiveCreators, 0);
 
-  const getMemberMonthlyGoal = (member: Teammate) =>
-    settings.customMemberMonthlyGoals[member.id] ?? settings.memberMonthlyGoal;
-  const getProgressionGoal = (member: Teammate) =>
-    settings.customProgressionGoals[member.id] ?? settings.progressionGoal;
-  const getExclusiveCreatorGoal = (member: Teammate) =>
-    settings.customExclusiveCreatorGoals[member.id] ?? settings.memberExclusiveCreatorGoal;
+  const getMonthlyTarget = (member: Teammate) => getMemberMonthlyGoal(settings, member);
+  const getProgressionTarget = (member: Teammate) => getMemberProgressionGoal(settings, member);
+  const getExclusiveCreatorTarget = (member: Teammate) =>
+    getMemberExclusiveCreatorGoal(settings, member);
 
   return (
     <div className="space-y-6">
@@ -1009,7 +1012,7 @@ function GoalsPage() {
         title="Team monthly goal"
         label="Pending commission"
         current={totals.pendingOwed}
-        target={settings.teamMonthlyGoal}
+        target={getTeamMonthlyGoal(settings)}
         tone="lime"
         icon={Target}
         size="hero"
@@ -1035,7 +1038,7 @@ function GoalsPage() {
               title={member.name}
               label="Pending commission"
               current={member.pendingOwed}
-              target={getMemberMonthlyGoal(member)}
+              target={getMonthlyTarget(member)}
               tone={(["yellow", "pink", "purple", "blue"] as Tone[])[index % 4]}
               icon={Users}
               onMotivationOpen={() =>
@@ -1044,7 +1047,7 @@ function GoalsPage() {
                     member.name,
                     "Monthly pending goal",
                     member.pendingOwed,
-                    getMemberMonthlyGoal(member),
+                    getMonthlyTarget(member),
                   ),
                 )
               }
@@ -1067,7 +1070,7 @@ function GoalsPage() {
               title={member.name}
               label="Total paid"
               current={member.commission}
-              target={getProgressionGoal(member)}
+              target={getProgressionTarget(member)}
               tone={(["lime", "orange", "blue", "purple"] as Tone[])[index % 4]}
               icon={TrendingUp}
               onMotivationOpen={() =>
@@ -1076,7 +1079,7 @@ function GoalsPage() {
                     member.name,
                     "Long-term progression goal",
                     member.commission,
-                    getProgressionGoal(member),
+                    getProgressionTarget(member),
                   ),
                 )
               }
@@ -1097,7 +1100,7 @@ function GoalsPage() {
           title="Team exclusive creator goal"
           label="Exclusive signed"
           current={teamExclusiveCreators}
-          target={settings.teamExclusiveCreatorGoal}
+          target={getTeamExclusiveCreatorGoal(settings)}
           tone="orange"
           icon={UserCheck}
           size="hero"
@@ -1112,7 +1115,7 @@ function GoalsPage() {
               title={member.name}
               label="Exclusive signed"
               current={member.exclusiveCreators}
-              target={getExclusiveCreatorGoal(member)}
+              target={getExclusiveCreatorTarget(member)}
               tone={(["lime", "yellow", "pink", "blue"] as Tone[])[index % 4]}
               icon={UserCheck}
               formatValue={formatCount}
@@ -1123,7 +1126,7 @@ function GoalsPage() {
                     member.name,
                     "Exclusive creator signing goal",
                     member.exclusiveCreators,
-                    getExclusiveCreatorGoal(member),
+                    getExclusiveCreatorTarget(member),
                   ),
                 )
               }

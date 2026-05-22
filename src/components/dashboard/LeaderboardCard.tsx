@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { team as fallbackTeam, type Teammate } from "@/data/team";
 import { DEFAULT_GOAL_SETTINGS } from "@/lib/goal-settings";
+import { getMemberProgressionGoal } from "@/lib/goal-targets";
 import { Trophy } from "lucide-react";
 
 const palette = [
@@ -14,7 +15,7 @@ const palette = [
 export function LeaderboardCard({
   limit = 5,
   team = fallbackTeam,
-  getProgressionGoal = () => DEFAULT_GOAL_SETTINGS.progressionGoal,
+  getProgressionGoal = (member) => getMemberProgressionGoal(DEFAULT_GOAL_SETTINGS, member),
 }: {
   limit?: number;
   team?: Teammate[];

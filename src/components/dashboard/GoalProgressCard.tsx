@@ -1,16 +1,24 @@
-import { team } from "@/data/team";
+import { team as fallbackTeam, type Teammate } from "@/data/team";
 import { Target } from "lucide-react";
 
 export function GoalProgressCard({
   current,
   target,
+  title = "Team monthly goal",
+  badge = "Monthly",
+  progressLabel = "there",
   paidThisMonth,
   pendingOwed,
+  team = fallbackTeam,
 }: {
   current: number;
   target: number;
+  title?: string;
+  badge?: string;
+  progressLabel?: string;
   paidThisMonth?: number;
   pendingOwed?: number;
+  team?: Teammate[];
 }) {
   const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
   const remaining = Math.max(0, target - current);
@@ -19,7 +27,7 @@ export function GoalProgressCard({
       <div className="flex items-start justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Long-term progression goal
+            {title}
           </div>
           <div className="mt-1 text-2xl font-bold">
             £{current.toLocaleString()}{" "}
@@ -29,7 +37,7 @@ export function GoalProgressCard({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1 rounded-full bg-fun-yellow/60 px-3 py-1 text-xs font-medium">
-          <Target className="h-3 w-3" /> Progression
+          <Target className="h-3 w-3" /> {badge}
         </div>
       </div>
       <div className="mt-5 h-4 overflow-hidden rounded-full bg-muted">
@@ -39,7 +47,9 @@ export function GoalProgressCard({
         />
       </div>
       <div className="mt-3 flex items-center justify-between text-sm">
-        <span className="font-semibold text-foreground">{pct}% there</span>
+        <span className="font-semibold text-foreground">
+          {pct}% {progressLabel}
+        </span>
         <span className="text-muted-foreground">£{remaining.toLocaleString()} left</span>
       </div>
       {(paidThisMonth !== undefined || pendingOwed !== undefined) && (

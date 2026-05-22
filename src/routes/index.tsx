@@ -16,6 +16,7 @@ import { HomeGoalSnapshotCard } from "@/components/dashboard/HomeGoalSnapshotCar
 import { OutreachSummaryCard } from "@/components/dashboard/OutreachSummaryCard";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { useGoalSettings } from "@/lib/goal-settings";
+import { getMemberProgressionGoal, getTeamMonthlyGoal } from "@/lib/goal-targets";
 import {
   team as fallbackTeam,
   totalCommission,
@@ -40,8 +41,8 @@ function Dashboard() {
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
   const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
   const getProgressionGoal = (member: (typeof team)[number]) =>
-    settings.customProgressionGoals[member.id] ?? settings.progressionGoal;
-  const progressionGoalTotal = team.reduce((sum, member) => sum + getProgressionGoal(member), 0);
+    getMemberProgressionGoal(settings, member);
+  const teamMonthlyGoal = getTeamMonthlyGoal(settings);
   const totals = data?.totals ?? {
     totalPaid: canUseLocalFallback ? totalCommission : 0,
     paidThisMonth: canUseLocalFallback ? totalMonthCommission : 0,
@@ -50,7 +51,7 @@ function Dashboard() {
     totalPricing: 0,
     averageDealSize: 0,
     averageProfitMargin: 0,
-    paidGoal: progressionGoalTotal,
+    paidGoal: teamMonthlyGoal,
     dealsGoal: 0,
   };
 
@@ -107,10 +108,14 @@ function Dashboard() {
       <section className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <GoalProgressCard
-            current={totals.totalPaid}
-            target={progressionGoalTotal}
+            current={totals.pendingOwed}
+            target={teamMonthlyGoal}
+            title="Team monthly goal"
+            badge="Monthly"
+            progressLabel="to monthly goal"
             paidThisMonth={totals.paidThisMonth}
             pendingOwed={totals.pendingOwed}
+            team={team}
           />
         </div>
         <LeaderboardCard team={team} getProgressionGoal={getProgressionGoal} />
