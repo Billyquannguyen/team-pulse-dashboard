@@ -234,7 +234,7 @@ export function NotificationBell() {
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-fun-lime">
                   <Check className="h-5 w-5 text-emerald-950" />
                 </div>
-                <div className="mt-3 text-sm font-black">No overdue DMs</div>
+                <div className="mt-3 text-sm font-black">No current notifications</div>
                 <p className="mt-1 text-xs font-semibold text-muted-foreground">
                   The hourly checker will add reminders here when something needs a reply.
                 </p>

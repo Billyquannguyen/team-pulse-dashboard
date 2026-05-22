@@ -1,5 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import {
+  PRODUCTION_SLACK_FOLLOW_UP_THRESHOLD_MS,
+  evaluateSlackDmFollowup,
+  findLatestMeaningfulSlackMessage,
+  formatSlackOverdue,
+  makeSlackSnippet,
+  slackTsToMs,
+  type SlackActionStateForRules,
+  type SlackMessageRuleInput,
+} from "@/lib/slack-notification-rules";
 
 type SlackApiResponse<T> = T & {
   ok: boolean;
@@ -74,7 +84,7 @@ type SlackUserInfoResponse = {
   };
 };
 
-type SlackActionState = {
+type SlackActionState = SlackActionStateForRules & {
   status: "done" | "dismissed" | "snoozed";
   lastMessageTs: string;
   snoozedUntil?: string;
@@ -135,6 +145,8 @@ export type SlackNotificationDiagnostics = {
   redisConfigured: boolean;
   redisReadable: boolean;
   redisWritable: boolean;
+  thresholdMinutes: number;
+  productionThresholdLocked: boolean;
   lastSyncAt: string | null;
   lastCheckAt: string | null;
   totalDmChannelsScanned: number;
@@ -145,7 +157,6 @@ export type SlackNotificationDiagnostics = {
 };
 
 const SLACK_API_URL = "https://slack.com/api";
-const FOLLOW_UP_AFTER_HOURS = 24;
 const SNOOZE_DEFAULT_HOURS = 24;
 const REDIS_KEY_PREFIX = "team-billion:slack-followups";
 const NOTIFICATIONS_KEY = `${REDIS_KEY_PREFIX}:notifications`;
@@ -155,6 +166,12 @@ const REDIS_STATE_TTL_SECONDS = 60 * 60 * 24 * 45;
 const REDIS_NOTIFICATION_TTL_SECONDS = 60 * 60 * 26;
 const SLACK_HISTORY_LIMIT = 20;
 const SLACK_LIST_LIMIT = 200;
+const DEV_THRESHOLD_ENV = "SLACK_FOLLOWUP_THRESHOLD_MINUTES";
+const TEST_NOTIFICATION_ID = "DTEAM_BILLION_TEST_NOTIFICATION";
+
+let localDevNotifications: SlackNotificationsPayload | null = null;
+let localDevDiagnostics: SlackNotificationDiagnostics | null = null;
+const localDevActionStates = new Map<string, SlackActionState>();
 
 const notificationActionInput = z.object({
   conversationId: z.string().min(1).max(120),
@@ -183,6 +200,28 @@ function readSlackEnv(): SlackRuntimeEnv {
     upstashRedisRestUrl: process.env.UPSTASH_REDIS_REST_URL?.trim() ?? "",
     upstashRedisRestToken: process.env.UPSTASH_REDIS_REST_TOKEN?.trim() ?? "",
   };
+}
+
+function isProductionRuntime() {
+  return process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+}
+
+function getFollowUpThresholdMs() {
+  if (isProductionRuntime()) {
+    return PRODUCTION_SLACK_FOLLOW_UP_THRESHOLD_MS;
+  }
+
+  const thresholdMinutes = Number(process.env[DEV_THRESHOLD_ENV] ?? "");
+
+  if (Number.isFinite(thresholdMinutes) && thresholdMinutes >= 1) {
+    return thresholdMinutes * 60_000;
+  }
+
+  return PRODUCTION_SLACK_FOLLOW_UP_THRESHOLD_MS;
+}
+
+function canUseLocalDevStore() {
+  return !isProductionRuntime() && !getRedisConfig();
 }
 
 export function getSlackNotificationEnvDiagnostics() {
@@ -273,14 +312,35 @@ function stateKey(conversationId: string) {
 }
 
 async function readNotificationActionState(conversationId: string) {
+  if (canUseLocalDevStore()) {
+    return localDevActionStates.get(conversationId) ?? null;
+  }
+
   return redisGetJson<SlackActionState>(stateKey(conversationId));
 }
 
 async function writeNotificationActionState(conversationId: string, state: SlackActionState) {
+  if (canUseLocalDevStore()) {
+    localDevActionStates.set(conversationId, state);
+    return;
+  }
+
   await redisSetJson(stateKey(conversationId), state, REDIS_STATE_TTL_SECONDS);
 }
 
 async function readStoredNotifications(): Promise<SlackNotificationsPayload> {
+  if (canUseLocalDevStore()) {
+    return (
+      localDevNotifications ?? {
+        checkedAt: nowIso(),
+        lastSyncAt: null,
+        count: 0,
+        items: [],
+        warning: "Local test storage is active. Upstash Redis is not configured here.",
+      }
+    );
+  }
+
   const stored = await redisGetJson<SlackNotificationsPayload>(NOTIFICATIONS_KEY);
 
   if (stored) return stored;
@@ -294,17 +354,24 @@ async function readStoredNotifications(): Promise<SlackNotificationsPayload> {
   };
 }
 
+async function writeStoredNotificationsPayload(payload: SlackNotificationsPayload) {
+  if (canUseLocalDevStore()) {
+    localDevNotifications = payload;
+    return payload;
+  }
+
+  await redisSetJson(NOTIFICATIONS_KEY, payload, REDIS_NOTIFICATION_TTL_SECONDS);
+  return payload;
+}
+
 async function writeStoredNotifications(items: SlackNotificationItem[], warning: string | null) {
-  const payload = {
+  return writeStoredNotificationsPayload({
     checkedAt: nowIso(),
     lastSyncAt: nowIso(),
     count: items.length,
     items,
     warning,
-  } satisfies SlackNotificationsPayload;
-
-  await redisSetJson(NOTIFICATIONS_KEY, payload, REDIS_NOTIFICATION_TTL_SECONDS);
-  return payload;
+  });
 }
 
 function collectScopes(
@@ -362,56 +429,6 @@ async function slackApi<T>(
   return payload ?? ({ ok: false, error: "invalid_slack_response" } as SlackApiResponse<T>);
 }
 
-function slackTsToMs(ts: string) {
-  const parsed = Number(ts);
-  return Number.isFinite(parsed) ? Math.floor(parsed * 1000) : 0;
-}
-
-function formatHoursOverdue(hours: number) {
-  if (hours < 48) return `${hours}h overdue`;
-  const days = Math.floor(hours / 24);
-  const remainder = hours % 24;
-  return remainder > 0 ? `${days}d ${remainder}h overdue` : `${days}d overdue`;
-}
-
-function cleanSlackText(text: string) {
-  return text
-    .replace(/<mailto:([^|>]+)\|([^>]+)>/g, "$2")
-    .replace(/<([^|>]+)\|([^>]+)>/g, "$2")
-    .replace(/<([^>]+)>/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function makeSnippet(message: SlackMessage) {
-  const cleanText = cleanSlackText(message.text ?? "");
-
-  if (!cleanText) return null;
-
-  return cleanText.length > 140 ? `${cleanText.slice(0, 137)}...` : cleanText;
-}
-
-function isMeaningfulMessage(message: SlackMessage) {
-  if (message.type !== "message") return false;
-  if (!message.user || !message.ts) return false;
-  if (message.bot_id || message.app_id) return false;
-  if (message.subtype) return false;
-
-  return Boolean(message.text?.trim() || message.files?.length);
-}
-
-function shouldSuppressForAction(state: SlackActionState | null, lastMessageTs: string, nowMs: number) {
-  if (!state || state.lastMessageTs !== lastMessageTs) return false;
-
-  if (state.status === "done" || state.status === "dismissed") return true;
-
-  if (state.status === "snoozed" && state.snoozedUntil) {
-    return Date.parse(state.snoozedUntil) > nowMs;
-  }
-
-  return false;
-}
-
 async function fetchAllDmConversations(scopeSet: Set<string>) {
   const conversations: SlackConversation[] = [];
   let cursor = "";
@@ -449,7 +466,7 @@ async function fetchLatestMeaningfulMessage(channelId: string, scopeSet: Set<str
   }
 
   collectScopes(scopeSet, response);
-  return (response.messages ?? []).find(isMeaningfulMessage) ?? null;
+  return findLatestMeaningfulSlackMessage((response.messages ?? []) as SlackMessageRuleInput[]);
 }
 
 async function fetchSlackPersonName(userId: string | undefined, scopeSet: Set<string>) {
@@ -490,6 +507,8 @@ function makeDiagnosticsBase(): SlackNotificationDiagnostics {
     redisConfigured: Boolean(getRedisConfig(env)),
     redisReadable: false,
     redisWritable: false,
+    thresholdMinutes: Math.round(getFollowUpThresholdMs() / 60_000),
+    productionThresholdLocked: isProductionRuntime(),
     lastSyncAt: null,
     lastCheckAt: null,
     totalDmChannelsScanned: 0,
@@ -501,6 +520,11 @@ function makeDiagnosticsBase(): SlackNotificationDiagnostics {
 }
 
 async function writeSlackDiagnostics(diagnostics: SlackNotificationDiagnostics) {
+  if (canUseLocalDevStore()) {
+    localDevDiagnostics = diagnostics;
+    return;
+  }
+
   try {
     await redisSetJson(DIAGNOSTICS_KEY, diagnostics, REDIS_NOTIFICATION_TTL_SECONDS);
   } catch (error) {
@@ -512,6 +536,25 @@ async function writeSlackDiagnostics(diagnostics: SlackNotificationDiagnostics) 
 
 export async function getSlackNotificationDiagnostics(): Promise<SlackNotificationDiagnostics> {
   const base = makeDiagnosticsBase();
+
+  if (canUseLocalDevStore()) {
+    const notifications = await readStoredNotifications();
+
+    return {
+      ...(localDevDiagnostics ?? base),
+      checkedAt: nowIso(),
+      env: getSlackNotificationEnvDiagnostics(),
+      redisConfigured: false,
+      redisReadable: true,
+      redisWritable: true,
+      thresholdMinutes: base.thresholdMinutes,
+      productionThresholdLocked: false,
+      activeNotificationCount: notifications.count,
+      lastWarning:
+        localDevDiagnostics?.lastWarning ??
+        "Using local in-memory test storage. Add Upstash Redis env vars for deployment.",
+    };
+  }
 
   if (!base.redisConfigured) {
     return {
@@ -530,6 +573,9 @@ export async function getSlackNotificationDiagnostics(): Promise<SlackNotificati
       env: getSlackNotificationEnvDiagnostics(),
       redisConfigured: true,
       redisReadable: true,
+      thresholdMinutes: stored?.thresholdMinutes ?? base.thresholdMinutes,
+      productionThresholdLocked:
+        stored?.productionThresholdLocked ?? base.productionThresholdLocked,
       activeNotificationCount: notifications.count,
     };
   } catch (error) {
@@ -552,7 +598,7 @@ export async function syncSlackNotifications(
   try {
     requireSlackConfig(env);
 
-    if (!getRedisConfig(env)) {
+    if (!getRedisConfig(env) && !canUseLocalDevStore()) {
       throw new Error("Upstash Redis REST env vars are missing.");
     }
 
@@ -575,37 +621,39 @@ export async function syncSlackNotifications(
     diagnostics.totalDmChannelsScanned = conversations.length;
 
     const nowMs = Date.now();
+    const thresholdMs = getFollowUpThresholdMs();
     const notifications: SlackNotificationItem[] = [];
 
     for (const conversation of conversations) {
       const latestMessage = await fetchLatestMeaningfulMessage(conversation.id, scopeSet);
 
-      if (!latestMessage?.ts) continue;
-      if (latestMessage.user === env.slackOwnerUserId) continue;
-
-      const messageAgeHours = Math.floor((nowMs - slackTsToMs(latestMessage.ts)) / 3_600_000);
-
-      if (messageAgeHours < FOLLOW_UP_AFTER_HOURS) continue;
-
       const actionState = await readNotificationActionState(conversation.id);
+      const evaluation = evaluateSlackDmFollowup({
+        messages: latestMessage ? [latestMessage] : [],
+        ownerUserId: env.slackOwnerUserId,
+        nowMs,
+        thresholdMs,
+        actionState,
+      });
 
-      if (shouldSuppressForAction(actionState, latestMessage.ts, nowMs)) {
-        continue;
-      }
+      if (evaluation.status !== "notify") continue;
 
-      const personName = await fetchSlackPersonName(conversation.user ?? latestMessage.user, scopeSet);
+      const personName = await fetchSlackPersonName(
+        conversation.user ?? evaluation.message.user,
+        scopeSet,
+      );
 
       notifications.push({
         id: conversation.id,
         conversationId: conversation.id,
         personName,
-        personUserId: conversation.user ?? latestMessage.user ?? null,
-        lastMessageAt: new Date(slackTsToMs(latestMessage.ts)).toISOString(),
-        lastMessageTs: latestMessage.ts,
-        overdueHours: messageAgeHours,
-        timeOverdue: formatHoursOverdue(messageAgeHours),
+        personUserId: conversation.user ?? evaluation.message.user ?? null,
+        lastMessageAt: evaluation.lastMessageAt,
+        lastMessageTs: evaluation.message.ts,
+        overdueHours: evaluation.overdueHours,
+        timeOverdue: evaluation.timeOverdue,
         jumpUrl: makeSlackJumpUrl(auth.team_id, conversation.id),
-        snippet: makeSnippet(latestMessage),
+        snippet: evaluation.snippet,
       });
     }
 
@@ -668,6 +716,10 @@ export const fetchSlackNotifications = createServerFn({ method: "GET" }).handler
   await requireDashboardAuth();
 
   if (!getRedisConfig()) {
+    if (canUseLocalDevStore()) {
+      return readStoredNotifications();
+    }
+
     return {
       checkedAt: nowIso(),
       lastSyncAt: null,
@@ -690,6 +742,74 @@ export const fetchSlackNotifications = createServerFn({ method: "GET" }).handler
   }
 });
 
+async function removeStoredNotification(conversationId: string, lastMessageTs: string) {
+  const stored = await readStoredNotifications();
+  const items = stored.items.filter(
+    (item) => item.conversationId !== conversationId || item.lastMessageTs !== lastMessageTs,
+  );
+
+  await writeStoredNotificationsPayload(
+    {
+      ...stored,
+      checkedAt: nowIso(),
+      count: items.length,
+      items,
+    } satisfies SlackNotificationsPayload,
+  );
+}
+
+export const createTestSlackNotification = createServerFn({ method: "POST" }).handler(async () => {
+  const { requireAdminAuth } = await import("@/lib/auth.server");
+  await requireAdminAuth();
+
+  if (!getRedisConfig() && !canUseLocalDevStore()) {
+    return {
+      ok: false as const,
+      message: "Upstash Redis env vars are missing, so the test notification cannot be stored.",
+    };
+  }
+
+  const lastMessageMs = Date.now() - 25 * 60 * 60 * 1000;
+  const lastMessageTs = (lastMessageMs / 1000).toFixed(6);
+  const existing = await readStoredNotifications();
+  const testItem = {
+    id: TEST_NOTIFICATION_ID,
+    conversationId: TEST_NOTIFICATION_ID,
+    personName: "Test Slack Reminder",
+    personUserId: "UTEST",
+    lastMessageAt: new Date(lastMessageMs).toISOString(),
+    lastMessageTs,
+    overdueHours: 25,
+    timeOverdue: formatSlackOverdue(25),
+    jumpUrl: null,
+    snippet: makeSlackSnippet({
+      type: "message",
+      user: "UTEST",
+      ts: lastMessageTs,
+      text: "This is a fake dashboard notification for testing the bell.",
+    }),
+  } satisfies SlackNotificationItem;
+  const items = [
+    testItem,
+    ...existing.items.filter((item) => item.conversationId !== TEST_NOTIFICATION_ID),
+  ];
+
+  await writeStoredNotificationsPayload(
+    {
+      checkedAt: nowIso(),
+      lastSyncAt: existing.lastSyncAt ?? nowIso(),
+      count: items.length,
+      items,
+      warning: existing.warning,
+    } satisfies SlackNotificationsPayload,
+  );
+
+  return {
+    ok: true as const,
+    message: "Test Slack notification created. Open the bell to preview it.",
+  };
+});
+
 export const markSlackNotificationDone = createServerFn({ method: "POST" })
   .inputValidator(notificationActionInput)
   .handler(async ({ data }) => {
@@ -701,6 +821,7 @@ export const markSlackNotificationDone = createServerFn({ method: "POST" })
       lastMessageTs: data.lastMessageTs,
       updatedAt: nowIso(),
     });
+    await removeStoredNotification(data.conversationId, data.lastMessageTs);
     await syncSlackNotifications({ source: "manual" });
 
     return { ok: true as const };
@@ -717,6 +838,7 @@ export const dismissSlackNotification = createServerFn({ method: "POST" })
       lastMessageTs: data.lastMessageTs,
       updatedAt: nowIso(),
     });
+    await removeStoredNotification(data.conversationId, data.lastMessageTs);
     await syncSlackNotifications({ source: "manual" });
 
     return { ok: true as const };
@@ -734,6 +856,7 @@ export const snoozeSlackNotification = createServerFn({ method: "POST" })
       snoozedUntil: new Date(Date.now() + data.hours * 3_600_000).toISOString(),
       updatedAt: nowIso(),
     });
+    await removeStoredNotification(data.conversationId, data.lastMessageTs);
     await syncSlackNotifications({ source: "manual" });
 
     return { ok: true as const };

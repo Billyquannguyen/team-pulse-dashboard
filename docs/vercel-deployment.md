@@ -72,3 +72,5 @@ For contract review, Billy GPT accepts PDF uploads in chat, extracts readable te
 For Slack DM follow-ups, the app uses `SLACK_USER_TOKEN` because personal DM history belongs to your Slack user, not the bot. `SLACK_OWNER_USER_ID` should be your own Slack user ID. The hourly Vercel Cron job calls `/api/slack-followups` and is protected by `CRON_SECRET`. Notifications are stored in Upstash Redis using `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, then displayed inside the dashboard bell.
 
 The Slack user token needs permission to list IM conversations and read IM history. In Slack terms, expect scopes like `im:read`, `im:history`, and `users:read`. Private DM text is checked server-side only. The dashboard only receives a small reminder record with the person name, timestamp, overdue age, Slack open link, and a short safe snippet.
+
+For local testing only, you can set `SLACK_FOLLOWUP_THRESHOLD_MINUTES=1` before starting the dev server. Production ignores this and keeps the real 24-hour threshold.

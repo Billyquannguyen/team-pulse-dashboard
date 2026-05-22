@@ -1,10 +1,16 @@
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi } from "@tanstack/react-router";
-import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import {
   getGoogleSheetsDiagnostics,
   type GoogleSheetsDiagnostics,
 } from "@/lib/google-sheets-diagnostics";
+import {
+  createTestSlackNotification,
+  slackNotificationsQuery,
+} from "@/lib/slack-notifications";
 import { cn } from "@/lib/utils";
 
 const rootRoute = getRouteApi("__root__");
@@ -473,6 +479,50 @@ function ContractReviewDiagnosticsCard({
   );
 }
 
+function CreateTestSlackNotificationButton() {
+  const [message, setMessage] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const queryClient = useQueryClient();
+
+  const handleCreate = async () => {
+    setIsCreating(true);
+    setMessage("");
+
+    try {
+      const result = await createTestSlackNotification();
+      setMessage(result.message);
+      await queryClient.invalidateQueries({ queryKey: slackNotificationsQuery.queryKey });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create the test notification.");
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-2xl border border-border bg-background p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-black">Manual test</div>
+          <p className="mt-1 text-xs font-semibold text-muted-foreground">
+            Creates a fake dashboard notification without calling Slack.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleCreate}
+          disabled={isCreating}
+          className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isCreating && <Loader2 className="h-4 w-4 animate-spin" />}
+          Create Test Slack Notification
+        </button>
+      </div>
+      {message && <p className="mt-3 text-xs font-bold text-muted-foreground">{message}</p>}
+    </div>
+  );
+}
+
 function SlackNotificationsDiagnosticsCard({
   diagnostics,
 }: {
@@ -512,6 +562,7 @@ function SlackNotificationsDiagnosticsCard({
         <MetricBox label="Overdue DMs" value={diagnostics.overdueCount} />
         <MetricBox label="Active reminders" value={diagnostics.activeNotificationCount} />
         <MetricBox label="DMs scanned" value={diagnostics.totalDmChannelsScanned} />
+        <MetricBox label="Threshold" value={`${diagnostics.thresholdMinutes} min`} />
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -519,6 +570,10 @@ function SlackNotificationsDiagnosticsCard({
           <div className="font-semibold">Schedule and storage</div>
           <div className="mt-2 space-y-1 text-xs text-muted-foreground">
             <div>Vercel Cron: hourly via /api/slack-followups</div>
+            <div>
+              Production threshold locked:{" "}
+              {diagnostics.productionThresholdLocked ? "Yes" : "No"}
+            </div>
             <div>Redis readable: {diagnostics.redisReadable ? "Yes" : "No"}</div>
             <div>Redis writable: {diagnostics.redisWritable ? "Yes" : "No"}</div>
             <div>
@@ -551,6 +606,8 @@ function SlackNotificationsDiagnosticsCard({
           </div>
         </div>
       </div>
+
+      <CreateTestSlackNotificationButton />
 
       {(diagnostics.lastError || diagnostics.lastWarning) && (
         <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
