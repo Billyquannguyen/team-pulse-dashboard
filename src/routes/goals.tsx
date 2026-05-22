@@ -1,6 +1,7 @@
 import { createFileRoute, getRouteApi, useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Check,
   Lock,
@@ -622,50 +623,41 @@ function AdminGoalControls({
     setPasswordError("");
   };
 
-  useEffect(() => {
-    if (!editDialogOpen) return;
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [editDialogOpen]);
-
   return (
-    <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold">Admin goal controls</h3>
-          <p className="text-xs text-muted-foreground">
-            Edit the main targets here. Members can keep viewing without logging in.
-          </p>
-        </div>
-        <div className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
-          <Lock className="h-3.5 w-3.5" />
-          {isAdmin ? "Admin unlocked" : "Locked"}
-        </div>
-      </div>
-
-      <div className="tb-hover-lift mt-5 rounded-2xl bg-muted/50 p-4">
+    <>
+      <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold">Goals are view-only</div>
-            <div className="text-xs text-muted-foreground">
-              {isAdmin
-                ? "Click edit to change targets."
-                : "Click edit and enter the admin password to change targets."}
-            </div>
+            <h3 className="text-base font-semibold">Admin goal controls</h3>
+            <p className="text-xs text-muted-foreground">
+              Edit the main targets here. Members can keep viewing without logging in.
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={openEditDialog}
-            className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"
-          >
-            <Lock className="h-4 w-4" />
-            Edit goals
-          </button>
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
+            <Lock className="h-3.5 w-3.5" />
+            {isAdmin ? "Admin unlocked" : "Locked"}
+          </div>
+        </div>
+
+        <div className="tb-hover-lift mt-5 rounded-2xl bg-muted/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">Goals are view-only</div>
+              <div className="text-xs text-muted-foreground">
+                {isAdmin
+                  ? "Click edit to change targets."
+                  : "Click edit and enter the admin password to change targets."}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={openEditDialog}
+              className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"
+            >
+              <Lock className="h-4 w-4" />
+              Edit goals
+            </button>
+          </div>
         </div>
       </div>
 
@@ -706,7 +698,7 @@ function AdminGoalControls({
                 </div>
               </div>
 
-              <div className="grid shrink-0 gap-2 border-t border-border bg-card p-4 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] sm:grid-cols-2 md:p-5">
+              <div className="grid shrink-0 gap-2 border-t border-border bg-card p-5 sm:grid-cols-2 md:p-6">
                 <button
                   type="button"
                   onClick={closeEditDialog}
@@ -900,7 +892,7 @@ function AdminGoalControls({
                 </section>
               </div>
 
-              <div className="flex shrink-0 justify-end border-t border-border bg-card p-4 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] md:p-5">
+              <div className="flex shrink-0 justify-end border-t border-border bg-card p-5 md:p-6">
                 <button
                   type="button"
                   onClick={closeEditDialog}
@@ -913,7 +905,7 @@ function AdminGoalControls({
           )}
         </GoalModal>
       )}
-    </div>
+    </>
   );
 }
 
@@ -928,19 +920,32 @@ function GoalModal({
   children: React.ReactNode;
   onClose: () => void;
 }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/35 p-3 backdrop-blur-sm sm:p-5">
-      <div className="flex max-h-[85vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[2rem] bg-card shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-border">
-        <div className="shrink-0 border-b border-border bg-card/95 px-5 py-4 md:px-6">
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const previousOverscrollBehavior = document.body.style.overscrollBehavior;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "contain";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscrollBehavior;
+    };
+  }, []);
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border">
+        <div className="shrink-0 border-b border-border p-5 md:p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h4 className="text-lg font-bold">{title}</h4>
+              <h4 className="text-base font-semibold">{title}</h4>
               <p className="mt-1 text-sm text-muted-foreground">{description}</p>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="tb-action rounded-full bg-muted p-2 hover:bg-accent"
+              className="tb-action rounded-full p-2 hover:bg-accent"
               aria-label="Close edit goals"
             >
               <X className="h-4 w-4" />
@@ -949,7 +954,8 @@ function GoalModal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
