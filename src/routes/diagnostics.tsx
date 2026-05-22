@@ -344,8 +344,10 @@ function NotionKnowledgeDiagnosticsCard({
         />
         <MetricBox label="Root access" value={diagnostics.rootPageAccess} />
         <MetricBox label="Synced" value={diagnostics.isSynced ? "Yes" : "No"} />
+        <MetricBox label="Indexed" value={diagnostics.indexed ? "Yes" : "No"} />
         <MetricBox label="Pages indexed" value={diagnostics.pagesIndexed} />
         <MetricBox label="Chunks indexed" value={diagnostics.chunksIndexed} />
+        <MetricBox label="Last retrieval" value={diagnostics.lastRetrievalResultCount} />
         <MetricBox
           label="Last sync"
           value={
@@ -361,6 +363,7 @@ function NotionKnowledgeDiagnosticsCard({
           <div>Setup ready: {diagnostics.setupReady ? "Yes" : "No"}</div>
           <div>Token env: {diagnostics.tokenEnvName}</div>
           <div>Last duration: {diagnostics.lastDurationMs ?? "-"}ms</div>
+          <div>Recursive subpages: enabled up to the configured nested block depth</div>
           <div>
             Storage: private server-side index. Page contents are not shown in diagnostics.
           </div>
@@ -434,6 +437,7 @@ function ContractReviewDiagnosticsCard({
         <MetricBox label="Extraction" value={diagnostics.extractionStatus} />
         <MetricBox label="Extracted chars" value={diagnostics.lastExtractedChars} />
         <MetricBox label="Sent chars" value={diagnostics.lastSentChars} />
+        <MetricBox label="Chunks" value={diagnostics.reviewChunkCount} />
       </div>
 
       <div className="mt-4 rounded-2xl bg-muted/45 p-4 text-sm">
@@ -443,6 +447,11 @@ function ContractReviewDiagnosticsCard({
           <div>Max PDF size: {(diagnostics.maxPdfBytes / 1024 / 1024).toFixed(1)}MB</div>
           <div>Max contract characters sent: {diagnostics.maxContractCharsSent}</div>
           <div>Truncated last review: {diagnostics.truncatedForCostSafety ? "Yes" : "No"}</div>
+          <div>OpenAI calls last review: {diagnostics.openAiCallCount}</div>
+          <div>
+            Sources used last review:{" "}
+            {diagnostics.sourcesUsed.length > 0 ? diagnostics.sourcesUsed.join(", ") : "-"}
+          </div>
           <div>
             Last review:{" "}
             {diagnostics.lastReviewAt ? new Date(diagnostics.lastReviewAt).toLocaleString() : "-"}

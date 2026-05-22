@@ -1,9 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ExternalLink, Search, Store } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  ExternalLink,
+  Search,
+  Store,
+} from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { activeBrandsQuery } from "@/lib/active-brands";
+
+const PAGE_SIZE = 20;
+const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 
 export const Route = createFileRoute("/active-brands")({
   head: () => ({
@@ -23,8 +35,62 @@ function toHref(value: string) {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
 }
 
+function normalizeHeader(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function getEmailValues(value: string) {
+  return value.match(EMAIL_PATTERN) ?? [];
+}
+
+function isBrandColumn(header: string, index: number) {
+  const normalized = normalizeHeader(header);
+  return (
+    normalized.includes("brand") ||
+    normalized.includes("company") ||
+    normalized.includes("business") ||
+    (index === 0 && normalized.includes("name"))
+  );
+}
+
+function isStatusColumn(header: string) {
+  const normalized = normalizeHeader(header);
+  return (
+    normalized.includes("status") ||
+    normalized.includes("stage") ||
+    normalized.includes("type") ||
+    normalized.includes("category") ||
+    normalized.includes("niche")
+  );
+}
+
+function isNumberValue(value: string) {
+  const normalized = value.replace(/[£,$%\s]/g, "");
+  return normalized.length > 0 && Number.isFinite(Number(normalized));
+}
+
+function getStatusTone(value: string) {
+  const normalized = value.toLowerCase();
+  if (/(active|yes|signed|partner|approved|live|warm)/.test(normalized)) {
+    return "border-fun-lime/50 bg-fun-lime/20 text-foreground";
+  }
+  if (/(pending|maybe|follow|waiting|review)/.test(normalized)) {
+    return "border-fun-yellow/60 bg-fun-yellow/20 text-foreground";
+  }
+  if (/(no|cold|lost|rejected|inactive)/.test(normalized)) {
+    return "border-destructive/25 bg-destructive/10 text-destructive";
+  }
+  return "border-border bg-muted text-muted-foreground";
+}
+
+function getCellKey(rowIndex: number, columnIndex: number, value: string) {
+  return `${rowIndex}-${columnIndex}-${value}`;
+}
+
 function ActiveBrandsPage() {
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const { data } = useQuery(activeBrandsQuery);
   const headers = data?.headers ?? [];
   const rows = data?.rows ?? [];
@@ -41,6 +107,28 @@ function ActiveBrandsPage() {
     if (!query) return rows;
     return rows.filter((row) => row.join(" ").toLowerCase().includes(query));
   }, [q, rows]);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = filteredRows.slice(pageStart, pageStart + PAGE_SIZE);
+  const showingStart = filteredRows.length === 0 ? 0 : pageStart + 1;
+  const showingEnd = Math.min(pageStart + PAGE_SIZE, filteredRows.length);
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, rows]);
+
+  const copyEmail = async (key: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      window.setTimeout(() => {
+        setCopiedKey((current) => (current === key ? null : current));
+      }, 1400);
+    } catch {
+      setCopiedKey(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -102,6 +190,9 @@ function ActiveBrandsPage() {
               className="tb-search h-10 w-full rounded-2xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
+          <div className="rounded-2xl bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground">
+            Showing {showingStart}-{showingEnd} of {filteredRows.length}
+          </div>
         </div>
 
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
@@ -120,32 +211,78 @@ function ActiveBrandsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((row, rowIndex) => (
+              {pageRows.map((row, pageRowIndex) => {
+                const rowIndex = pageStart + pageRowIndex;
+
+                return (
                 <tr
                   key={`${rowIndex}-${row.join("|")}`}
                   className="tb-row-hover border-t border-border/60 hover:bg-muted/40"
                 >
-                  {headers.map((_, columnIndex) => {
+                  {headers.map((header, columnIndex) => {
                     const value = row[columnIndex] ?? "";
+                    const trimmedValue = value.trim();
+                    const emails = getEmailValues(trimmedValue);
+                    const email = emails.length > 0;
+                    const brand = isBrandColumn(header, columnIndex);
+                    const status = isStatusColumn(header) && trimmedValue;
+                    const number = isNumberValue(trimmedValue);
+                    const copyValue = emails.join(", ");
+                    const copyKey = getCellKey(rowIndex, columnIndex, copyValue);
+
                     return (
-                      <td key={columnIndex} className="px-3 py-3 text-muted-foreground">
-                        {isLikelyUrl(value) ? (
+                      <td
+                        key={columnIndex}
+                        className={`px-3 py-3 align-middle ${
+                          brand ? "min-w-[180px]" : "text-muted-foreground"
+                        } ${number ? "text-right tabular-nums" : ""}`}
+                      >
+                        {brand && trimmedValue ? (
+                          <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-fun-pink shadow-sm" />
+                            <span className="font-bold text-foreground">{trimmedValue}</span>
+                          </div>
+                        ) : email ? (
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-foreground">{trimmedValue}</span>
+                            <button
+                              type="button"
+                              onClick={() => copyEmail(copyKey, copyValue)}
+                              className="tb-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+                              aria-label={`Copy ${copyValue}`}
+                              title="Copy email"
+                            >
+                              {copiedKey === copyKey ? (
+                                <Check className="h-3.5 w-3.5" />
+                              ) : (
+                                <Copy className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        ) : status ? (
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${getStatusTone(trimmedValue)}`}
+                          >
+                            {trimmedValue}
+                          </span>
+                        ) : isLikelyUrl(trimmedValue) ? (
                           <a
-                            href={toHref(value)}
+                            href={toHref(trimmedValue)}
                             target="_blank"
                             rel="noreferrer"
-                            className="tb-action font-medium text-primary hover:underline"
+                            className="tb-action inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary hover:bg-primary/15"
                           >
-                            {value}
+                            Open <ExternalLink className="h-3 w-3" />
                           </a>
                         ) : (
-                          value || "-"
+                          trimmedValue || "-"
                         )}
                       </td>
                     );
                   })}
                 </tr>
-              ))}
+                );
+              })}
               {filteredRows.length === 0 && (
                 <tr className="border-t border-border/60">
                   <td
@@ -159,6 +296,34 @@ function ActiveBrandsPage() {
             </tbody>
           </table>
         </div>
+
+        {filteredRows.length > PAGE_SIZE && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs font-semibold text-muted-foreground">
+              Page {currentPage} of {pageCount} · {PAGE_SIZE} brands per page
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={currentPage === 1}
+                className="tb-action inline-flex h-10 items-center gap-1.5 rounded-2xl bg-muted px-3 text-sm font-semibold hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+                disabled={currentPage === pageCount}
+                className="tb-action inline-flex h-10 items-center gap-1.5 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

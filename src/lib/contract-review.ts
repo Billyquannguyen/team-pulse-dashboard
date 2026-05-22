@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireDashboardAuth } from "@/lib/auth";
 import {
   formatBillyGptContextForModel,
   getBillyGptContextBundle,
@@ -25,6 +24,9 @@ export type ContractReviewDiagnostics = {
   temporaryFileHandling: "memory-only";
   maxPdfBytes: number;
   maxContractCharsSent: number;
+  reviewChunkCount: number;
+  openAiCallCount: number;
+  sourcesUsed: string[];
   lastError: string | null;
 };
 
@@ -34,13 +36,15 @@ type ContractReviewGlobal = typeof globalThis & {
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
 const MAX_CONTRACT_CHARS_SENT = 65_000;
+const CONTRACT_CHUNK_CHARS = 12_000;
+const MAX_CONTRACT_CHUNKS = 6;
 const MIN_USEFUL_TEXT_CHARS = 400;
 const MAX_BASE64_CHARS = Math.ceil((MAX_PDF_BYTES * 4) / 3) + 128;
 
 const contractPdfInput = z.object({
-  fileName: z.string().trim().min(1).max(180),
-  mimeType: z.string().trim().max(120).optional().default("application/pdf"),
-  fileBase64: z.string().min(1).max(MAX_BASE64_CHARS),
+  fileName: z.string().trim().min(1),
+  mimeType: z.string().trim().optional().default("application/pdf"),
+  fileBase64: z.string().min(1),
 });
 
 function defaultDiagnostics(): ContractReviewDiagnostics {
@@ -61,6 +65,9 @@ function defaultDiagnostics(): ContractReviewDiagnostics {
     temporaryFileHandling: "memory-only",
     maxPdfBytes: MAX_PDF_BYTES,
     maxContractCharsSent: MAX_CONTRACT_CHARS_SENT,
+    reviewChunkCount: 0,
+    openAiCallCount: 0,
+    sourcesUsed: [],
     lastError: null,
   };
 }
@@ -279,11 +286,101 @@ function truncateContractText(text: string) {
   const truncated = text.length > MAX_CONTRACT_CHARS_SENT;
 
   return {
-    text: truncated
-      ? `${text.slice(0, MAX_CONTRACT_CHARS_SENT)}\n\n[Contract text truncated for cost-safe processing.]`
-      : text,
+    text: truncated ? text.slice(0, MAX_CONTRACT_CHARS_SENT) : text,
     truncated,
   };
+}
+
+function splitContractText(text: string) {
+  const costSafe = truncateContractText(text);
+  const sentences = costSafe.text.match(/[^.!?]+[.!?]+|\S[\s\S]{0,220}(?=\s|$)/g) ?? [
+    costSafe.text,
+  ];
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const sentence of sentences) {
+    const next = sentence.trim();
+    if (!next) continue;
+
+    if (current && `${current} ${next}`.length > CONTRACT_CHUNK_CHARS) {
+      chunks.push(current.trim());
+      current = next;
+      continue;
+    }
+
+    current = current ? `${current} ${next}` : next;
+  }
+
+  if (current.trim()) chunks.push(current.trim());
+
+  return {
+    chunks: chunks.slice(0, MAX_CONTRACT_CHUNKS),
+    truncated: costSafe.truncated || chunks.length > MAX_CONTRACT_CHUNKS,
+    sentChars: chunks.slice(0, MAX_CONTRACT_CHUNKS).join("\n").length,
+  };
+}
+
+function getSourceLabels(tags: Array<"handbook" | "sheets" | "web">) {
+  const labels = ["Contract"];
+
+  if (tags.includes("handbook")) labels.push("Handbook");
+  if (tags.includes("sheets")) labels.push("Sheets");
+  if (tags.includes("web")) labels.push("Web");
+
+  return labels;
+}
+
+function appendContractSources(review: string, sources: string[]) {
+  const clean = review.trim();
+  const withoutDuplicateDisclaimer = clean.replace(/\n*This is not legal advice\.?\s*$/i, "");
+  const sourceLine = `Sources used: ${sources.join(", ")}`;
+  const withSources = /Sources used:/i.test(withoutDuplicateDisclaimer)
+    ? withoutDuplicateDisclaimer
+    : `${withoutDuplicateDisclaimer}\n\n${sourceLine}`;
+
+  return `${withSources}\n\nThis is not legal advice.`;
+}
+
+function cleanModelContractReview(value: string) {
+  const lines = value
+    .replace(/```(?:json|markdown)?/gi, "")
+    .replace(/```/g, "")
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !/^(\{|\}|"schema"|raw|debug|extracted contract text|team billion source context|source context|contract text characters)/i.test(
+        trimmed,
+      );
+    });
+
+  return lines.join("\n").trim();
+}
+
+function contractContextQuery(fileName: string, text: string) {
+  return [
+    "Team Billion influencer marketing contract review preferences",
+    "usage rights exclusivity deliverables payment cancellation approval revisions termination",
+    fileName.replace(/\.pdf$/i, ""),
+    text.slice(0, 1800),
+  ].join(" ");
+}
+
+async function summarizeContractChunks(chunks: string[]) {
+  const notes: string[] = [];
+
+  for (const [index, chunk] of chunks.entries()) {
+    const response = await callOpenAiText({
+      instructions:
+        "Create internal contract-review notes from this contract section. Do not write the final user answer. Do not quote long passages. Do not dump raw contract text. Keep it concise and practical. Capture parties, scope, payment, usage rights, exclusivity, deliverables, approval/revisions, termination, risky clauses, and possible redlines.",
+      input: `Contract section ${index + 1} of ${chunks.length}:\n${chunk}`,
+      maxOutputTokens: 900,
+    });
+
+    notes.push(`Section ${index + 1} notes:\n${response.text}`);
+  }
+
+  return notes;
 }
 
 function friendlyContractError(error: unknown) {
@@ -300,6 +397,7 @@ function friendlyContractError(error: unknown) {
 export const reviewContractPdf = createServerFn({ method: "POST" })
   .inputValidator(contractPdfInput)
   .handler(async ({ data }) => {
+    const { requireDashboardAuth } = await import("@/lib/auth.server");
     await requireDashboardAuth();
 
     const fileName = cleanFileName(data.fileName);
@@ -313,6 +411,14 @@ export const reviewContractPdf = createServerFn({ method: "POST" })
     try {
       if (!/pdf/i.test(data.mimeType) && !fileName.toLowerCase().endsWith(".pdf")) {
         throw new Error("Only PDF contract uploads are supported.");
+      }
+
+      if (data.fileBase64.length > MAX_BASE64_CHARS) {
+        updateContractDiagnostics({
+          uploadStatus: "rejected",
+          lastError: "PDF exceeded the size limit.",
+        });
+        throw new Error("PDF exceeded the size limit.");
       }
 
       const bytes = decodeBase64ToBytes(data.fileBase64);
@@ -339,28 +445,29 @@ export const reviewContractPdf = createServerFn({ method: "POST" })
         throw new Error("No readable PDF text was extracted.");
       }
 
-      const costSafeContract = truncateContractText(extraction.text);
+      const contractChunks = splitContractText(extraction.text);
       const context = await getBillyGptContextBundle(
-        "influencer marketing contract review red flags usage rights exclusivity payment deliverables cancellation brand negotiation Team Billion preferences",
+        contractContextQuery(fileName, extraction.text),
         { includeWeb: true },
       );
+      const contractNotes = await summarizeContractChunks(contractChunks.chunks);
+      const sourcesUsed = getSourceLabels(context.sourceTags);
       const modelInput = `Contract file: ${fileName}
 Extraction status: ${extraction.status}
-Contract text characters extracted: ${extraction.extractedChars}
-Contract text characters sent: ${costSafeContract.text.length}
+Contract sections reviewed: ${contractChunks.chunks.length}
 
-Team Billion source context:
+Relevant Team Billion context, for internal use only:
 ${formatBillyGptContextForModel(context)}
 
-Extracted contract text:
-${costSafeContract.text}`;
+Internal contract notes, for final answer:
+${contractNotes.join("\n\n")}`;
       const response = await callOpenAiText({
         instructions:
-          'You are Billy GPT reviewing an influencer/brand contract for Team Billion. This is not legal advice. Use [handbook] context first for Team Billion preferences and rules, [sheets] for operational context, and [web] only for general legal/business context. Do not claim to be a lawyer. Do not dump raw contract text. Return exactly these sections: "1. Plain-English summary", "2. Risky clauses", "3. Suggested edits/redlines", "4. Questions to ask the brand", "5. Final negotiation notes". Be specific, practical, and concise. For suggested edits, use bullets with "Original concern" and "Suggested wording" when possible.',
+          'You are Billy GPT reviewing an influencer/brand contract for Team Billion. Write a polished user-facing contract review. Use [handbook] context first, [sheets] if relevant, and [web] only as general external context. Never expose raw extraction text, raw handbook chunks, JSON, schema text, logs, debug messages, or stack traces. Return exactly these sections: "Contract summary", "Risk level", "Key issues", "Suggested redlines/edits", "Questions to ask the brand/client", "Negotiation notes". Be specific, concise, and practical. For redlines, write suggested replacement wording when possible.',
         input: modelInput,
-        maxOutputTokens: 2200,
+        maxOutputTokens: 2600,
       });
-      const review = `This is not legal advice.\n\n${response.text}`;
+      const review = appendContractSources(cleanModelContractReview(response.text), sourcesUsed);
 
       updateContractDiagnostics({
         uploadStatus: "reviewed",
@@ -369,8 +476,11 @@ ${costSafeContract.text}`;
         lastFileName: fileName,
         lastFileSizeBytes: bytes.byteLength,
         lastExtractedChars: extraction.extractedChars,
-        lastSentChars: costSafeContract.text.length,
-        truncatedForCostSafety: costSafeContract.truncated,
+        lastSentChars: contractChunks.sentChars,
+        truncatedForCostSafety: contractChunks.truncated,
+        reviewChunkCount: contractChunks.chunks.length,
+        openAiCallCount: contractChunks.chunks.length + 1,
+        sourcesUsed,
         lastError: null,
       });
 
@@ -380,7 +490,7 @@ ${costSafeContract.text}`;
         fileName,
         extractionStatus: extraction.status,
         extractedChars: extraction.extractedChars,
-        sentChars: costSafeContract.text.length,
+        sentChars: contractChunks.sentChars,
       };
     } catch (error) {
       const safeMessage = friendlyContractError(error);

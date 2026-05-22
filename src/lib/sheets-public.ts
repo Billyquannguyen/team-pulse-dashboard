@@ -15,7 +15,6 @@ import {
   normalizeMemberOutreachRows,
   type OutreachRow,
 } from "@/lib/sheet-normalizer";
-import { requireDashboardAuth } from "@/lib/auth";
 
 type GoogleSheetsServer = typeof import("@/lib/google-sheets.server");
 type GoogleSheetsConfig = ReturnType<GoogleSheetsServer["getGoogleSheetsConfig"]>;
@@ -1191,6 +1190,7 @@ export async function getDashboardDataFlowDiagnostics(): Promise<DashboardDataFl
 
 export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler(
   async () => {
+    const { requireDashboardAuth } = await import("@/lib/auth.server");
     logDashboardDataFlow("dashboard server function called");
     await requireDashboardAuth();
     const googleSheets = await getGoogleSheetsServer();

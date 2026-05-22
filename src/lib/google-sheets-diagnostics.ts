@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireAdminAuth } from "@/lib/auth";
 import type { ActiveBrandsDataFlowDiagnostics } from "@/lib/active-brands";
 import type { ContractReviewDiagnostics } from "@/lib/contract-review";
 import type { NotionKnowledgeDiagnostics } from "@/lib/notion-knowledge";
@@ -164,6 +163,8 @@ async function checkSpreadsheet(
 }
 
 export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireAdminAuth } = await import("@/lib/auth.server");
+
   try {
     await requireAdminAuth();
   } catch {

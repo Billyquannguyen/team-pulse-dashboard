@@ -6,7 +6,6 @@ import {
   type AssetIconName,
   type AssetLink,
 } from "@/data/assets";
-import { requireAdminAuth, requireDashboardAuth } from "@/lib/auth";
 
 type GoogleSheetsConfig = {
   serviceAccountEmail: string;
@@ -861,6 +860,7 @@ export async function getTeamAssetsDataFlowDiagnostics(): Promise<TeamAssetsData
 }
 
 export const fetchTeamAssetsData = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireDashboardAuth } = await import("@/lib/auth.server");
   await requireDashboardAuth();
   const googleSheets = await getGoogleSheetsServer();
   const productionRuntime = googleSheets.isProductionRuntime();
@@ -890,6 +890,7 @@ export const fetchTeamAssetsData = createServerFn({ method: "GET" }).handler(asy
 export const addTeamAssetLink = createServerFn({ method: "POST" })
   .inputValidator(teamAssetInput)
   .handler(async ({ data }) => {
+    const { requireAdminAuth } = await import("@/lib/auth.server");
     await requireAdminAuth();
     const googleSheets = await getGoogleSheetsServer();
     const config = googleSheets.getGoogleSheetsConfig();
@@ -906,6 +907,7 @@ export const addTeamAssetLink = createServerFn({ method: "POST" })
 export const updateTeamAssetLink = createServerFn({ method: "POST" })
   .inputValidator(updateTeamAssetInput)
   .handler(async ({ data }) => {
+    const { requireAdminAuth } = await import("@/lib/auth.server");
     await requireAdminAuth();
     const googleSheets = await getGoogleSheetsServer();
     const config = googleSheets.getGoogleSheetsConfig();
@@ -928,6 +930,7 @@ export const updateTeamAssetLink = createServerFn({ method: "POST" })
 export const removeTeamAssetLink = createServerFn({ method: "POST" })
   .inputValidator(removeTeamAssetInput)
   .handler(async ({ data }) => {
+    const { requireAdminAuth } = await import("@/lib/auth.server");
     await requireAdminAuth();
     const googleSheets = await getGoogleSheetsServer();
     const config = googleSheets.getGoogleSheetsConfig();

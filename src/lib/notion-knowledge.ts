@@ -1,7 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { getActiveBrandsKnowledgeMatches } from "@/lib/active-brands";
-import { requireAdminAuth, requireDashboardAuth } from "@/lib/auth";
 import { callOpenAiText, getOpenAiDiagnostics, getOpenAiEnvDiagnostics } from "@/lib/openai.server";
 import {
   getWebKnowledgeDiagnostics,
@@ -48,6 +47,7 @@ type NotionKnowledgeState = {
   lastDurationMs: number | null;
   rootPageAccess: "unknown" | "ok" | "error";
   rootPageError: string | null;
+  lastRetrievalResultCount: number;
 };
 
 export type NotionKnowledgeDiagnostics = {
@@ -65,6 +65,8 @@ export type NotionKnowledgeDiagnostics = {
   errors: string[];
   warnings: string[];
   isSynced: boolean;
+  indexed: boolean;
+  lastRetrievalResultCount: number;
   lastDurationMs: number | null;
   web: WebKnowledgeDiagnostics;
 };
@@ -117,7 +119,7 @@ const MIN_CHUNK_CHARS = 240;
 const MAX_NOTION_RETRIES = 2;
 
 const askBillyInput = z.object({
-  question: z.string().trim().min(1).max(1200),
+  question: z.string().trim().min(1),
 });
 
 const STOP_WORDS = new Set([
@@ -186,6 +188,7 @@ const defaultState: NotionKnowledgeState = {
   lastDurationMs: null,
   rootPageAccess: "unknown",
   rootPageError: null,
+  lastRetrievalResultCount: 0,
 };
 
 type NotionKnowledgeGlobal = typeof globalThis & {
@@ -283,6 +286,8 @@ export function getNotionKnowledgeDiagnostics(): NotionKnowledgeDiagnostics {
     errors: state.error ? [state.error] : [],
     warnings,
     isSynced: Boolean(state.syncedAt && state.chunks.length > 0),
+    indexed: state.chunks.length > 0,
+    lastRetrievalResultCount: state.lastRetrievalResultCount,
     lastDurationMs: state.lastDurationMs,
     web: getWebKnowledgeDiagnostics(),
   };
@@ -588,6 +593,7 @@ function buildKnowledgeState(
     lastDurationMs: Date.now() - startedAt,
     rootPageAccess: "ok",
     rootPageError: null,
+    lastRetrievalResultCount: getState().lastRetrievalResultCount ?? 0,
   };
 }
 
@@ -635,6 +641,7 @@ async function runNotionSync(): Promise<NotionKnowledgeDiagnostics> {
       lastDurationMs: Date.now() - startedAt,
       rootPageAccess: "error",
       rootPageError: message,
+      lastRetrievalResultCount: getState().lastRetrievalResultCount ?? 0,
     });
 
     logNotionKnowledge("notion handbook sync failed", { error: message });
@@ -677,6 +684,31 @@ function searchKnowledge(question: string) {
     .slice(0, 3);
 }
 
+async function ensureKnowledgeReady() {
+  const state = getState();
+  const env = getNotionEnv();
+
+  if (state.chunks.length > 0 || !env.setupReady) {
+    return state;
+  }
+
+  const activeSync = getSyncPromise();
+  if (activeSync) {
+    await activeSync;
+    return getState();
+  }
+
+  await runNotionSync();
+  return getState();
+}
+
+function setLastRetrievalResultCount(count: number) {
+  setState({
+    ...getState(),
+    lastRetrievalResultCount: count,
+  });
+}
+
 function sourceLabel(chunk: KnowledgeChunk) {
   const heading = chunk.heading && chunk.heading !== chunk.pageTitle ? `, ${chunk.heading}` : "";
   return `${chunk.pageTitle}${heading}`;
@@ -703,11 +735,27 @@ function contextBundleToModelText(bundle: BillyGptContextBundle) {
     .join("\n\n");
 }
 
+function sourceTagsToLabel(tags: Array<"handbook" | "sheets" | "web">) {
+  const labels = tags.map((tag) => {
+    if (tag === "handbook") return "Handbook";
+    if (tag === "sheets") return "Sheets";
+    return "Web";
+  });
+
+  return labels.join(", ");
+}
+
+function appendSourceLabels(answer: string, tags: Array<"handbook" | "sheets" | "web">) {
+  if (tags.length === 0) return answer;
+  if (/Sources used:/i.test(answer)) return answer;
+  return `${answer.trim()}\n\nSources used: ${sourceTagsToLabel(tags)}`;
+}
+
 export async function getBillyGptContextBundle(
   question: string,
   options: { includeWeb?: boolean } = {},
 ): Promise<BillyGptContextBundle> {
-  const state = getState();
+  const state = await ensureKnowledgeReady();
   const handbookMatches = searchKnowledge(question);
   const sheetMatches = await getActiveBrandsKnowledgeMatches(question);
   const useWeb =
@@ -740,6 +788,7 @@ export async function getBillyGptContextBundle(
     })),
   ];
   const sourceTags = uniqueSourceTags(sources.map((source) => source.source));
+  setLastRetrievalResultCount(sources.length);
 
   return {
     sources,
@@ -770,13 +819,9 @@ function fallbackAnswerFromContext(
     };
   }
 
-  const sourceTitles = bundle.sources
-    .slice(0, 4)
-    .map((source) => `[${source.source}] ${source.title}`)
-    .join("\n");
-
   return {
-    answer: `I found relevant context, but the model is not configured to write a clean answer yet. Add OPENAI_API_KEY in Vercel to enable full Billy GPT responses.\n\nSources found:\n${sourceTitles}`,
+    answer:
+      "I found relevant internal context, but the AI model is not connected right now. Add OPENAI_API_KEY in Vercel to enable full Billy GPT answers.",
     foundInHandbook: bundle.foundInHandbook,
     sourceCount: bundle.sources.length,
     syncedAt: bundle.syncedAt,
@@ -786,7 +831,7 @@ function fallbackAnswerFromContext(
 
 async function answerFromKnowledge(question: string): Promise<BillyGptAnswer> {
   const diagnostics = getNotionKnowledgeDiagnostics();
-  const state = getState();
+  const state = await ensureKnowledgeReady();
 
   if (!diagnostics.setupReady) {
     return {
@@ -799,13 +844,13 @@ async function answerFromKnowledge(question: string): Promise<BillyGptAnswer> {
     };
   }
 
-  if (!state.syncedAt || state.chunks.length === 0) {
+  if (!getState().syncedAt || getState().chunks.length === 0) {
     return {
       answer:
-        "Billy GPT has not synced the Notion handbook yet. Ask an admin to click Sync Notion Knowledge first.",
+        "Billy GPT could not load the handbook index yet. Ask an admin to run Sync Notion Knowledge, then try again.",
       foundInHandbook: false,
       sourceCount: 0,
-      syncedAt: state.syncedAt,
+      syncedAt: getState().syncedAt,
       sourceTags: [],
     };
   }
@@ -821,7 +866,7 @@ async function answerFromKnowledge(question: string): Promise<BillyGptAnswer> {
           : "I could not find a reliable handbook, sheets, or web source for that. Try asking with a brand name, platform, or more specific topic.",
       foundInHandbook: false,
       sourceCount: 0,
-      syncedAt: state.syncedAt,
+      syncedAt: getState().syncedAt,
       sourceTags: [],
     };
   }
@@ -839,10 +884,10 @@ async function answerFromKnowledge(question: string): Promise<BillyGptAnswer> {
     });
 
     return {
-      answer: response.text,
+      answer: appendSourceLabels(response.text, bundle.sourceTags),
       foundInHandbook: bundle.foundInHandbook,
       sourceCount,
-      syncedAt: state.syncedAt,
+      syncedAt: getState().syncedAt,
       sourceTags: bundle.sourceTags,
     };
   } catch {
@@ -851,18 +896,20 @@ async function answerFromKnowledge(question: string): Promise<BillyGptAnswer> {
         "I found source context, but I could not get the AI model to write a clean answer right now. Try again in a moment.",
       foundInHandbook: bundle.foundInHandbook,
       sourceCount,
-      syncedAt: state.syncedAt,
+      syncedAt: getState().syncedAt,
       sourceTags: bundle.sourceTags,
     };
   }
 }
 
 export const getBillyGptKnowledgeStatus = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireDashboardAuth } = await import("@/lib/auth.server");
   await requireDashboardAuth();
   return getNotionKnowledgeDiagnostics();
 });
 
 export const syncNotionKnowledge = createServerFn({ method: "POST" }).handler(async () => {
+  const { requireAdminAuth } = await import("@/lib/auth.server");
   await requireAdminAuth();
 
   const activeSync = getSyncPromise();
@@ -879,6 +926,7 @@ export const syncNotionKnowledge = createServerFn({ method: "POST" }).handler(as
 export const askBillyGpt = createServerFn({ method: "POST" })
   .inputValidator(askBillyInput)
   .handler(async ({ data }) => {
+    const { requireDashboardAuth } = await import("@/lib/auth.server");
     await requireDashboardAuth();
-    return answerFromKnowledge(data.question);
+    return answerFromKnowledge(data.question.slice(0, 4000));
   });

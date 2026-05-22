@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireDashboardAuth } from "@/lib/auth";
 
 type GoogleSheetsServer = typeof import("@/lib/google-sheets.server");
 type GoogleSheetsConfig = ReturnType<GoogleSheetsServer["getGoogleSheetsConfig"]>;
@@ -452,6 +451,7 @@ export async function getActiveBrandsDataFlowDiagnostics(): Promise<ActiveBrands
 }
 
 export const fetchActiveBrandsData = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireDashboardAuth } = await import("@/lib/auth.server");
   await requireDashboardAuth();
   const googleSheets = await getGoogleSheetsServer();
   const productionRuntime = googleSheets.isProductionRuntime();

@@ -17,6 +17,8 @@ const SUGGESTIONS = [
   "Where can I find the outreach script?",
 ];
 
+const MAX_CONTRACT_PDF_BYTES = 10 * 1024 * 1024;
+
 export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([
@@ -71,13 +73,12 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
     try {
       const reply = await askBillyGpt({ data: { question: text } });
       setMessages((m) => [...m, { role: "assistant", content: reply.answer }]);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Billy GPT could not answer.";
+    } catch {
       setMessages((m) => [
         ...m,
         {
           role: "assistant",
-          content: `I could not reach the handbook search right now. ${message}`,
+          content: "Billy GPT could not answer right now. Try again in a moment.",
         },
       ]);
     } finally {
@@ -107,6 +108,17 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
         {
           role: "assistant",
           content: "Please upload a PDF contract. Other file types are not supported yet.",
+        },
+      ]);
+      return;
+    }
+
+    if (file.size > MAX_CONTRACT_PDF_BYTES) {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: "Please upload a PDF under 10MB so Billy GPT can review it safely.",
         },
       ]);
       return;
