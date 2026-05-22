@@ -17,6 +17,7 @@ import { Route as CreatorsRouteImport } from './routes/creators'
 import { Route as AssetsRouteImport } from './routes/assets'
 import { Route as ActiveBrandsRouteImport } from './routes/active-brands'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
 
 const LeaderboardRoute = LeaderboardRouteImport.update({
   id: '/leaderboard',
@@ -58,6 +59,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSlackFollowupsRoute = ApiSlackFollowupsRouteImport.update({
+  id: '/api/slack-followups',
+  path: '/api/slack-followups',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -68,6 +74,7 @@ export interface FileRoutesByFullPath {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/api/slack-followups': typeof ApiSlackFollowupsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -78,6 +85,7 @@ export interface FileRoutesByTo {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/api/slack-followups': typeof ApiSlackFollowupsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -89,6 +97,7 @@ export interface FileRoutesById {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/api/slack-followups': typeof ApiSlackFollowupsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -101,6 +110,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/api/slack-followups'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -111,6 +121,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/api/slack-followups'
   id:
     | '__root__'
     | '/'
@@ -121,6 +132,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/api/slack-followups'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -132,6 +144,7 @@ export interface RootRouteChildren {
   DiagnosticsRoute: typeof DiagnosticsRoute
   GoalsRoute: typeof GoalsRoute
   LeaderboardRoute: typeof LeaderboardRoute
+  ApiSlackFollowupsRoute: typeof ApiSlackFollowupsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -192,6 +205,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/slack-followups': {
+      id: '/api/slack-followups'
+      path: '/api/slack-followups'
+      fullPath: '/api/slack-followups'
+      preLoaderRoute: typeof ApiSlackFollowupsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -204,6 +224,7 @@ const rootRouteChildren: RootRouteChildren = {
   DiagnosticsRoute: DiagnosticsRoute,
   GoalsRoute: GoalsRoute,
   LeaderboardRoute: LeaderboardRoute,
+  ApiSlackFollowupsRoute: ApiSlackFollowupsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

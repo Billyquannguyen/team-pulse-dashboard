@@ -1,8 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, useRouter } from "@tanstack/react-router";
-import { Bell, LogOut, ShieldCheck, UserRound } from "lucide-react";
+import { LogOut, ShieldCheck, UserRound } from "lucide-react";
 import { team } from "@/data/team";
 import { logoutFromDashboard } from "@/lib/auth";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -32,9 +33,7 @@ export function AppHeader({ title, subtitle }: { title: string; subtitle?: strin
           )}
           {auth.role === "admin" ? "Admin" : "Team"}
         </div>
-        <button className="tb-action flex h-11 w-11 items-center justify-center rounded-2xl bg-card ring-1 ring-border transition hover:bg-accent">
-          <Bell className="h-4 w-4" />
-        </button>
+        <NotificationBell />
         <button
           type="button"
           onClick={handleLogout}

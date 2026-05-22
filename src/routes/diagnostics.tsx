@@ -473,6 +473,102 @@ function ContractReviewDiagnosticsCard({
   );
 }
 
+function SlackNotificationsDiagnosticsCard({
+  diagnostics,
+}: {
+  diagnostics: GoogleSheetsDiagnostics["slackNotifications"];
+}) {
+  if (!diagnostics) return null;
+
+  const ok = diagnostics.slackConnected && diagnostics.dmFetchSuccess && diagnostics.redisConfigured;
+
+  return (
+    <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Slack DM follow-ups</h3>
+          <p className="text-xs text-muted-foreground">
+            This checks the hourly Slack DM reminder system shown in the dashboard bell.
+          </p>
+        </div>
+        <StatusPill ok={ok} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <MetricBox label="Slack connected" value={diagnostics.slackConnected ? "Yes" : "No"} />
+        <MetricBox label="Owner user set" value={diagnostics.ownerUserConfigured ? "Yes" : "No"} />
+        <MetricBox
+          label="Owner matches token"
+          value={
+            diagnostics.ownerUserMatchesToken === null
+              ? "-"
+              : diagnostics.ownerUserMatchesToken
+                ? "Yes"
+                : "No"
+          }
+        />
+        <MetricBox label="DM fetch" value={diagnostics.dmFetchSuccess ? "OK" : "Not checked"} />
+        <MetricBox label="Redis" value={diagnostics.redisConfigured ? "Configured" : "Missing"} />
+        <MetricBox label="Overdue DMs" value={diagnostics.overdueCount} />
+        <MetricBox label="Active reminders" value={diagnostics.activeNotificationCount} />
+        <MetricBox label="DMs scanned" value={diagnostics.totalDmChannelsScanned} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+          <div className="font-semibold">Schedule and storage</div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>Vercel Cron: hourly via /api/slack-followups</div>
+            <div>Redis readable: {diagnostics.redisReadable ? "Yes" : "No"}</div>
+            <div>Redis writable: {diagnostics.redisWritable ? "Yes" : "No"}</div>
+            <div>
+              Last sync:{" "}
+              {diagnostics.lastSyncAt ? new Date(diagnostics.lastSyncAt).toLocaleString() : "-"}
+            </div>
+            <div>
+              Last check:{" "}
+              {diagnostics.lastCheckAt ? new Date(diagnostics.lastCheckAt).toLocaleString() : "-"}
+            </div>
+          </div>
+        </div>
+        <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+          <div className="font-semibold">Slack scopes detected</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {diagnostics.scopesDetected.length > 0 ? (
+              diagnostics.scopesDetected.slice(0, 20).map((scope) => (
+                <span
+                  key={scope}
+                  className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary"
+                >
+                  {scope}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                No scopes detected yet. Run the cron check once.
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {(diagnostics.lastError || diagnostics.lastWarning) && (
+        <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
+          <div className="mb-2 font-bold">Slack reminder note</div>
+          {diagnostics.lastError && (
+            <p className="break-words text-xs font-semibold text-destructive">
+              {diagnostics.lastError}
+            </p>
+          )}
+          {diagnostics.lastWarning && (
+            <p className="break-words text-xs font-semibold">{diagnostics.lastWarning}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnostics }) {
   return (
     <div className="space-y-6">
@@ -618,6 +714,8 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
       <NotionKnowledgeDiagnosticsCard diagnostics={diagnostics.notion} />
 
       <ContractReviewDiagnosticsCard diagnostics={diagnostics.contractReview} />
+
+      <SlackNotificationsDiagnosticsCard diagnostics={diagnostics.slackNotifications} />
 
       <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3">

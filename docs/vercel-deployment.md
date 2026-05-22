@@ -38,6 +38,13 @@ NOTION_HANDBOOK_ROOT_PAGE_ID=your_handbook_root_page_id
 BRAVE_SEARCH_API_KEY=optional_for_stronger_live_web_search
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_CONTRACT_REVIEW_MODEL=gpt-5.4-mini
+SLACK_USER_TOKEN=xoxp-your-personal-user-token
+SLACK_OWNER_USER_ID=your_slack_user_id
+SLACK_BOT_TOKEN=xoxb-your-bot-token-if-used
+SLACK_SIGNING_SECRET=your_slack_signing_secret
+CRON_SECRET=long_random_secret_for_vercel_cron
+UPSTASH_REDIS_REST_URL=https://your-upstash-url.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your_upstash_rest_token
 ```
 
 Keep `TEAM_DASHBOARD_PASSWORD` and `ADMIN_PASSWORD` different.
@@ -61,3 +68,7 @@ For Active Brands, the spreadsheet must have a worksheet tab named `Active Conta
 For Billy GPT, create a Notion internal integration, share the handbook root page with it, then add the integration secret as `NOTION_API_TOKEN` and the root page ID as `NOTION_HANDBOOK_ROOT_PAGE_ID`. Admins can sync the handbook from the Billy GPT panel after deployment. Billy GPT uses handbook context first, Active Brands Google Sheet context second, and web context only for enrichment. More detail lives in `docs/notion-billy-gpt-setup.md`.
 
 For contract review, Billy GPT accepts PDF uploads in chat, extracts readable text server-side, and sends only extracted text plus source-labeled context to OpenAI. Uploaded PDFs are processed in memory only and are not permanently stored by the app.
+
+For Slack DM follow-ups, the app uses `SLACK_USER_TOKEN` because personal DM history belongs to your Slack user, not the bot. `SLACK_OWNER_USER_ID` should be your own Slack user ID. The hourly Vercel Cron job calls `/api/slack-followups` and is protected by `CRON_SECRET`. Notifications are stored in Upstash Redis using `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, then displayed inside the dashboard bell.
+
+The Slack user token needs permission to list IM conversations and read IM history. In Slack terms, expect scopes like `im:read`, `im:history`, and `users:read`. Private DM text is checked server-side only. The dashboard only receives a small reminder record with the person name, timestamp, overdue age, Slack open link, and a short safe snippet.

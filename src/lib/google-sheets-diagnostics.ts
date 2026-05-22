@@ -3,6 +3,7 @@ import type { ActiveBrandsDataFlowDiagnostics } from "@/lib/active-brands";
 import type { ContractReviewDiagnostics } from "@/lib/contract-review";
 import type { NotionKnowledgeDiagnostics } from "@/lib/notion-knowledge";
 import type { DashboardDataFlowDiagnostics } from "@/lib/sheets-public";
+import type { SlackNotificationDiagnostics } from "@/lib/slack-notifications";
 import type { TeamAssetsDataFlowDiagnostics } from "@/lib/team-assets";
 
 type EnvDiagnostic = {
@@ -44,6 +45,7 @@ export type GoogleSheetsDiagnostics = {
   activeBrands: ActiveBrandsDataFlowDiagnostics | null;
   notion: NotionKnowledgeDiagnostics | null;
   contractReview: ContractReviewDiagnostics | null;
+  slackNotifications: SlackNotificationDiagnostics | null;
 };
 
 const DIAGNOSTICS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -61,10 +63,12 @@ async function getEnvStatus(): Promise<EnvDiagnostic[]> {
   const googleSheets = await import("@/lib/google-sheets.server");
   const notionKnowledge = await import("@/lib/notion-knowledge");
   const contractReview = await import("@/lib/contract-review");
+  const slackNotifications = await import("@/lib/slack-notifications");
   return [
     ...googleSheets.getGoogleEnvPresence(),
     ...notionKnowledge.getNotionEnvDiagnostics(),
     ...contractReview.getContractReviewEnvDiagnostics(),
+    ...slackNotifications.getSlackNotificationEnvDiagnostics(),
   ].filter(
     (item, index, items) => items.findIndex((candidate) => candidate.name === item.name) === index,
   );
@@ -184,12 +188,14 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       activeBrands: null,
       notion: null,
       contractReview: null,
+      slackNotifications: null,
     } satisfies GoogleSheetsDiagnostics;
   }
 
   if (diagnosticsCache && diagnosticsCache.expiresAt > Date.now()) {
     const notionKnowledge = await import("@/lib/notion-knowledge");
     const contractReview = await import("@/lib/contract-review");
+    const slackNotifications = await import("@/lib/slack-notifications");
     logDiagnostics("returning cached diagnostics", {
       expiresAt: new Date(diagnosticsCache.expiresAt).toISOString(),
     });
@@ -197,6 +203,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       ...diagnosticsCache.data,
       notion: notionKnowledge.getNotionKnowledgeDiagnostics(),
       contractReview: contractReview.getContractReviewDiagnostics(),
+      slackNotifications: await slackNotifications.getSlackNotificationDiagnostics(),
     };
   }
 
@@ -205,6 +212,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
   const teamAssets = await import("@/lib/team-assets");
   const notionKnowledge = await import("@/lib/notion-knowledge");
   const contractReview = await import("@/lib/contract-review");
+  const slackNotifications = await import("@/lib/slack-notifications");
   const [
     env,
     auth,
@@ -215,6 +223,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     activeBrandsFlow,
     notion,
     contractReviewFlow,
+    slackNotificationsFlow,
   ] = await Promise.all([
       getEnvStatus(),
       checkAuthStatus(),
@@ -225,6 +234,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       activeBrands.getActiveBrandsDataFlowDiagnostics(),
       notionKnowledge.getNotionKnowledgeDiagnostics(),
       contractReview.getContractReviewDiagnostics(),
+      slackNotifications.getSlackNotificationDiagnostics(),
     ]);
 
   logDiagnostics("full diagnostics complete", {
@@ -243,6 +253,9 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     notionChunksIndexed: notion.chunksIndexed,
     openAiKeyPresent: contractReviewFlow.openAiKeyPresent,
     contractReviewModel: contractReviewFlow.modelUsed,
+    slackConnected: slackNotificationsFlow.slackConnected,
+    slackOverdueCount: slackNotificationsFlow.overdueCount,
+    slackRedisConfigured: slackNotificationsFlow.redisConfigured,
   });
 
   const diagnostics = {
@@ -256,6 +269,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     activeBrands: activeBrandsFlow,
     notion,
     contractReview: contractReviewFlow,
+    slackNotifications: slackNotificationsFlow,
   } satisfies GoogleSheetsDiagnostics;
 
   diagnosticsCache = {
