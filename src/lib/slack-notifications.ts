@@ -235,6 +235,12 @@ function slackErrorMessage(response: SlackApiResponse<unknown>) {
   return null;
 }
 
+function filterLegacySlackWarning(warning: string | null | undefined) {
+  if (!warning) return null;
+  if (warning.includes("users:read")) return null;
+  return warning;
+}
+
 function readSlackEnv(): SlackRuntimeEnv {
   return {
     slackUserToken: process.env.SLACK_USER_TOKEN?.trim() ?? "",
@@ -398,7 +404,12 @@ async function readStoredNotifications(): Promise<SlackNotificationsPayload> {
 
   const stored = await redisGetJson<SlackNotificationsPayload>(NOTIFICATIONS_KEY);
 
-  if (stored) return stored;
+  if (stored) {
+    return {
+      ...stored,
+      warning: filterLegacySlackWarning(stored.warning),
+    };
+  }
 
   return {
     checkedAt: nowIso(),
@@ -425,7 +436,7 @@ async function writeStoredNotifications(items: SlackNotificationItem[], warning:
     lastSyncAt: nowIso(),
     count: items.length,
     items,
-    warning,
+    warning: filterLegacySlackWarning(warning),
   });
 }
 
@@ -572,13 +583,6 @@ async function fetchSlackPersonName(
 
   if (!response.ok) {
     const error = slackErrorMessage(response);
-
-    if (
-      response.error === "missing_scope" &&
-      !warnings.some((warning) => warning.includes("users:read"))
-    ) {
-      warnings.push("Slack real names need the users:read scope on SLACK_USER_TOKEN.");
-    }
 
     return {
       name: `Slack user ${userId}`,
@@ -758,7 +762,7 @@ export async function getSlackNotificationDiagnostics(): Promise<SlackNotificati
       productionThresholdLocked: false,
       activeNotificationCount: notifications.count,
       lastWarning:
-        localDevDiagnostics?.lastWarning ??
+        filterLegacySlackWarning(localDevDiagnostics?.lastWarning) ??
         "Using local in-memory test storage. Add Upstash Redis env vars for deployment.",
     };
   }
@@ -786,6 +790,7 @@ export async function getSlackNotificationDiagnostics(): Promise<SlackNotificati
       productionThresholdLocked:
         stored?.productionThresholdLocked ?? base.productionThresholdLocked,
       activeNotificationCount: notifications.count,
+      lastWarning: filterLegacySlackWarning(stored?.lastWarning ?? base.lastWarning),
     };
   } catch (error) {
     const notifications = await readStoredNotifications().catch(() => null);
