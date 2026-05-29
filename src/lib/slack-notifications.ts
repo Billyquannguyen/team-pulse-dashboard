@@ -108,6 +108,13 @@ type SlackSyncResult = {
   error: string | null;
 };
 
+type SlackNameLookupSource =
+  | "message_profile"
+  | "users.info"
+  | "users.info_cache"
+  | "fallback"
+  | "redis_legacy";
+
 type SlackRuntimeEnv = {
   slackUserToken: string;
   slackOwnerUserId: string;
@@ -129,6 +136,7 @@ export type SlackNotificationItem = {
   timeOverdue: string;
   jumpUrl: string | null;
   snippet: string | null;
+  personNameSource?: SlackNameLookupSource;
 };
 
 export type SlackNotificationsPayload = {
@@ -157,6 +165,22 @@ export type SlackNotificationDiagnostics = {
   totalDmChannelsScanned: number;
   overdueCount: number;
   activeNotificationCount: number;
+  authTest: {
+    ok: boolean;
+    userId: string | null;
+    teamId: string | null;
+    error: string | null;
+  };
+  userInfoProbe: {
+    attempted: boolean;
+    ok: boolean;
+    userId: string | null;
+    storedPersonName: string | null;
+    freshPersonName: string | null;
+    storedNameSource: SlackNameLookupSource | null;
+    freshNameSource: SlackNameLookupSource | null;
+    error: string | null;
+  };
   lastError: string | null;
   lastWarning: string | null;
 };
@@ -195,6 +219,20 @@ function nowIso() {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function slackErrorMessage(response: SlackApiResponse<unknown>) {
+  if (!response.ok) {
+    const details = [
+      response.error,
+      response.needed ? `needed=${response.needed}` : "",
+      response.provided ? `provided=${response.provided}` : "",
+    ].filter(Boolean);
+
+    return details.join(" ") || "unknown_error";
+  }
+
+  return null;
 }
 
 function readSlackEnv(): SlackRuntimeEnv {
@@ -507,14 +545,34 @@ async function fetchSlackPersonName(
   warnings: string[],
 ) {
   const profileName = profileDisplayName(fallbackProfile);
-  if (profileName) return profileName;
-  if (!userId) return "Slack DM";
+  if (profileName) {
+    return {
+      name: profileName,
+      source: "message_profile" as const,
+      error: null,
+    };
+  }
+  if (!userId) {
+    return {
+      name: "Slack DM",
+      source: "fallback" as const,
+      error: "missing_user_id",
+    };
+  }
   const cached = slackUserNameCache.get(userId);
-  if (cached) return cached;
+  if (cached) {
+    return {
+      name: cached,
+      source: "users.info_cache" as const,
+      error: null,
+    };
+  }
 
   const response = await slackApi<SlackUserInfoResponse>("users.info", { user: userId });
 
   if (!response.ok) {
+    const error = slackErrorMessage(response);
+
     if (
       response.error === "missing_scope" &&
       !warnings.some((warning) => warning.includes("users:read"))
@@ -522,7 +580,11 @@ async function fetchSlackPersonName(
       warnings.push("Slack real names need the users:read scope on SLACK_USER_TOKEN.");
     }
 
-    return `Slack user ${userId}`;
+    return {
+      name: `Slack user ${userId}`,
+      source: "fallback" as const,
+      error,
+    };
   }
 
   collectScopes(scopeSet, response);
@@ -536,7 +598,11 @@ async function fetchSlackPersonName(
     `Slack user ${userId}`;
 
   slackUserNameCache.set(userId, name);
-  return name;
+  return {
+    name,
+    source: "users.info" as const,
+    error: null,
+  };
 }
 
 function makeSlackJumpUrl(teamId: string | undefined, channelId: string) {
@@ -565,6 +631,22 @@ function makeDiagnosticsBase(): SlackNotificationDiagnostics {
     totalDmChannelsScanned: 0,
     overdueCount: 0,
     activeNotificationCount: 0,
+    authTest: {
+      ok: false,
+      userId: null,
+      teamId: null,
+      error: null,
+    },
+    userInfoProbe: {
+      attempted: false,
+      ok: false,
+      userId: null,
+      storedPersonName: null,
+      freshPersonName: null,
+      storedNameSource: null,
+      freshNameSource: null,
+      error: null,
+    },
     lastError: null,
     lastWarning: null,
   };
@@ -583,6 +665,80 @@ async function writeSlackDiagnostics(diagnostics: SlackNotificationDiagnostics) 
       error: errorMessage(error),
     });
   }
+}
+
+async function getSlackAuthAndUserProbe(
+  notifications: SlackNotificationsPayload,
+  base: SlackNotificationDiagnostics,
+) {
+  const env = readSlackEnv();
+  const diagnostics: Pick<SlackNotificationDiagnostics, "authTest" | "userInfoProbe"> = {
+    authTest: base.authTest,
+    userInfoProbe: base.userInfoProbe,
+  };
+
+  if (!env.slackUserToken) {
+    diagnostics.authTest = {
+      ok: false,
+      userId: null,
+      teamId: null,
+      error: "SLACK_USER_TOKEN is missing.",
+    };
+    return diagnostics;
+  }
+
+  const auth = await slackApi<SlackAuthTestResponse>("auth.test");
+  diagnostics.authTest = {
+    ok: auth.ok,
+    userId: auth.user_id ?? null,
+    teamId: auth.team_id ?? null,
+    error: slackErrorMessage(auth),
+  };
+
+  const probeItem = notifications.items.find((item) => item.personUserId);
+
+  if (!probeItem?.personUserId) {
+    return diagnostics;
+  }
+
+  diagnostics.userInfoProbe = {
+    ...diagnostics.userInfoProbe,
+    attempted: true,
+    userId: probeItem.personUserId,
+    storedPersonName: probeItem.personName,
+    storedNameSource: probeItem.personNameSource ?? "redis_legacy",
+  };
+
+  const userInfo = await slackApi<SlackUserInfoResponse>("users.info", {
+    user: probeItem.personUserId,
+  });
+
+  if (!userInfo.ok) {
+    diagnostics.userInfoProbe = {
+      ...diagnostics.userInfoProbe,
+      ok: false,
+      error: slackErrorMessage(userInfo),
+    };
+    return diagnostics;
+  }
+
+  const user = userInfo.user;
+  const freshName =
+    user?.profile?.display_name?.trim() ||
+    user?.profile?.real_name?.trim() ||
+    user?.real_name?.trim() ||
+    user?.name?.trim() ||
+    `Slack user ${probeItem.personUserId}`;
+
+  diagnostics.userInfoProbe = {
+    ...diagnostics.userInfoProbe,
+    ok: true,
+    freshPersonName: freshName,
+    freshNameSource: "users.info",
+    error: null,
+  };
+
+  return diagnostics;
 }
 
 export async function getSlackNotificationDiagnostics(): Promise<SlackNotificationDiagnostics> {
@@ -617,9 +773,11 @@ export async function getSlackNotificationDiagnostics(): Promise<SlackNotificati
   try {
     const stored = await redisGetJson<SlackNotificationDiagnostics>(DIAGNOSTICS_KEY);
     const notifications = await readStoredNotifications();
+    const liveProbe = await getSlackAuthAndUserProbe(notifications, stored ?? base);
 
     return {
       ...(stored ?? base),
+      ...liveProbe,
       checkedAt: nowIso(),
       env: getSlackNotificationEnvDiagnostics(),
       redisConfigured: true,
@@ -630,8 +788,17 @@ export async function getSlackNotificationDiagnostics(): Promise<SlackNotificati
       activeNotificationCount: notifications.count,
     };
   } catch (error) {
+    const notifications = await readStoredNotifications().catch(() => null);
+    const liveProbe = notifications
+      ? await getSlackAuthAndUserProbe(notifications, base).catch(() => ({
+          authTest: base.authTest,
+          userInfoProbe: base.userInfoProbe,
+        }))
+      : { authTest: base.authTest, userInfoProbe: base.userInfoProbe };
+
     return {
       ...base,
+      ...liveProbe,
       lastError: errorMessage(error),
     };
   }
@@ -654,6 +821,12 @@ export async function syncSlackNotifications(
     }
 
     const auth = await slackApi<SlackAuthTestResponse>("auth.test");
+    diagnostics.authTest = {
+      ok: auth.ok,
+      userId: auth.user_id ?? null,
+      teamId: auth.team_id ?? null,
+      error: slackErrorMessage(auth),
+    };
 
     if (!auth.ok) {
       throw new Error(`Slack auth.test failed: ${auth.error ?? "unknown_error"}`);
@@ -694,7 +867,7 @@ export async function syncSlackNotifications(
 
       if (evaluation.status !== "notify") continue;
 
-      const personName = await fetchSlackPersonName(
+      const personNameLookup = await fetchSlackPersonName(
         conversation.user ?? evaluation.message.user,
         scopeSet,
         (evaluation.message as SlackMessage).user_profile,
@@ -704,7 +877,7 @@ export async function syncSlackNotifications(
       notifications.push({
         id: conversation.id,
         conversationId: conversation.id,
-        personName,
+        personName: personNameLookup.name,
         personUserId: conversation.user ?? evaluation.message.user ?? null,
         lastMessageAt: evaluation.lastMessageAt,
         lastMessageTs: evaluation.message.ts,
@@ -712,6 +885,7 @@ export async function syncSlackNotifications(
         timeOverdue: evaluation.timeOverdue,
         jumpUrl: makeSlackJumpUrl(auth.team_id, conversation.id),
         snippet: evaluation.snippet,
+        personNameSource: personNameLookup.source,
       });
     }
 
@@ -867,6 +1041,24 @@ export const createTestSlackNotification = createServerFn({ method: "POST" }).ha
     message: "Test Slack notification created. Open the bell to preview it.",
   };
 });
+
+export const forceRefreshSlackNotifications = createServerFn({ method: "POST" }).handler(
+  async () => {
+    const { requireAdminAuth } = await import("@/lib/auth.server");
+    await requireAdminAuth();
+
+    slackUserNameCache.clear();
+    const result = await syncSlackNotifications({ source: "diagnostics" });
+
+    return {
+      ok: result.ok,
+      message: result.ok
+        ? `Slack reminders refreshed. ${result.count} active reminder${result.count === 1 ? "" : "s"} stored.`
+        : `Slack refresh failed: ${result.error ?? "unknown error"}`,
+      result,
+    };
+  },
+);
 
 export const markSlackNotificationDone = createServerFn({ method: "POST" })
   .inputValidator(notificationActionInput)

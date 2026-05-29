@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi, useRouter } from "@tanstack/react-router";
 import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import {
@@ -9,6 +9,7 @@ import {
 } from "@/lib/google-sheets-diagnostics";
 import {
   createTestSlackNotification,
+  forceRefreshSlackNotifications,
   slackNotificationsQuery,
 } from "@/lib/slack-notifications";
 import { cn } from "@/lib/utils";
@@ -503,6 +504,52 @@ function CreateTestSlackNotificationButton() {
   );
 }
 
+function ForceRefreshSlackNotificationsButton() {
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    setMessage(null);
+
+    try {
+      const result = await forceRefreshSlackNotifications();
+      setMessage(result.message);
+      await queryClient.invalidateQueries({ queryKey: slackNotificationsQuery.queryKey });
+      await router.invalidate();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not refresh Slack reminders.");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-2xl border border-border bg-background p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-black">Force refresh</div>
+          <p className="mt-1 text-xs font-semibold text-muted-foreground">
+            Re-runs Slack sync and rewrites stored Redis reminder names from fresh Slack lookups.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isRefreshing && <Loader2 className="h-4 w-4 animate-spin" />}
+          Force Refresh Slack Reminders
+        </button>
+      </div>
+      {message && <p className="mt-3 text-xs font-bold text-muted-foreground">{message}</p>}
+    </div>
+  );
+}
+
 function SlackNotificationsDiagnosticsCard({
   diagnostics,
 }: {
@@ -543,6 +590,31 @@ function SlackNotificationsDiagnosticsCard({
         <MetricBox label="Active reminders" value={diagnostics.activeNotificationCount} />
         <MetricBox label="DMs scanned" value={diagnostics.totalDmChannelsScanned} />
         <MetricBox label="Threshold" value={`${diagnostics.thresholdMinutes} min`} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+          <div className="font-semibold">Live token check</div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>auth.test: {diagnostics.authTest.ok ? "OK" : "Failed"}</div>
+            <div>User ID: {diagnostics.authTest.userId ?? "-"}</div>
+            <div>Team ID: {diagnostics.authTest.teamId ?? "-"}</div>
+            <div>Error: {diagnostics.authTest.error ?? "-"}</div>
+          </div>
+        </div>
+        <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+          <div className="font-semibold">Stored user lookup probe</div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>Attempted: {diagnostics.userInfoProbe.attempted ? "Yes" : "No"}</div>
+            <div>users.info: {diagnostics.userInfoProbe.ok ? "OK" : "Failed / not run"}</div>
+            <div>User ID: {diagnostics.userInfoProbe.userId ?? "-"}</div>
+            <div>Stored name: {diagnostics.userInfoProbe.storedPersonName ?? "-"}</div>
+            <div>Fresh name: {diagnostics.userInfoProbe.freshPersonName ?? "-"}</div>
+            <div>Stored source: {diagnostics.userInfoProbe.storedNameSource ?? "-"}</div>
+            <div>Fresh source: {diagnostics.userInfoProbe.freshNameSource ?? "-"}</div>
+            <div>Error: {diagnostics.userInfoProbe.error ?? "-"}</div>
+          </div>
+        </div>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -588,6 +660,7 @@ function SlackNotificationsDiagnosticsCard({
       </div>
 
       <CreateTestSlackNotificationButton />
+      <ForceRefreshSlackNotificationsButton />
 
       {(diagnostics.lastError || diagnostics.lastWarning) && (
         <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
