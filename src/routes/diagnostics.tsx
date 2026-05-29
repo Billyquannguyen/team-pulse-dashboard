@@ -64,22 +64,22 @@ function TabMatchCard({
         <div>
           <h4 className="text-sm font-semibold">{title}</h4>
           <p className="text-xs text-muted-foreground">
-            Available tabs are matched to member names before rows are requested.
+            Member tabs are auto-detected from worksheet headers. System tabs are ignored.
           </p>
         </div>
-        <StatusPill ok={diagnostic.missingExpectedMembers.length === 0} />
+        <StatusPill ok={diagnostic.matchedMembers.length > 0} />
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <MetricBox label="Available tabs" value={diagnostic.availableTabs.length} />
-        <MetricBox label="Matched members" value={diagnostic.matchedMembers.length} />
-        <MetricBox label="Missing expected" value={diagnostic.missingExpectedMembers.length} />
+        <MetricBox label="Detected members" value={diagnostic.matchedMembers.length} />
+        <MetricBox label="Ignored tabs" value={diagnostic.skippedTabs.length} />
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-4">
         <div>
           <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-            Matched
+            Detected
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
             {diagnostic.matchedMembers.length > 0 ? (
@@ -93,26 +93,6 @@ function TabMatchCard({
               ))
             ) : (
               <span className="text-xs text-muted-foreground">No member tabs matched.</span>
-            )}
-          </div>
-        </div>
-
-        <div>
-          <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-            Missing
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {diagnostic.missingExpectedMembers.length > 0 ? (
-              diagnostic.missingExpectedMembers.map((memberName) => (
-                <span
-                  key={memberName}
-                  className="rounded-full bg-destructive/10 px-3 py-1 text-xs font-semibold text-destructive"
-                >
-                  {memberName}
-                </span>
-              ))
-            ) : (
-              <span className="text-xs text-muted-foreground">No expected members missing.</span>
             )}
           </div>
         </div>

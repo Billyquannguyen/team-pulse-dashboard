@@ -51,6 +51,11 @@ type SlackMessage = {
   type?: string;
   subtype?: string;
   user?: string;
+  user_profile?: {
+    display_name?: string;
+    real_name?: string;
+    name?: string;
+  };
   text?: string;
   ts?: string;
   bot_id?: string;
@@ -166,8 +171,10 @@ const REDIS_STATE_TTL_SECONDS = 60 * 60 * 24 * 45;
 const REDIS_NOTIFICATION_TTL_SECONDS = 60 * 60 * 26;
 const SLACK_HISTORY_LIMIT = 20;
 const SLACK_LIST_LIMIT = 200;
+const SLACK_RECENT_LOOKBACK_DAYS = 14;
 const DEV_THRESHOLD_ENV = "SLACK_FOLLOWUP_THRESHOLD_MINUTES";
 const TEST_NOTIFICATION_ID = "DTEAM_BILLION_TEST_NOTIFICATION";
+const slackUserNameCache = new Map<string, string>();
 
 let localDevNotifications: SlackNotificationsPayload | null = null;
 let localDevDiagnostics: SlackNotificationDiagnostics | null = null;
@@ -218,6 +225,16 @@ function getFollowUpThresholdMs() {
   }
 
   return PRODUCTION_SLACK_FOLLOW_UP_THRESHOLD_MS;
+}
+
+function getFollowUpLookbackMs() {
+  const configuredDays = Number(process.env.SLACK_FOLLOWUP_LOOKBACK_DAYS ?? "");
+  const days =
+    Number.isFinite(configuredDays) && configuredDays >= 1
+      ? Math.min(configuredDays, 90)
+      : SLACK_RECENT_LOOKBACK_DAYS;
+
+  return days * 24 * 60 * 60 * 1000;
 }
 
 function canUseLocalDevStore() {
@@ -455,10 +472,15 @@ async function fetchAllDmConversations(scopeSet: Set<string>) {
   return conversations;
 }
 
-async function fetchLatestMeaningfulMessage(channelId: string, scopeSet: Set<string>) {
+async function fetchLatestMeaningfulMessage(
+  channelId: string,
+  scopeSet: Set<string>,
+  oldestTs: string,
+) {
   const response = await slackApi<SlackHistoryResponse>("conversations.history", {
     channel: channelId,
     limit: SLACK_HISTORY_LIMIT,
+    oldest: oldestTs,
   });
 
   if (!response.ok) {
@@ -469,23 +491,52 @@ async function fetchLatestMeaningfulMessage(channelId: string, scopeSet: Set<str
   return findLatestMeaningfulSlackMessage((response.messages ?? []) as SlackMessageRuleInput[]);
 }
 
-async function fetchSlackPersonName(userId: string | undefined, scopeSet: Set<string>) {
+function profileDisplayName(profile: SlackMessage["user_profile"] | undefined) {
+  return (
+    profile?.display_name?.trim() ||
+    profile?.real_name?.trim() ||
+    profile?.name?.trim() ||
+    ""
+  );
+}
+
+async function fetchSlackPersonName(
+  userId: string | undefined,
+  scopeSet: Set<string>,
+  fallbackProfile: SlackMessage["user_profile"] | undefined,
+  warnings: string[],
+) {
+  const profileName = profileDisplayName(fallbackProfile);
+  if (profileName) return profileName;
   if (!userId) return "Slack DM";
+  const cached = slackUserNameCache.get(userId);
+  if (cached) return cached;
 
   const response = await slackApi<SlackUserInfoResponse>("users.info", { user: userId });
 
-  if (!response.ok) return `Slack user ${userId}`;
+  if (!response.ok) {
+    if (
+      response.error === "missing_scope" &&
+      !warnings.some((warning) => warning.includes("users:read"))
+    ) {
+      warnings.push("Slack real names need the users:read scope on SLACK_USER_TOKEN.");
+    }
+
+    return `Slack user ${userId}`;
+  }
 
   collectScopes(scopeSet, response);
   const user = response.user;
 
-  return (
+  const name =
     user?.profile?.display_name?.trim() ||
     user?.profile?.real_name?.trim() ||
     user?.real_name?.trim() ||
     user?.name?.trim() ||
-    `Slack user ${userId}`
-  );
+    `Slack user ${userId}`;
+
+  slackUserNameCache.set(userId, name);
+  return name;
 }
 
 function makeSlackJumpUrl(teamId: string | undefined, channelId: string) {
@@ -622,10 +673,15 @@ export async function syncSlackNotifications(
 
     const nowMs = Date.now();
     const thresholdMs = getFollowUpThresholdMs();
+    const oldestTs = ((nowMs - getFollowUpLookbackMs()) / 1000).toFixed(6);
     const notifications: SlackNotificationItem[] = [];
 
     for (const conversation of conversations) {
-      const latestMessage = await fetchLatestMeaningfulMessage(conversation.id, scopeSet);
+      const latestMessage = await fetchLatestMeaningfulMessage(
+        conversation.id,
+        scopeSet,
+        oldestTs,
+      );
 
       const actionState = await readNotificationActionState(conversation.id);
       const evaluation = evaluateSlackDmFollowup({
@@ -641,6 +697,8 @@ export async function syncSlackNotifications(
       const personName = await fetchSlackPersonName(
         conversation.user ?? evaluation.message.user,
         scopeSet,
+        (evaluation.message as SlackMessage).user_profile,
+        warnings,
       );
 
       notifications.push({

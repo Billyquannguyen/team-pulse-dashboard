@@ -428,7 +428,7 @@ export async function fetchSheetRows(
     throw new Error(`No sheet name was available for ${sheet.memberName}`);
   }
 
-  const range = `${quoteSheetName(sheet.sheetName)}!A:AZ`;
+  const range = quoteSheetName(sheet.sheetName);
   const url = new URL(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
       range,
@@ -465,7 +465,7 @@ export async function fetchSheetRowsBatch(
     if (!sheet.sheetName) {
       throw new Error(`No sheet name was available for ${sheet.memberName}`);
     }
-    url.searchParams.append("ranges", `${quoteSheetName(sheet.sheetName)}!A:AZ`);
+    url.searchParams.append("ranges", quoteSheetName(sheet.sheetName));
   }
 
   url.searchParams.set("majorDimension", "ROWS");
@@ -498,7 +498,7 @@ export async function appendSheetRow(
     throw new Error(`No sheet name was available for ${sheet.memberName}`);
   }
 
-  const range = `${quoteSheetName(sheet.sheetName)}!A:AZ`;
+  const range = quoteSheetName(sheet.sheetName);
   const url = new URL(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
       range,

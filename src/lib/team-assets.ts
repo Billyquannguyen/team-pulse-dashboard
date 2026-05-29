@@ -6,6 +6,7 @@ import {
   type AssetIconName,
   type AssetLink,
 } from "@/data/assets";
+import { createHeaderLookup, getHeaderCell, type HeaderLookup } from "@/lib/sheet-headers";
 
 type GoogleSheetsConfig = {
   serviceAccountEmail: string;
@@ -42,8 +43,6 @@ type TeamAssetsReadResult = {
   cacheStatus: TeamAssetsCacheStatus;
   cacheExpiresAt: string | null;
 };
-
-type ColumnLookup = Partial<Record<TeamAssetField, number>>;
 
 type TeamAssetField =
   | "title"
@@ -291,32 +290,12 @@ function toTitleCase(value: string) {
     .replace(/\b[\p{L}\p{N}]/gu, (letter) => letter.toUpperCase());
 }
 
-function buildColumnLookup(headers: string[]): ColumnLookup {
-  const lookup: ColumnLookup = {};
-  const normalizedAliases = Object.entries(TEAM_ASSET_COLUMN_ALIASES).map(([field, aliases]) => ({
-    field: field as TeamAssetField,
-    aliases: aliases.map(normalizeKey),
-  }));
-
-  headers.forEach((header, index) => {
-    const normalizedHeader = normalizeKey(header);
-    if (!normalizedHeader) return;
-
-    const match = normalizedAliases.find(
-      ({ field, aliases }) => lookup[field] === undefined && aliases.includes(normalizedHeader),
-    );
-
-    if (match) {
-      lookup[match.field] = index;
-    }
-  });
-
-  return lookup;
+function buildColumnLookup(headers: string[]): HeaderLookup<TeamAssetField> {
+  return createHeaderLookup(headers, TEAM_ASSET_COLUMN_ALIASES);
 }
 
-function getCell(row: string[], lookup: ColumnLookup, field: TeamAssetField) {
-  const index = lookup[field];
-  return index === undefined ? "" : (row[index] ?? "").trim();
+function getCell(row: string[], lookup: HeaderLookup<TeamAssetField>, field: TeamAssetField) {
+  return getHeaderCell(row, lookup, field);
 }
 
 function cleanAssetUrl(value: string) {
@@ -386,7 +365,7 @@ function emptyDebug(): TeamAssetsReadDebug {
 function normalizeAssetRows(headers: string[], rows: string[][], debug: TeamAssetsReadDebug) {
   const lookup = buildColumnLookup(headers);
   const missingRequired = (["title", "url"] as const).filter(
-    (field) => lookup[field] === undefined,
+    (field) => lookup[field] === undefined || lookup[field] < 0,
   );
 
   debug.headerCount = headers.length;
@@ -504,7 +483,7 @@ function getWriteValue(field: TeamAssetField, input: TeamAssetInput) {
 function buildTeamAssetWriteRow(headers: string[], existingRow: string[], input: TeamAssetInput) {
   const lookup = buildColumnLookup(headers);
   const missingRequired = (["title", "url"] as const).filter(
-    (field) => lookup[field] === undefined,
+    (field) => lookup[field] === undefined || lookup[field] < 0,
   );
   const url = cleanAssetUrl(input.url);
 
@@ -523,7 +502,7 @@ function buildTeamAssetWriteRow(headers: string[], existingRow: string[], input:
 
   (Object.keys(TEAM_ASSET_COLUMN_ALIASES) as TeamAssetField[]).forEach((field) => {
     const index = lookup[field];
-    if (index !== undefined) {
+    if (index !== undefined && index >= 0) {
       row[index] = field === "url" ? url : getWriteValue(field, input);
     }
   });
@@ -535,7 +514,7 @@ function nextSortOrder(headers: string[], rows: string[][]) {
   const lookup = buildColumnLookup(headers);
   const orderIndex = lookup.sortOrder;
   const highest = rows.reduce((max, row, index) => {
-    const raw = orderIndex === undefined ? "" : (row[orderIndex] ?? "");
+    const raw = orderIndex === undefined || orderIndex < 0 ? "" : (row[orderIndex] ?? "");
     return Math.max(max, parseSortOrder(raw, index));
   }, 0);
 
@@ -567,7 +546,12 @@ function buildTeamAssetNameLinkRow(
   const urlIndex = lookup.url;
   const url = cleanAssetUrl(input.url);
 
-  if (titleIndex === undefined || urlIndex === undefined) {
+  if (
+    titleIndex === undefined ||
+    titleIndex < 0 ||
+    urlIndex === undefined ||
+    urlIndex < 0
+  ) {
     throw new Error(`${TEAM_ASSETS_TAB_NAME} tab is missing required title or url column.`);
   }
 
@@ -587,7 +571,7 @@ function buildDisabledRow(headers: string[], existingRow: string[]) {
   const lookup = buildColumnLookup(headers);
   const enabledIndex = lookup.enabled;
 
-  if (enabledIndex === undefined) {
+  if (enabledIndex === undefined || enabledIndex < 0) {
     throw new Error(`${TEAM_ASSETS_TAB_NAME} tab needs an enabled column to remove links.`);
   }
 

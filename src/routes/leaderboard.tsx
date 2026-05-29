@@ -4,7 +4,7 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { team as fallbackTeam } from "@/data/team";
 import { deals as fallbackDeals } from "@/data/deals";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
-import { BarChart3, ExternalLink, Trophy } from "lucide-react";
+import { BarChart3, Trophy } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -195,9 +195,9 @@ function LeaderboardPage() {
                 <th className="px-3 py-2.5 text-left font-medium">Creator</th>
                 <th className="px-3 py-2.5 text-left font-medium">Member</th>
                 <th className="px-3 py-2.5 text-right font-medium">Total pricing</th>
-                <th className="px-3 py-2.5 text-right font-medium">Manager total</th>
+                <th className="px-3 py-2.5 text-right font-medium">Margin</th>
+                <th className="px-3 py-2.5 text-right font-medium">Profit</th>
                 <th className="px-3 py-2.5 text-left font-medium">Status</th>
-                <th className="px-3 py-2.5 text-left font-medium">Live</th>
               </tr>
             </thead>
             <tbody>
@@ -213,22 +213,9 @@ function LeaderboardPage() {
                   <td className="px-3 py-3 text-right font-semibold">
                     {formatCurrency(deal.totalPricingGbp)}
                   </td>
-                  <td className="px-3 py-3 text-right">{formatCurrency(deal.managerTotalGbp)}</td>
+                  <td className="px-3 py-3 text-right">{deal.profitMargin || "-"}</td>
+                  <td className="px-3 py-3 text-right">{formatCurrency(getDealProfit(deal))}</td>
                   <td className="px-3 py-3">{deal.status}</td>
-                  <td className="px-3 py-3">
-                    {deal.liveLink ? (
-                      <a
-                        href={deal.liveLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="tb-action tb-link-arrow inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
-                      >
-                        Open <ExternalLink className="h-3 w-3" />
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Check,
+  Gift,
   Lock,
   SlidersHorizontal,
   Target,
@@ -236,7 +237,6 @@ function GoalProgressPanel({
   current,
   target,
   tone,
-  icon: Icon,
   size = "normal",
   formatValue = formatMoney,
   formatGap = getGoalGap,
@@ -247,7 +247,7 @@ function GoalProgressPanel({
   current: number;
   target: number;
   tone: Tone;
-  icon: LucideIcon;
+  icon?: LucideIcon;
   size?: "hero" | "normal";
   formatValue?: (value: number) => string;
   formatGap?: (current: number, target: number) => string;
@@ -288,13 +288,9 @@ function GoalProgressPanel({
             aria-label={`Open ${label.toLowerCase()} motivation card for ${title}`}
             title="View motivation card"
           >
-            <Icon className="h-5 w-5" />
+            <Gift className="h-5 w-5" />
           </button>
-        ) : (
-          <div className={iconClassName}>
-            <Icon className="h-5 w-5" />
-          </div>
-        )}
+        ) : null}
       </div>
 
       <div className="mt-5 h-3 overflow-hidden rounded-full bg-muted">
@@ -1026,8 +1022,7 @@ function GoalsPage() {
               Each member's pending commission compared with their monthly goal.
             </p>
           </div>
-          <div className="hidden items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground sm:inline-flex">
-            <Users className="h-3.5 w-3.5" />
+          <div className="hidden rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground sm:inline-flex">
             {team.length} members
           </div>
         </div>

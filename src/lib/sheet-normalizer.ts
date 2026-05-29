@@ -8,6 +8,13 @@ import {
 } from "@/data/sheetConfig";
 import type { Creator, CreatorRelationship, CreatorStatus } from "@/data/creators";
 import type { Deal, DealStatus, Platform } from "@/data/deals";
+import {
+  createHeaderLookup,
+  getHeaderCell,
+  getMissingHeaders,
+  hasAnyHeaderAlias,
+  hasHeaderAlias,
+} from "@/lib/sheet-headers";
 
 type SheetRow = string[];
 
@@ -33,36 +40,80 @@ export type OutreachRow = {
   notes?: string;
 };
 
-function normalizeHeader(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
+const REQUIRED_OUTREACH_FIELDS: OutreachField[] = [
+  "emailed",
+  "igOutreach",
+  "replied",
+  "bookedCall",
+  "finalStatus",
+];
 
-function createColumnLookup<TField extends string>(
-  headers: string[],
-  aliases: Record<TField, string[]>,
-) {
-  const normalizedHeaders = headers.map(normalizeHeader);
+const REQUIRED_DEAL_FIELDS: DashboardDealField[] = [
+  "brand",
+  "creator",
+  "status",
+  "totalPricingGbp",
+  "managerTotalGbp",
+];
 
-  const entries = Object.entries(aliases) as Array<[TField, string[]]>;
+const REQUIRED_CREATOR_FIELDS: DashboardCreatorField[] = ["handle", "owner", "relationship"];
 
-  return Object.fromEntries(
-    entries.map(([field, names]) => {
-      const normalizedNames = names.map(normalizeHeader);
-      const index = normalizedHeaders.findIndex((header) => normalizedNames.includes(header));
-      return [field, index];
-    }),
-  ) as Record<TField, number>;
-}
+const DEAL_FIELD_LABELS: Record<DashboardDealField, string> = {
+  rowNumber: "No.",
+  brand: "Brand name",
+  creator: "Creator",
+  platform: "Platform",
+  contractLink: "Contract link",
+  status: "Status",
+  liveLink: "Live link",
+  totalPricingGbp: "Total pricing",
+  creatorTotalGbp: "Creator total",
+  profitMargin: "Profit margin",
+  managerTotalGbp: "Manager total",
+  vnd: "VND",
+  netTerms: "Net terms",
+  managerTotalPaid: "Manager total paid",
+  managerPaidCurrentMonth: "Manager paid current month",
+  notes: "Notes",
+};
 
-function getCell<TField extends string>(
-  row: SheetRow,
-  lookup: Record<TField, number>,
-  field: TField,
-) {
-  const index = lookup[field];
-  if (index === undefined || index < 0) return "";
-  return row[index]?.trim() ?? "";
-}
+const CREATOR_FIELD_LABELS: Record<DashboardCreatorField, string> = {
+  handle: "Creator",
+  base: "Base",
+  owner: "Owner",
+  tiktokLink: "TikTok link",
+  instagramLink: "Instagram link",
+  youtubeLink: "YouTube link",
+  email: "Email",
+  platform: "Platform",
+  niche: "Niche",
+  followers: "Followers",
+  relationship: "Relationship",
+  estimatedRate: "Estimated rate",
+  songPromoRate: "Song promo rate",
+  activeDeals: "Active deals",
+  revenue: "Revenue",
+  status: "Status",
+  notes: "Notes",
+};
+
+const OUTREACH_FIELD_LABELS: Record<OutreachField, string> = {
+  outreachType: "Outreach type",
+  name: "Name",
+  tiktokLink: "TikTok link",
+  instagramLink: "Instagram link",
+  youtubeLink: "YouTube link",
+  email: "Email",
+  niche: "Niche",
+  mainPlatform: "Main platform",
+  emailed: "Emailed",
+  igOutreach: "IG outreach",
+  replied: "Replied",
+  bookedCall: "Booked call",
+  finalStatus: "Final status",
+  timeLog: "Time log",
+  notes: "Notes",
+};
 
 function parseMoney(value: string) {
   const number = Number(value.replace(/[$£,%\s,]/g, ""));
@@ -85,7 +136,7 @@ function parseDealStatus(value: string): DealStatus {
 
 function parseBoolean(value: string) {
   const normalized = value.toLowerCase().trim();
-  return ["true", "yes", "y", "1", "paid", "done"].includes(normalized);
+  return ["true", "yes", "y", "1", "paid", "done", "checked", "x", "✓"].includes(normalized);
 }
 
 function parseCreatorStatus(value: string): CreatorStatus {
@@ -143,17 +194,12 @@ export function canonicalMemberName(value: string) {
 
 function hasUsefulOutreachContact(row: SheetRow, lookup: Record<OutreachField, number>) {
   return Boolean(
-    getCell(row, lookup, "name") ||
-    getCell(row, lookup, "email") ||
-    getCell(row, lookup, "tiktokLink") ||
-    getCell(row, lookup, "instagramLink") ||
-    getCell(row, lookup, "youtubeLink"),
+    getHeaderCell(row, lookup, "name") ||
+    getHeaderCell(row, lookup, "email") ||
+    getHeaderCell(row, lookup, "tiktokLink") ||
+    getHeaderCell(row, lookup, "instagramLink") ||
+    getHeaderCell(row, lookup, "youtubeLink"),
   );
-}
-
-function getFallbackCell(row: SheetRow, lookupIndex: number, fallbackIndex: number) {
-  if (lookupIndex >= 0) return row[lookupIndex]?.trim() ?? "";
-  return row[fallbackIndex]?.trim() ?? "";
 }
 
 function isBookedCallStatus(value: string) {
@@ -170,49 +216,92 @@ function isSignedStatus(value: string) {
 
 function isEndedStatus(value: string) {
   const normalized = value.toLowerCase();
-  return ["ended", "rejected", "not interested", "passed", "declined", "no"].some((word) =>
+  return ["ended", "rejected", "not interested", "passed", "declined", "no response"].some((word) =>
     normalized.includes(word),
   );
+}
+
+export function getMissingOutreachHeaders(headers: string[]) {
+  return getMissingHeaders(
+    headers,
+    OUTREACH_COLUMN_ALIASES,
+    REQUIRED_OUTREACH_FIELDS,
+    OUTREACH_FIELD_LABELS,
+  );
+}
+
+export function getMissingDealHeaders(headers: string[]) {
+  return getMissingHeaders(headers, DEAL_COLUMN_ALIASES, REQUIRED_DEAL_FIELDS, DEAL_FIELD_LABELS);
+}
+
+export function getMissingCreatorHeaders(headers: string[]) {
+  return getMissingHeaders(
+    headers,
+    CREATOR_COLUMN_ALIASES,
+    REQUIRED_CREATOR_FIELDS,
+    CREATOR_FIELD_LABELS,
+  );
+}
+
+export function isDealWorksheetHeader(headers: string[]) {
+  return getMissingDealHeaders(headers).length === 0;
+}
+
+export function isOutreachWorksheetHeader(headers: string[]) {
+  const hasContactHeader = hasAnyHeaderAlias(headers, OUTREACH_COLUMN_ALIASES, [
+    "name",
+    "email",
+    "tiktokLink",
+    "instagramLink",
+    "youtubeLink",
+  ]);
+  const hasMetricHeader =
+    hasHeaderAlias(headers, OUTREACH_COLUMN_ALIASES, "emailed") ||
+    hasHeaderAlias(headers, OUTREACH_COLUMN_ALIASES, "igOutreach") ||
+    hasHeaderAlias(headers, OUTREACH_COLUMN_ALIASES, "replied") ||
+    hasHeaderAlias(headers, OUTREACH_COLUMN_ALIASES, "finalStatus");
+
+  return hasContactHeader && hasMetricHeader;
 }
 
 export function normalizeMemberDealRows(tabName: string, rows: SheetRow[]): Deal[] {
   const [headers, ...body] = rows;
   if (!headers) return [];
 
-  const lookup = createColumnLookup<DashboardDealField>(headers, DEAL_COLUMN_ALIASES);
+  const lookup = createHeaderLookup<DashboardDealField>(headers, DEAL_COLUMN_ALIASES);
 
   return body
     .filter((row) => {
-      const brand = getCell(row, lookup, "brand");
-      const creator = getCell(row, lookup, "creator");
-      const totalPricing = parseMoney(getCell(row, lookup, "totalPricingGbp"));
+      const brand = getHeaderCell(row, lookup, "brand");
+      const creator = getHeaderCell(row, lookup, "creator");
+      const totalPricing = parseMoney(getHeaderCell(row, lookup, "totalPricingGbp"));
       return Boolean(brand || creator || totalPricing);
     })
     .map((row, index) => {
-      const totalPricingGbp = parseMoney(getCell(row, lookup, "totalPricingGbp"));
-      const creatorTotalGbp = parseMoney(getCell(row, lookup, "creatorTotalGbp"));
-      const managerTotalGbp = parseMoney(getCell(row, lookup, "managerTotalGbp"));
-      const profitMargin = getCell(row, lookup, "profitMargin");
+      const totalPricingGbp = parseMoney(getHeaderCell(row, lookup, "totalPricingGbp"));
+      const creatorTotalGbp = parseMoney(getHeaderCell(row, lookup, "creatorTotalGbp"));
+      const managerTotalGbp = parseMoney(getHeaderCell(row, lookup, "managerTotalGbp"));
+      const profitMargin = getHeaderCell(row, lookup, "profitMargin");
 
       return {
         id: `${tabName}-${index + 1}`,
-        rowNumber: getCell(row, lookup, "rowNumber") || `${index + 1}`,
+        rowNumber: getHeaderCell(row, lookup, "rowNumber") || `${index + 1}`,
         manager: tabName,
-        brand: getCell(row, lookup, "brand"),
-        creator: getCell(row, lookup, "creator"),
-        platform: parsePlatform(getCell(row, lookup, "platform")),
-        contractLink: getCell(row, lookup, "contractLink") || undefined,
-        liveLink: getCell(row, lookup, "liveLink") || undefined,
+        brand: getHeaderCell(row, lookup, "brand"),
+        creator: getHeaderCell(row, lookup, "creator"),
+        platform: parsePlatform(getHeaderCell(row, lookup, "platform")),
+        contractLink: getHeaderCell(row, lookup, "contractLink") || undefined,
+        liveLink: getHeaderCell(row, lookup, "liveLink") || undefined,
         totalPricingGbp,
         creatorTotalGbp,
         profitMargin,
         managerTotalGbp,
-        vnd: parseMoney(getCell(row, lookup, "vnd")),
-        netTerms: getCell(row, lookup, "netTerms"),
-        managerTotalPaid: parseBoolean(getCell(row, lookup, "managerTotalPaid")),
-        managerPaidCurrentMonth: parseBoolean(getCell(row, lookup, "managerPaidCurrentMonth")),
-        status: parseDealStatus(getCell(row, lookup, "status")),
-        notes: getCell(row, lookup, "notes") || undefined,
+        vnd: parseMoney(getHeaderCell(row, lookup, "vnd")),
+        netTerms: getHeaderCell(row, lookup, "netTerms"),
+        managerTotalPaid: parseBoolean(getHeaderCell(row, lookup, "managerTotalPaid")),
+        managerPaidCurrentMonth: parseBoolean(getHeaderCell(row, lookup, "managerPaidCurrentMonth")),
+        status: parseDealStatus(getHeaderCell(row, lookup, "status")),
+        notes: getHeaderCell(row, lookup, "notes") || undefined,
       };
     })
     .filter((deal) => deal.status !== "Cancelled");
@@ -222,29 +311,29 @@ export function normalizeCreatorRows(rows: SheetRow[]): Creator[] {
   const [headers, ...body] = rows;
   if (!headers) return [];
 
-  const lookup = createColumnLookup<DashboardCreatorField>(headers, CREATOR_COLUMN_ALIASES);
+  const lookup = createHeaderLookup<DashboardCreatorField>(headers, CREATOR_COLUMN_ALIASES);
 
   return body
     .filter((row) => row.some(Boolean))
     .map((row, index) => ({
       id: `creator-${index + 1}`,
-      handle: getCell(row, lookup, "handle"),
-      owner: canonicalMemberName(getCell(row, lookup, "owner")),
-      platform: parsePlatform(getCell(row, lookup, "platform")),
-      niche: getCell(row, lookup, "niche"),
-      base: getCell(row, lookup, "base") || undefined,
-      email: getCell(row, lookup, "email") || undefined,
-      tiktokLink: getCell(row, lookup, "tiktokLink") || undefined,
-      instagramLink: getCell(row, lookup, "instagramLink") || undefined,
-      youtubeLink: getCell(row, lookup, "youtubeLink") || undefined,
-      estimatedRate: getCell(row, lookup, "estimatedRate") || undefined,
-      songPromoRate: getCell(row, lookup, "songPromoRate") || undefined,
-      followers: parseInteger(getCell(row, lookup, "followers")),
-      relationship: parseRelationship(getCell(row, lookup, "relationship")),
-      status: parseCreatorStatus(getCell(row, lookup, "status")) || "Active",
-      activeDeals: parseInteger(getCell(row, lookup, "activeDeals")),
-      revenue: parseMoney(getCell(row, lookup, "revenue")),
-      notes: getCell(row, lookup, "notes") || undefined,
+      handle: getHeaderCell(row, lookup, "handle"),
+      owner: canonicalMemberName(getHeaderCell(row, lookup, "owner")),
+      platform: parsePlatform(getHeaderCell(row, lookup, "platform")),
+      niche: getHeaderCell(row, lookup, "niche"),
+      base: getHeaderCell(row, lookup, "base") || undefined,
+      email: getHeaderCell(row, lookup, "email") || undefined,
+      tiktokLink: getHeaderCell(row, lookup, "tiktokLink") || undefined,
+      instagramLink: getHeaderCell(row, lookup, "instagramLink") || undefined,
+      youtubeLink: getHeaderCell(row, lookup, "youtubeLink") || undefined,
+      estimatedRate: getHeaderCell(row, lookup, "estimatedRate") || undefined,
+      songPromoRate: getHeaderCell(row, lookup, "songPromoRate") || undefined,
+      followers: parseInteger(getHeaderCell(row, lookup, "followers")),
+      relationship: parseRelationship(getHeaderCell(row, lookup, "relationship")),
+      status: parseCreatorStatus(getHeaderCell(row, lookup, "status")) || "Active",
+      activeDeals: parseInteger(getHeaderCell(row, lookup, "activeDeals")),
+      revenue: parseMoney(getHeaderCell(row, lookup, "revenue")),
+      notes: getHeaderCell(row, lookup, "notes") || undefined,
     }));
 }
 
@@ -252,34 +341,39 @@ export function normalizeMemberOutreachRows(tabName: string, rows: SheetRow[]): 
   const [headers, ...body] = rows;
   if (!headers) return [];
 
-  const lookup = createColumnLookup<OutreachField>(headers, OUTREACH_COLUMN_ALIASES);
+  const lookup = createHeaderLookup<OutreachField>(headers, OUTREACH_COLUMN_ALIASES);
   const memberName = canonicalMemberName(tabName);
 
   return body
     .filter((row) => hasUsefulOutreachContact(row, lookup))
     .map((row, index) => {
-      const finalStatus = getCell(row, lookup, "finalStatus");
-      const notes = getFallbackCell(row, lookup.notes, 13);
+      const finalStatus = getHeaderCell(row, lookup, "finalStatus");
+      const hasBookedCallColumn = lookup.bookedCall !== undefined && lookup.bookedCall >= 0;
+      const bookedCallValue = getHeaderCell(row, lookup, "bookedCall");
+      const bookedCall = hasBookedCallColumn
+        ? parseBoolean(bookedCallValue)
+        : isBookedCallStatus(finalStatus);
+      const notes = getHeaderCell(row, lookup, "notes");
 
       return {
         id: `${memberName}-outreach-${index + 1}`,
         memberName,
-        outreachType: getCell(row, lookup, "outreachType"),
-        name: getCell(row, lookup, "name"),
-        tiktokLink: getCell(row, lookup, "tiktokLink") || undefined,
-        instagramLink: getCell(row, lookup, "instagramLink") || undefined,
-        youtubeLink: getCell(row, lookup, "youtubeLink") || undefined,
-        email: getCell(row, lookup, "email") || undefined,
-        niche: getCell(row, lookup, "niche"),
-        mainPlatform: parsePlatform(getCell(row, lookup, "mainPlatform")),
-        emailed: parseBoolean(getCell(row, lookup, "emailed")),
-        igOutreach: parseBoolean(getCell(row, lookup, "igOutreach")),
-        replied: parseBoolean(getCell(row, lookup, "replied")),
+        outreachType: getHeaderCell(row, lookup, "outreachType"),
+        name: getHeaderCell(row, lookup, "name"),
+        tiktokLink: getHeaderCell(row, lookup, "tiktokLink") || undefined,
+        instagramLink: getHeaderCell(row, lookup, "instagramLink") || undefined,
+        youtubeLink: getHeaderCell(row, lookup, "youtubeLink") || undefined,
+        email: getHeaderCell(row, lookup, "email") || undefined,
+        niche: getHeaderCell(row, lookup, "niche"),
+        mainPlatform: parsePlatform(getHeaderCell(row, lookup, "mainPlatform")),
+        emailed: parseBoolean(getHeaderCell(row, lookup, "emailed")),
+        igOutreach: parseBoolean(getHeaderCell(row, lookup, "igOutreach")),
+        replied: parseBoolean(getHeaderCell(row, lookup, "replied")),
         finalStatus,
-        bookedCall: isBookedCallStatus(finalStatus),
+        bookedCall,
         signedFromStatus: isSignedStatus(finalStatus),
         ended: isEndedStatus(finalStatus),
-        timeLog: getCell(row, lookup, "timeLog") || undefined,
+        timeLog: getHeaderCell(row, lookup, "timeLog") || undefined,
         notes: notes || undefined,
       };
     });

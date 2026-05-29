@@ -1,18 +1,6 @@
 export const SIGNED_CREATORS_TAB_NAME = "Signed creators ";
 export const IGNORED_OUTREACH_TAB_NAMES = ["Ex-managers", "Signed creators"];
 export const SHEET_HEADER_ROW_NUMBER = 1;
-export const MEMBER_SUMMARY_CELLS = {
-  pendingOwed: "S2",
-  paidCurrentMonth: "S4",
-  paidTotal: "S6",
-};
-
-export const FALLBACK_MEMBER_SHEETS = [
-  { name: "KTrang" },
-  { name: "HYen" },
-  { name: "BNgan" },
-  { name: "LNgoc" },
-];
 
 export type DashboardDealField =
   | "rowNumber"
@@ -113,6 +101,7 @@ export type OutreachField =
   | "emailed"
   | "igOutreach"
   | "replied"
+  | "bookedCall"
   | "finalStatus"
   | "timeLog"
   | "notes";
@@ -129,7 +118,8 @@ export const OUTREACH_COLUMN_ALIASES: Record<OutreachField, string[]> = {
   emailed: ["emailed", "email sent"],
   igOutreach: ["ig outreach", "instagram outreach", "dm outreach"],
   replied: ["replied", "reply", "responded"],
+  bookedCall: ["booked call", "call booked", "booked"],
   finalStatus: ["final status", "status", "outcome"],
-  timeLog: ["time log", "timestamp", "date"],
+  timeLog: ["time log", "timestamp", "logged at", "date"],
   notes: ["notes", "note", "comments"],
 };

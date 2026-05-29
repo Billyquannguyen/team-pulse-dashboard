@@ -1,6 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
-import { FileSpreadsheet, ExternalLink, Filter, RotateCcw, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileSpreadsheet,
+  ExternalLink,
+  Filter,
+  RotateCcw,
+  Search,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
@@ -46,6 +54,7 @@ const linkFilters = [
 
 type PaymentFilter = (typeof paymentFilters)[number];
 type LinkFilter = (typeof linkFilters)[number];
+const PAGE_SIZE = 20;
 
 function formatLinkLabel(url: string) {
   return url.replace(/^https?:\/\//, "").replace(/^www\./, "");
@@ -91,6 +100,7 @@ function DealsPage() {
   const [platform, setPlatform] = useState("All platforms");
   const [payment, setPayment] = useState<PaymentFilter>("All payments");
   const [links, setLinks] = useState<LinkFilter>("All links");
+  const [page, setPage] = useState(1);
   const { data } = useQuery(dashboardSheetQuery);
   const deals = data?.deals ?? [];
   const sourceLabel =
@@ -184,6 +194,28 @@ function DealsPage() {
       }),
     [deals, links, member, payment, platform, q, status],
   );
+  const sortedDeals = useMemo(
+    () =>
+      [...filtered].sort((a, b) => {
+        const postedDiff = Number(b.status === "Posted") - Number(a.status === "Posted");
+        if (postedDiff !== 0) return postedDiff;
+        const pricingDiff = b.totalPricingGbp - a.totalPricingGbp;
+        if (pricingDiff !== 0) return pricingDiff;
+        return a.manager.localeCompare(b.manager) || a.brand.localeCompare(b.brand);
+      }),
+    [filtered],
+  );
+  const pageCount = Math.max(1, Math.ceil(sortedDeals.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pageDeals = sortedDeals.slice(pageStart, pageStart + PAGE_SIZE);
+  const showingStart = sortedDeals.length === 0 ? 0 : pageStart + 1;
+  const showingEnd = Math.min(pageStart + PAGE_SIZE, sortedDeals.length);
+
+  useEffect(() => {
+    setPage(1);
+  }, [links, member, payment, platform, q, status]);
+
   return (
     <div className="space-y-6">
       <AppHeader title="Deals 📒" subtitle="Synced from the Team Billion Google Sheet." />
@@ -270,8 +302,13 @@ function DealsPage() {
           </div>
 
           <div className="text-xs font-medium text-muted-foreground">
-            Showing <span className="text-foreground">{filtered.length.toLocaleString()}</span> of{" "}
-            <span className="text-foreground">{deals.length.toLocaleString()}</span> deals
+            Showing{" "}
+            <span className="text-foreground">
+              {showingStart}-{showingEnd}
+            </span>{" "}
+            of <span className="text-foreground">{filtered.length.toLocaleString()}</span>{" "}
+            matching deals ·{" "}
+            <span className="text-foreground">{deals.length.toLocaleString()}</span> total
           </div>
         </div>
 
@@ -304,16 +341,16 @@ function DealsPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
+              {sortedDeals.length === 0 && (
                 <tr className="tb-row-hover border-t border-border/60">
                   <td colSpan={16} className="px-3 py-8 text-center text-sm text-muted-foreground">
                     No deals match those filters.
                   </td>
                 </tr>
               )}
-              {filtered.map((d, index) => (
+              {pageDeals.map((d, index) => (
                 <tr key={d.id} className="tb-row-hover border-t border-border/60 hover:bg-muted/40">
-                  <td className="px-3 py-3 text-muted-foreground">{index + 1}</td>
+                  <td className="px-3 py-3 text-muted-foreground">{pageStart + index + 1}</td>
                   <td className="px-3 py-3 font-medium">{d.manager}</td>
                   <td className="px-3 py-3 text-muted-foreground">{d.creator}</td>
                   <td className="px-3 py-3">{d.platform}</td>
@@ -389,10 +426,37 @@ function DealsPage() {
           </table>
         </div>
 
+        {sortedDeals.length > PAGE_SIZE && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs font-semibold text-muted-foreground">
+              Page {currentPage} of {pageCount} · {PAGE_SIZE} deals per page
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={currentPage === 1}
+                className="tb-action inline-flex h-10 items-center gap-1.5 rounded-2xl bg-muted px-3 text-sm font-semibold hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+                disabled={currentPage === pageCount}
+                className="tb-action inline-flex h-10 items-center gap-1.5 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         <p className="mt-4 text-xs text-muted-foreground">
-          {/* Integration note */}
-          Data is read from the four member tabs: KTrang, HYen, BNgan, and LNgoc. The table
-          refreshes automatically.
+          Posted deals are sorted first, then highest total pricing. Member tabs are auto-detected
+          from the deal worksheet headers.
         </p>
       </div>
     </div>

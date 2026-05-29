@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import {
-  FALLBACK_MEMBER_SHEETS,
   IGNORED_OUTREACH_TAB_NAMES,
   SIGNED_CREATORS_TAB_NAME,
 } from "@/data/sheetConfig";
@@ -10,11 +9,17 @@ import { creators as fallbackCreators, type Creator } from "@/data/creators";
 import {
   canonicalMemberName,
   cleanSheetName,
+  getMissingCreatorHeaders,
+  getMissingDealHeaders,
+  getMissingOutreachHeaders,
+  isDealWorksheetHeader,
+  isOutreachWorksheetHeader,
   normalizeCreatorRows,
   normalizeMemberDealRows,
   normalizeMemberOutreachRows,
   type OutreachRow,
 } from "@/lib/sheet-normalizer";
+import { normalizeSheetHeader } from "@/lib/sheet-headers";
 
 type GoogleSheetsServer = typeof import("@/lib/google-sheets.server");
 type GoogleSheetsConfig = ReturnType<GoogleSheetsServer["getGoogleSheetsConfig"]>;
@@ -27,6 +32,7 @@ type SheetRef = {
 
 type ReadableMemberSheet = {
   memberName: string;
+  sheetName: string;
   headers: string[];
   rows: string[][];
 };
@@ -53,11 +59,6 @@ export type SignedCreatorsTabDiagnostic = {
   found: boolean;
   sheetName: string | null;
   warning: string | null;
-};
-
-type SheetDiscoveryResult = {
-  refs: SheetRef[];
-  diagnostics: TabMatchDiagnostic;
 };
 
 type SignedCreatorsDiscoveryResult = {
@@ -128,6 +129,9 @@ export type OutreachMemberStats = {
   signed: number;
   ended: number;
   replyRate: number;
+  bookingRate: number;
+  callClosingRate: number;
+  overallClosingRate: number;
   conversionRate: number;
   topNiche: string;
 };
@@ -188,20 +192,24 @@ const QUERY_STALE_TIME_MS = SERVER_DATA_CACHE_TTL_MS;
 const QUERY_REFETCH_INTERVAL_MS = SERVER_DATA_CACHE_TTL_MS;
 let dashboardCache: DashboardCacheEntry | null = null;
 let dashboardRefreshPromise: Promise<DashboardCacheEntry> | null = null;
-const BLOCKED_TAB_NAME_WORDS = [
+const SYSTEM_TAB_NAME_WORDS = [
   "archive",
+  "active contacts",
   "asset",
-  "creator",
+  "company database",
+  "config",
+  "contacts",
   "dashboard",
   "database",
-  "deal",
-  "google",
-  "gstatic",
-  "outreach",
+  "diagnostic",
+  "ex-manager",
+  "ex managers",
+  "instruction",
+  "links",
   "setting",
-  "sheet",
   "summary",
   "template",
+  "team assets",
 ];
 
 function parseMoney(value: string) {
@@ -251,17 +259,6 @@ function cleanMemberName(value: string) {
   return cleanSheetName(value);
 }
 
-function isLikelyMemberName(value: string) {
-  const name = cleanMemberName(value);
-  const lowerName = name.toLowerCase();
-
-  if (!name || name.length > 32) return false;
-  if (!/^[\p{L}][\p{L}\p{N} '\-_]*$/u.test(name)) return false;
-  if (BLOCKED_TAB_NAME_WORDS.some((word) => lowerName.includes(word))) return false;
-
-  return true;
-}
-
 function normalizeSheetLabel(value: string) {
   return cleanSheetName(value).toLowerCase();
 }
@@ -278,107 +275,23 @@ function isSignedCreatorsSheet(value: string) {
   return normalizeSheetLabel(value).includes("signed creators");
 }
 
-function isOutreachWorksheetName(value: string) {
-  return isLikelyMemberName(value) && !isIgnoredOutreachSheet(value);
-}
+function getSystemTabSkipReason(sheetName: string) {
+  if (isIgnoredOutreachSheet(sheetName) || isSignedCreatorsSheet(sheetName)) {
+    return "Ignored creator sourcing system tab.";
+  }
 
-function expectedMemberNames() {
-  return Array.from(new Set(FALLBACK_MEMBER_SHEETS.map((sheet) => canonicalMemberName(sheet.name))));
+  const normalized = normalizeSheetLabel(sheetName);
+  const matchedWord = SYSTEM_TAB_NAME_WORDS.find((word) => normalized.includes(word));
+
+  if (matchedWord) {
+    return `Ignored system tab matching "${matchedWord}".`;
+  }
+
+  return null;
 }
 
 function memberMatchKey(value: string) {
   return canonicalMemberName(value).toLowerCase();
-}
-
-function createSheetDiscoveryResult({
-  spreadsheet,
-  discovered,
-  includeSheet,
-}: {
-  spreadsheet: TabMatchDiagnostic["spreadsheet"];
-  discovered: SheetRef[];
-  includeSheet: (sheet: SheetRef, memberName: string) => string | null;
-}): SheetDiscoveryResult {
-  const expectedMembers = expectedMemberNames();
-  const availableTabs = discovered.map((sheet) => sheet.sheetName);
-  const skippedTabs: TabMatchDiagnostic["skippedTabs"] = [];
-  const warnings: string[] = [];
-  const byMember = new Map<string, SheetRef>();
-
-  for (const sheet of discovered) {
-    const rawSheetName = sheet.sheetName || sheet.memberName;
-    const memberName = canonicalMemberName(rawSheetName);
-    const skipReason = includeSheet(sheet, memberName);
-
-    if (skipReason) {
-      skippedTabs.push({ sheetName: rawSheetName, reason: skipReason });
-      continue;
-    }
-
-    const key = memberMatchKey(memberName);
-    if (byMember.has(key)) {
-      skippedTabs.push({
-        sheetName: rawSheetName,
-        reason: `Duplicate member tab for ${memberName}; using ${byMember.get(key)?.sheetName}.`,
-      });
-      continue;
-    }
-
-    byMember.set(key, {
-      ...sheet,
-      memberName,
-      sheetName: rawSheetName,
-    });
-  }
-
-  const orderedRefs: SheetRef[] = [];
-  const matchedMembers: TabMatchDiagnostic["matchedMembers"] = [];
-  const missingExpectedMembers: string[] = [];
-
-  for (const memberName of expectedMembers) {
-    const ref = byMember.get(memberMatchKey(memberName));
-    if (!ref) {
-      missingExpectedMembers.push(memberName);
-      continue;
-    }
-
-    matchedMembers.push({ memberName, sheetName: ref.sheetName });
-    orderedRefs.push(ref);
-  }
-
-  for (const ref of byMember.values()) {
-    if (expectedMembers.some((memberName) => memberMatchKey(memberName) === memberMatchKey(ref.memberName))) {
-      continue;
-    }
-    orderedRefs.push(ref);
-    matchedMembers.push({ memberName: ref.memberName, sheetName: ref.sheetName });
-  }
-
-  if (missingExpectedMembers.length > 0) {
-    warnings.push(
-      `Missing expected member tabs: ${missingExpectedMembers.join(", ")}. Those members were skipped.`,
-    );
-  }
-
-  logDashboardDataFlow(`${spreadsheet} tab metadata matched`, {
-    availableTabs,
-    matchedMembers,
-    missingExpectedMembers,
-    skippedTabs,
-  });
-
-  return {
-    refs: orderedRefs,
-    diagnostics: {
-      spreadsheet,
-      availableTabs,
-      expectedMembers,
-      matchedMembers,
-      missingExpectedMembers,
-      skippedTabs,
-      warnings,
-    },
-  };
 }
 
 function getInitials(name: string) {
@@ -404,28 +317,9 @@ function makeMemberId(name: string, index: number) {
   );
 }
 
-function normalizeHeader(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function hasHeader(headers: string[], candidates: string[]) {
-  const normalizedHeaders = headers.map(normalizeHeader);
-  return candidates.some((candidate) => normalizedHeaders.includes(normalizeHeader(candidate)));
-}
-
-function isDealWorksheet(headers: string[]) {
-  return (
-    hasHeader(headers, ["creator"]) &&
-    hasHeader(headers, ["brand name", "brand"]) &&
-    hasHeader(headers, ["status"]) &&
-    hasHeader(headers, ["total pricing", "total pricing (£)"]) &&
-    hasHeader(headers, ["manager total"])
-  );
-}
-
 function getSheetSignature(headers: string[], rows: string[][]) {
   return JSON.stringify([
-    headers.map(normalizeHeader),
+    headers.map(normalizeSheetHeader),
     rows.slice(0, 30).map((row) => row.slice(0, 16)),
   ]);
 }
@@ -485,33 +379,23 @@ async function discoverAllSheetRefs(
   }));
 }
 
-async function discoverDealSheetRefs(
-  config: GoogleSheetsConfig,
-  spreadsheetId: string,
-): Promise<SheetDiscoveryResult> {
-  const discovered = await discoverAllSheetRefs(config, spreadsheetId);
-
-  return createSheetDiscoveryResult({
-    spreadsheet: "deals",
-    discovered,
-    includeSheet: (sheet, memberName) => {
-      if (!isLikelyMemberName(memberName)) {
-        return "Tab name does not look like a member name.";
-      }
-      if (isIgnoredOutreachSheet(sheet.sheetName)) {
-        return "Tab is reserved for creator sourcing, not deals.";
-      }
-      return null;
-    },
-  });
-}
-
 function getSummaryValue(rows: string[][], labels: string[]) {
-  const row = rows.find((item) => {
-    const label = item[17]?.toLowerCase().trim() ?? "";
-    return labels.some((candidate) => label.includes(candidate));
-  });
-  return parseMoney(row?.[18] ?? "");
+  const normalizedLabels = labels.map((label) => normalizeSheetLabel(label));
+
+  for (const row of rows) {
+    for (let index = 0; index < row.length; index += 1) {
+      const label = normalizeSheetLabel(row[index] ?? "");
+      const matchesLabel = normalizedLabels.some((candidate) => label.includes(candidate));
+
+      if (!matchesLabel) continue;
+
+      const valueCells = row.slice(index + 1, index + 4);
+      const value = valueCells.map(parseMoney).find((candidate) => candidate > 0);
+      return value ?? 0;
+    }
+  }
+
+  return 0;
 }
 
 async function fetchSheetRowsBatchFromApi(
@@ -536,6 +420,7 @@ async function fetchMemberSheetsRowsBatchSafely(
 
     return sheets.map((sheet, index) => ({
       memberName: sheet.memberName,
+      sheetName: sheet.sheetName,
       headers: rows[index]?.headers ?? [],
       rows: rows[index]?.rows ?? [],
     }));
@@ -555,6 +440,95 @@ async function fetchMemberSheetsRowsBatchSafely(
 
     return [];
   }
+}
+
+async function readAutoDetectedDealMemberSheets(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  debug?: DashboardReadDebug,
+): Promise<ReadableMemberSheet[]> {
+  const discovered = await discoverAllSheetRefs(config, spreadsheetId);
+  const availableTabs = discovered.map((sheet) => sheet.sheetName);
+  const skippedTabs: TabMatchDiagnostic["skippedTabs"] = [];
+  const candidateRefs = discovered.filter((sheet) => {
+    const skipReason = getSystemTabSkipReason(sheet.sheetName);
+
+    if (skipReason) {
+      skippedTabs.push({ sheetName: sheet.sheetName, reason: skipReason });
+      return false;
+    }
+
+    return true;
+  });
+  const candidateSheets = await fetchMemberSheetsRowsBatchSafely(
+    config,
+    spreadsheetId,
+    candidateRefs,
+    debug,
+  );
+  const byMember = new Map<string, ReadableMemberSheet>();
+
+  for (const sheet of candidateSheets) {
+    const rawSheetName = sheet.memberName;
+    const memberName = canonicalMemberName(rawSheetName);
+    const missingHeaders = getMissingDealHeaders(sheet.headers);
+
+    if (sheet.headers.length === 0) {
+      skippedTabs.push({ sheetName: rawSheetName, reason: "No header row found." });
+      continue;
+    }
+
+    if (!isDealWorksheetHeader(sheet.headers)) {
+      skippedTabs.push({
+        sheetName: rawSheetName,
+        reason: `Missing required deal headers: ${missingHeaders.join(", ")}.`,
+      });
+      continue;
+    }
+
+    const key = memberMatchKey(memberName);
+    if (byMember.has(key)) {
+      skippedTabs.push({
+        sheetName: rawSheetName,
+        reason: `Duplicate member tab for ${memberName}; using ${byMember.get(key)?.memberName}.`,
+      });
+      continue;
+    }
+
+    byMember.set(key, {
+      ...sheet,
+      memberName,
+    });
+  }
+
+  const sheets = dedupeSheetsByContent([...byMember.values()]);
+  const diagnostics: TabMatchDiagnostic = {
+    spreadsheet: "deals",
+    availableTabs,
+    expectedMembers: [],
+    matchedMembers: sheets.map((sheet) => ({
+      memberName: sheet.memberName,
+      sheetName: sheet.sheetName,
+    })),
+    missingExpectedMembers: [],
+    skippedTabs,
+    warnings: [],
+  };
+
+  if (sheets.length === 0) {
+    diagnostics.warnings.push("No member deal tabs were detected from worksheet headers.");
+  }
+
+  debug && (debug.dealTabs = diagnostics);
+  debug?.warnings.push(...diagnostics.warnings);
+
+  logDashboardDataFlow("deal member tabs auto-detected from headers", {
+    availableTabs,
+    matchedMembers: diagnostics.matchedMembers,
+    skippedTabs,
+  });
+
+  return sheets;
 }
 
 function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fallback: Teammate) {
@@ -639,6 +613,9 @@ function emptyOutreachTotals(): OutreachDashboardData["totals"] {
     signed: 0,
     ended: 0,
     replyRate: 0,
+    bookingRate: 0,
+    callClosingRate: 0,
+    overallClosingRate: 0,
     conversionRate: 0,
     topNiche: "-",
   };
@@ -658,6 +635,9 @@ function fallbackOutreachData(team: Teammate[] = fallbackTeam): OutreachDashboar
       signed: member.exclusiveCreators + member.nonExclusiveCreators,
       ended: 0,
       replyRate: 0,
+      bookingRate: 0,
+      callClosingRate: 0,
+      overallClosingRate: 0,
       conversionRate: 0,
       topNiche: "-",
     })),
@@ -687,8 +667,10 @@ function buildOutreachDashboardData(
     const replies = rows.filter((row) => row.replied).length;
     const bookedCalls = rows.filter((row) => row.bookedCall).length;
     const signedFromStatus = rows.filter((row) => row.signedFromStatus).length;
-    const signed = Math.max(signedFromStatus, signedByMember.get(memberName) ?? 0);
+    const hasOutcomeData = rows.some((row) => row.finalStatus.trim());
+    const signed = hasOutcomeData ? signedFromStatus : (signedByMember.get(memberName) ?? 0);
     const ended = rows.filter((row) => row.ended).length;
+    const overallClosingRate = percentage(signed, contacted);
 
     return {
       memberName: member.name,
@@ -702,7 +684,10 @@ function buildOutreachDashboardData(
       signed,
       ended,
       replyRate: percentage(replies, contacted),
-      conversionRate: percentage(signed, contacted),
+      bookingRate: percentage(bookedCalls, contacted),
+      callClosingRate: percentage(signed, bookedCalls),
+      overallClosingRate,
+      conversionRate: overallClosingRate,
       topNiche: mostCommon(rows.map((row) => row.niche)),
     };
   });
@@ -718,6 +703,9 @@ function buildOutreachDashboardData(
       signed: acc.signed + member.signed,
       ended: acc.ended + member.ended,
       replyRate: 0,
+      bookingRate: 0,
+      callClosingRate: 0,
+      overallClosingRate: 0,
       conversionRate: 0,
       topNiche: "-",
     }),
@@ -729,6 +717,9 @@ function buildOutreachDashboardData(
     totals: {
       ...totalsBase,
       replyRate: percentage(totalsBase.replies, totalsBase.contacted),
+      bookingRate: percentage(totalsBase.bookedCalls, totalsBase.contacted),
+      callClosingRate: percentage(totalsBase.signed, totalsBase.bookedCalls),
+      overallClosingRate: percentage(totalsBase.signed, totalsBase.contacted),
       conversionRate: percentage(totalsBase.signed, totalsBase.contacted),
       topNiche: mostCommon(outreachRows.map((row) => row.niche)),
     },
@@ -747,22 +738,21 @@ async function readCreatorSourcingData(
   });
 
   const discoveredCreatorTabs = await discoverAllSheetRefs(config, creatorSourcingSpreadsheetId);
-  const outreachDiscovery = createSheetDiscoveryResult({
-    spreadsheet: "creator-sourcing",
-    discovered: discoveredCreatorTabs,
-    includeSheet: (sheet, memberName) => {
-      if (isIgnoredOutreachSheet(sheet.sheetName ?? "")) {
-        return "Ignored creator sourcing system tab.";
-      }
-      if (!isOutreachWorksheetName(memberName)) {
-        return "Tab name does not look like a member outreach tab.";
-      }
-      return null;
-    },
-  });
+  const availableTabs = discoveredCreatorTabs.map((sheet) => sheet.sheetName);
+  const skippedOutreachTabs: TabMatchDiagnostic["skippedTabs"] = [];
   const signedCreatorsFound = discoveredCreatorTabs.find((sheet) =>
     isSignedCreatorsSheet(sheet.sheetName ?? sheet.memberName),
   );
+  const outreachCandidateRefs = discoveredCreatorTabs.filter((sheet) => {
+    const skipReason = getSystemTabSkipReason(sheet.sheetName);
+
+    if (skipReason) {
+      skippedOutreachTabs.push({ sheetName: sheet.sheetName, reason: skipReason });
+      return false;
+    }
+
+    return true;
+  });
   const signedCreatorsDiscovery: SignedCreatorsDiscoveryResult = {
     ref: signedCreatorsFound
       ? {
@@ -771,7 +761,7 @@ async function readCreatorSourcingData(
         }
       : null,
     diagnostics: {
-      availableTabs: discoveredCreatorTabs.map((sheet) => sheet.sheetName),
+      availableTabs,
       expectedName: cleanMemberName(SIGNED_CREATORS_TAB_NAME),
       found: Boolean(signedCreatorsFound),
       sheetName: signedCreatorsFound?.sheetName ?? null,
@@ -780,25 +770,17 @@ async function readCreatorSourcingData(
         : "Signed creators tab was not found, so creator roster rows were skipped.",
     },
   };
-  const outreachRefs = outreachDiscovery.refs;
   const signedCreatorsRef = signedCreatorsDiscovery.ref;
 
-  if (debug) {
-    debug.outreachTabs = outreachDiscovery.diagnostics;
-    debug.signedCreatorsTab = signedCreatorsDiscovery.diagnostics;
-    debug.warnings.push(...outreachDiscovery.diagnostics.warnings);
-    if (signedCreatorsDiscovery.diagnostics.warning) {
-      debug.warnings.push(signedCreatorsDiscovery.diagnostics.warning);
-    }
-  }
-
   logDashboardDataFlow("creator sourcing sheet refs discovered", {
-    outreachRefCount: outreachRefs.length,
-    outreachRefs: outreachRefs.map((sheet) => sheet.sheetName),
+    outreachCandidateCount: outreachCandidateRefs.length,
+    outreachCandidates: outreachCandidateRefs.map((sheet) => sheet.sheetName),
     signedCreatorsSheet: signedCreatorsRef?.sheetName ?? null,
   });
 
-  const creatorSheetRefs = signedCreatorsRef ? [...outreachRefs, signedCreatorsRef] : outreachRefs;
+  const creatorSheetRefs = signedCreatorsRef
+    ? [...outreachCandidateRefs, signedCreatorsRef]
+    : outreachCandidateRefs;
   const creatorSheetRows = await fetchSheetRowsBatchFromApi(
     config,
     creatorSourcingSpreadsheetId,
@@ -816,15 +798,94 @@ async function readCreatorSourcingData(
     });
     return [];
   });
-  const readableOutreachSheets = outreachRefs.map((sheet, index) => ({
-    memberName: sheet.memberName,
-    headers: creatorSheetRows[index]?.headers ?? [],
-    rows: creatorSheetRows[index]?.rows ?? [],
-  }));
+
+  const outreachDiagnostics: TabMatchDiagnostic = {
+    spreadsheet: "creator-sourcing",
+    availableTabs,
+    expectedMembers: [],
+    matchedMembers: [],
+    missingExpectedMembers: [],
+    skippedTabs: skippedOutreachTabs,
+    warnings: [],
+  };
+  const readableOutreachSheets: ReadableMemberSheet[] = [];
+
+  outreachCandidateRefs.forEach((sheet, index) => {
+    const memberName = canonicalMemberName(sheet.sheetName || sheet.memberName);
+    const headers = creatorSheetRows[index]?.headers ?? [];
+    const rows = creatorSheetRows[index]?.rows ?? [];
+    const missingHeaders = getMissingOutreachHeaders(headers);
+
+    if (headers.length === 0) {
+      outreachDiagnostics.skippedTabs.push({
+        sheetName: sheet.sheetName,
+        reason: "No header row found.",
+      });
+      return;
+    }
+
+    if (!isOutreachWorksheetHeader(headers)) {
+      outreachDiagnostics.skippedTabs.push({
+        sheetName: sheet.sheetName,
+        reason:
+          missingHeaders.length > 0
+            ? `Missing outreach headers: ${missingHeaders.join(", ")}.`
+            : "Does not match the outreach worksheet structure.",
+      });
+      return;
+    }
+
+    outreachDiagnostics.matchedMembers.push({
+      memberName,
+      sheetName: sheet.sheetName,
+    });
+
+    if (missingHeaders.length > 0) {
+      outreachDiagnostics.warnings.push(
+        `${memberName} outreach sheet is missing headers used by dashboard metrics: ${missingHeaders.join(", ")}.`,
+      );
+    }
+
+    readableOutreachSheets.push({
+      memberName,
+      sheetName: sheet.sheetName,
+      headers,
+      rows,
+    });
+  });
+
+  if (readableOutreachSheets.length === 0) {
+    outreachDiagnostics.warnings.push(
+      "No member outreach tabs were detected from worksheet headers.",
+    );
+  }
+
+  if (debug) {
+    debug.outreachTabs = outreachDiagnostics;
+    debug.signedCreatorsTab = signedCreatorsDiscovery.diagnostics;
+    debug.warnings.push(...outreachDiagnostics.warnings);
+    if (signedCreatorsDiscovery.diagnostics.warning) {
+      debug.warnings.push(signedCreatorsDiscovery.diagnostics.warning);
+    }
+  }
+
   const signedCreatorsRows =
-    signedCreatorsRef && creatorSheetRows[outreachRefs.length]
-      ? creatorSheetRows[outreachRefs.length]
+    signedCreatorsRef && creatorSheetRows[outreachCandidateRefs.length]
+      ? creatorSheetRows[outreachCandidateRefs.length]
       : { headers: [], rows: [] };
+  const missingCreatorHeaders = getMissingCreatorHeaders(signedCreatorsRows.headers);
+  if (signedCreatorsRows.headers.length > 0 && missingCreatorHeaders.length > 0) {
+    const warning = `Signed creators tab is missing headers used by creator metrics: ${missingCreatorHeaders.join(", ")}.`;
+    debug?.warnings.push(warning);
+    signedCreatorsDiscovery.diagnostics.warning =
+      signedCreatorsDiscovery.diagnostics.warning ?? warning;
+  }
+
+  logDashboardDataFlow("creator sourcing tabs auto-detected from headers", {
+    matchedMembers: outreachDiagnostics.matchedMembers,
+    skippedTabs: outreachDiagnostics.skippedTabs,
+    warnings: outreachDiagnostics.warnings,
+  });
 
   const outreachRows = readableOutreachSheets.flatMap(({ memberName, headers, rows }) =>
     normalizeMemberOutreachRows(memberName, [headers, ...rows]),
@@ -934,33 +995,15 @@ async function readDashboardSheetData(
     dealsSheetUrl: makeSheetUrl(config.teamSpreadsheetId),
     creatorSourcingSheetUrl: makeSheetUrl(config.creatorSourcingSpreadsheetId),
   };
-  const dealDiscovery = await discoverDealSheetRefs(config, config.teamSpreadsheetId);
-  const sheetRefs = dealDiscovery.refs;
-  if (debug) {
-    debug.dealTabs = dealDiscovery.diagnostics;
-    debug.warnings.push(...dealDiscovery.diagnostics.warnings);
-  }
-  logDashboardDataFlow("deal sheet refs discovered", {
-    sheetRefCount: sheetRefs.length,
-    sheetRefs: sheetRefs.map((sheet) => sheet.sheetName),
-  });
-  const readableSheets = await fetchMemberSheetsRowsBatchSafely(
-    config,
-    config.teamSpreadsheetId,
-    sheetRefs,
-    debug,
-  );
+  const sheets = await readAutoDetectedDealMemberSheets(config, config.teamSpreadsheetId, debug);
   logDashboardDataFlow("deal sheet rows returned", {
-    sheets: readableSheets.map((sheet) => ({
+    sheets: sheets.map((sheet) => ({
       memberName: sheet.memberName,
       headerCount: sheet.headers.length,
       rowCount: sheet.rows.length,
-      expectedDealHeaders: isDealWorksheet(sheet.headers),
+      expectedDealHeaders: isDealWorksheetHeader(sheet.headers),
     })),
   });
-  const sheets = dedupeSheetsByContent(
-    readableSheets.filter((sheet) => isDealWorksheet(sheet.headers)),
-  );
 
   logDashboardDataFlow("deal sheets after expected-header filter", {
     validDealSheetCount: sheets.length,
@@ -1229,7 +1272,7 @@ export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler
 );
 
 export const dashboardSheetQuery = {
-  queryKey: ["team-billion-dashboard-sheet", "creator-sourcing-v3"],
+  queryKey: ["team-billion-dashboard-sheet", "universal-header-parser-v1"],
   queryFn: () => fetchDashboardSheetData(),
   refetchInterval: QUERY_REFETCH_INTERVAL_MS,
   staleTime: QUERY_STALE_TIME_MS,

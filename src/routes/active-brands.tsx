@@ -8,6 +8,8 @@ import {
   ChevronRight,
   Copy,
   ExternalLink,
+  Filter,
+  RotateCcw,
   Search,
   Store,
 } from "lucide-react";
@@ -16,6 +18,11 @@ import { activeBrandsQuery } from "@/lib/active-brands";
 
 const PAGE_SIZE = 20;
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+const contactFilters = ["All contacts", "Has email", "Missing email"] as const;
+const linkFilters = ["All links", "Has link", "Missing link"] as const;
+
+type ContactFilter = (typeof contactFilters)[number];
+type LinkFilter = (typeof linkFilters)[number];
 
 export const Route = createFileRoute("/active-brands")({
   head: () => ({
@@ -41,6 +48,41 @@ function normalizeHeader(value: string) {
 
 function getEmailValues(value: string) {
   return value.match(EMAIL_PATTERN) ?? [];
+}
+
+function uniqueSorted(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b),
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="min-w-[150px] flex-1 sm:flex-none">
+      <span className="text-xs font-semibold text-muted-foreground">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="tb-search mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/30"
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function isBrandColumn(header: string, index: number) {
@@ -90,6 +132,9 @@ function getCellKey(rowIndex: number, columnIndex: number, value: string) {
 function ActiveBrandsPage() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState("All statuses");
+  const [contactFilter, setContactFilter] = useState<ContactFilter>("All contacts");
+  const [linkFilter, setLinkFilter] = useState<LinkFilter>("All links");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const { data } = useQuery(activeBrandsQuery);
   const headers = data?.headers ?? [];
@@ -102,11 +147,58 @@ function ActiveBrandsPage() {
         : data?.source === "fallback"
           ? "Local fallback"
           : "Loading Sheet";
+  const statusColumnIndexes = useMemo(
+    () =>
+      headers
+        .map((header, index) => (isStatusColumn(header) ? index : -1))
+        .filter((index) => index >= 0),
+    [headers],
+  );
+  const statusOptions = useMemo(
+    () => [
+      "All statuses",
+      ...uniqueSorted(
+        rows.flatMap((row) =>
+          statusColumnIndexes.map((index) => row[index] ?? "").filter((value) => value.trim()),
+        ),
+      ),
+    ],
+    [rows, statusColumnIndexes],
+  );
+  const hasActiveFilters =
+    q.trim() !== "" ||
+    statusFilter !== "All statuses" ||
+    contactFilter !== "All contacts" ||
+    linkFilter !== "All links";
+  const clearFilters = () => {
+    setQ("");
+    setStatusFilter("All statuses");
+    setContactFilter("All contacts");
+    setLinkFilter("All links");
+  };
   const filteredRows = useMemo(() => {
     const query = q.trim().toLowerCase();
-    if (!query) return rows;
-    return rows.filter((row) => row.join(" ").toLowerCase().includes(query));
-  }, [q, rows]);
+    return rows.filter((row) => {
+      const rowText = row.join(" ").toLowerCase();
+      const emails = getEmailValues(row.join(" "));
+      const hasEmail = emails.length > 0;
+      const hasLink = row.some((cell) => isLikelyUrl(cell.trim()));
+      const statusValues = statusColumnIndexes.map((index) => row[index]?.trim() ?? "");
+      const matchesQuery = !query || rowText.includes(query);
+      const matchesStatus =
+        statusFilter === "All statuses" || statusValues.some((value) => value === statusFilter);
+      const matchesContact =
+        contactFilter === "All contacts" ||
+        (contactFilter === "Has email" && hasEmail) ||
+        (contactFilter === "Missing email" && !hasEmail);
+      const matchesLink =
+        linkFilter === "All links" ||
+        (linkFilter === "Has link" && hasLink) ||
+        (linkFilter === "Missing link" && !hasLink);
+
+      return matchesQuery && matchesStatus && matchesContact && matchesLink;
+    });
+  }, [contactFilter, linkFilter, q, rows, statusColumnIndexes, statusFilter]);
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
   const pageStart = (currentPage - 1) * PAGE_SIZE;
@@ -116,7 +208,7 @@ function ActiveBrandsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [q, rows]);
+  }, [contactFilter, linkFilter, q, rows, statusFilter]);
 
   const copyEmail = async (key: string, value: string) => {
     try {
@@ -180,7 +272,7 @@ function ActiveBrandsPage() {
           </div>
         )}
 
-        <div className="mt-5 flex flex-wrap items-center gap-2">
+        <div className="mt-5 space-y-4">
           <div className="relative min-w-[200px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -190,8 +282,49 @@ function ActiveBrandsPage() {
               className="tb-search h-10 w-full rounded-2xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
-          <div className="rounded-2xl bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground">
-            Showing {showingStart}-{showingEnd} of {filteredRows.length}
+
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="tb-hover-lift flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-xs font-semibold text-muted-foreground">
+              <Filter className="h-3.5 w-3.5" />
+              Smart filters
+            </div>
+            <FilterSelect
+              label="Status / type"
+              value={statusFilter}
+              options={statusOptions}
+              onChange={setStatusFilter}
+            />
+            <FilterSelect
+              label="Contact"
+              value={contactFilter}
+              options={[...contactFilters]}
+              onChange={(value) => setContactFilter(value as ContactFilter)}
+            />
+            <FilterSelect
+              label="Links"
+              value={linkFilter}
+              options={[...linkFilters]}
+              onChange={(value) => setLinkFilter(value as LinkFilter)}
+            />
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-muted px-4 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Clear
+              </button>
+            )}
+          </div>
+
+          <div className="text-xs font-medium text-muted-foreground">
+            Showing{" "}
+            <span className="text-foreground">
+              {showingStart}-{showingEnd}
+            </span>{" "}
+            of <span className="text-foreground">{filteredRows.length.toLocaleString()}</span> of{" "}
+            <span className="text-foreground">{rows.length.toLocaleString()}</span> brands
           </div>
         </div>
 

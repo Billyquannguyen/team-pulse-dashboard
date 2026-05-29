@@ -24,6 +24,9 @@ function fallbackOutreach(): OutreachDashboardData {
     signed: member.exclusiveCreators + member.nonExclusiveCreators,
     ended: 0,
     replyRate: 0,
+    bookingRate: 0,
+    callClosingRate: 0,
+    overallClosingRate: 0,
     conversionRate: 0,
     topNiche: "-",
   }));
@@ -40,6 +43,9 @@ function fallbackOutreach(): OutreachDashboardData {
       signed: members.reduce((sum, member) => sum + member.signed, 0),
       ended: 0,
       replyRate: 0,
+      bookingRate: 0,
+      callClosingRate: 0,
+      overallClosingRate: 0,
       conversionRate: 0,
       topNiche: "-",
     },
@@ -60,6 +66,9 @@ function emptyOutreach(): OutreachDashboardData {
       signed: 0,
       ended: 0,
       replyRate: 0,
+      bookingRate: 0,
+      callClosingRate: 0,
+      overallClosingRate: 0,
       conversionRate: 0,
       topNiche: "-",
     },
@@ -116,14 +125,32 @@ export function OutreachSummaryCard({
       tone: "var(--fun-yellow)",
     },
     {
+      label: "Booked calls",
+      value: totals.bookedCalls.toLocaleString(),
+      icon: PhoneCall,
+      tone: "var(--fun-blue)",
+    },
+    {
       label: "Signed & partnered",
       value: totals.signed.toLocaleString(),
       icon: UserCheck,
       tone: "var(--fun-purple)",
     },
     {
-      label: "Conversion",
-      value: formatPercent(totals.conversionRate),
+      label: "Booking rate",
+      value: formatPercent(totals.bookingRate),
+      icon: Percent,
+      tone: "var(--fun-lime)",
+    },
+    {
+      label: "Call closing",
+      value: formatPercent(totals.callClosingRate),
+      icon: Percent,
+      tone: "var(--fun-orange)",
+    },
+    {
+      label: "Overall closing",
+      value: formatPercent(totals.overallClosingRate),
       icon: Percent,
       tone: "var(--fun-orange)",
     },
@@ -155,7 +182,7 @@ export function OutreachSummaryCard({
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -190,7 +217,9 @@ export function OutreachSummaryCard({
                 <th className="px-3 py-2.5 text-right font-medium">Calls</th>
                 <th className="px-3 py-2.5 text-right font-medium">Signed & partnered</th>
                 <th className="px-3 py-2.5 text-right font-medium">Reply rate</th>
-                <th className="px-3 py-2.5 text-right font-medium">Conversion</th>
+                <th className="px-3 py-2.5 text-right font-medium">Booking rate</th>
+                <th className="px-3 py-2.5 text-right font-medium">Call closing</th>
+                <th className="px-3 py-2.5 text-right font-medium">Overall closing</th>
                 <th className="px-3 py-2.5 text-left font-medium">Top niche</th>
               </tr>
             </thead>
@@ -225,7 +254,13 @@ export function OutreachSummaryCard({
                     {member.signed.toLocaleString()}
                   </td>
                   <td className="px-3 py-3 text-right">{formatPercent(member.replyRate)}</td>
-                  <td className="px-3 py-3 text-right">{formatPercent(member.conversionRate)}</td>
+                  <td className="px-3 py-3 text-right">{formatPercent(member.bookingRate)}</td>
+                  <td className="px-3 py-3 text-right">
+                    {formatPercent(member.callClosingRate)}
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    {formatPercent(member.overallClosingRate)}
+                  </td>
                   <td className="px-3 py-3 text-muted-foreground">{member.topNiche}</td>
                 </tr>
               ))}

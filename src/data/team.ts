@@ -3,11 +3,11 @@ export type Teammate = {
   name: string;
   initials: string;
   role: string;
-  // S6: total paid to this member from the start.
+  // Parsed from the member summary label/value cells in the deal worksheet.
   commission: number;
-  // S4: paid this month for last month's work.
+  // Parsed from the member summary label/value cells in the deal worksheet.
   monthCommission: number;
-  // S2: amount still owed to this member.
+  // Parsed from the member summary label/value cells in the deal worksheet.
   pendingOwed: number;
   dealsClosed: number;
   revenue: number;

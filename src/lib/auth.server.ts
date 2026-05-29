@@ -14,11 +14,13 @@ function readAuthEnv() {
   const adminPassword = process.env.ADMIN_PASSWORD ?? "";
 
   if (!teamPassword || !adminPassword) {
+    const location = process.env.VERCEL === "1" ? "in Vercel" : "for this environment";
+
     return {
       teamPassword,
       adminPassword,
       setupReady: false,
-      setupIssue: "Missing TEAM_DASHBOARD_PASSWORD or ADMIN_PASSWORD in Vercel.",
+      setupIssue: `Missing TEAM_DASHBOARD_PASSWORD or ADMIN_PASSWORD environment variables ${location}.`,
     };
   }
 

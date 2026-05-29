@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, Search, Users } from "lucide-react";
+import { ExternalLink, Filter, RotateCcw, Search, Users } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { OutreachSummaryCard } from "@/components/dashboard/OutreachSummaryCard";
 import { creators, type CreatorRelationship } from "@/data/creators";
@@ -23,9 +23,45 @@ const relationshipStyles: Record<CreatorRelationship, string> = {
   "Non-exclusive": "bg-fun-blue text-sky-900",
 };
 
+function uniqueSorted(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function FilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="min-w-[150px] flex-1 sm:flex-none">
+      <span className="text-xs font-semibold text-muted-foreground">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="tb-search mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/30"
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function CreatorsPage() {
   const [q, setQ] = useState("");
   const [relationship, setRelationship] = useState<CreatorRelationship | "All">("All");
+  const [owner, setOwner] = useState("All owners");
+  const [platform, setPlatform] = useState("All platforms");
+  const [niche, setNiche] = useState("All niches");
   const { data } = useQuery(dashboardSheetQuery);
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
   const liveCreators = data ? data.creators : canUseLocalFallback ? creators : [];
@@ -37,11 +73,39 @@ function CreatorsPage() {
         : canUseLocalFallback
           ? "Demo fallback data"
           : "Loading Sheet";
+  const owners = useMemo(
+    () => ["All owners", ...uniqueSorted(liveCreators.map((creator) => creator.owner))],
+    [liveCreators],
+  );
+  const platforms = useMemo(
+    () => ["All platforms", ...uniqueSorted(liveCreators.map((creator) => creator.platform))],
+    [liveCreators],
+  );
+  const niches = useMemo(
+    () => ["All niches", ...uniqueSorted(liveCreators.map((creator) => creator.niche))],
+    [liveCreators],
+  );
+  const hasActiveFilters =
+    q.trim() !== "" ||
+    relationship !== "All" ||
+    owner !== "All owners" ||
+    platform !== "All platforms" ||
+    niche !== "All niches";
+  const clearFilters = () => {
+    setQ("");
+    setRelationship("All");
+    setOwner("All owners");
+    setPlatform("All platforms");
+    setNiche("All niches");
+  };
   const filtered = useMemo(
     () =>
       liveCreators.filter(
         (creator) =>
           (relationship === "All" || creator.relationship === relationship) &&
+          (owner === "All owners" || creator.owner === owner) &&
+          (platform === "All platforms" || creator.platform === platform) &&
+          (niche === "All niches" || creator.niche === niche) &&
           (q === "" ||
             [
               creator.handle,
@@ -56,7 +120,7 @@ function CreatorsPage() {
               .toLowerCase()
               .includes(q.toLowerCase())),
       ),
-    [liveCreators, q, relationship],
+    [liveCreators, niche, owner, platform, q, relationship],
   );
 
   return (
@@ -99,7 +163,7 @@ function CreatorsPage() {
           )}
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-2">
+        <div className="mt-5 space-y-4">
           <div className="relative min-w-[200px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -109,20 +173,43 @@ function CreatorsPage() {
               className="tb-search h-10 w-full rounded-2xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
-          {(["All", "Exclusive", "Non-exclusive"] as const).map((item) => (
-            <button
-              key={item}
-              onClick={() => setRelationship(item)}
-              className={cn(
-                "tb-action rounded-full px-3 py-1.5 text-xs font-medium transition",
-                relationship === item
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-accent",
-              )}
-            >
-              {item}
-            </button>
-          ))}
+
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="tb-hover-lift flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-xs font-semibold text-muted-foreground">
+              <Filter className="h-3.5 w-3.5" />
+              Smart filters
+            </div>
+            <FilterSelect
+              label="Relationship"
+              value={relationship}
+              options={["All", "Exclusive", "Non-exclusive"]}
+              onChange={(value) => setRelationship(value as CreatorRelationship | "All")}
+            />
+            <FilterSelect label="Owner" value={owner} options={owners} onChange={setOwner} />
+            <FilterSelect
+              label="Platform"
+              value={platform}
+              options={platforms}
+              onChange={setPlatform}
+            />
+            <FilterSelect label="Niche" value={niche} options={niches} onChange={setNiche} />
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-muted px-4 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Clear
+              </button>
+            )}
+          </div>
+
+          <div className="text-xs font-medium text-muted-foreground">
+            Showing <span className="text-foreground">{filtered.length.toLocaleString()}</span> of{" "}
+            <span className="text-foreground">{liveCreators.length.toLocaleString()}</span>{" "}
+            creators
+          </div>
         </div>
 
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
