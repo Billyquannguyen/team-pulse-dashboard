@@ -843,9 +843,7 @@ export async function getTeamAssetsDataFlowDiagnostics(): Promise<TeamAssetsData
   }
 }
 
-export const fetchTeamAssetsData = createServerFn({ method: "GET" }).handler(async () => {
-  const { requireDashboardAuth } = await import("@/lib/auth.server");
-  await requireDashboardAuth();
+export async function getTeamAssetsDataForServer(): Promise<TeamAssetsSheetData> {
   const googleSheets = await getGoogleSheetsServer();
   const productionRuntime = googleSheets.isProductionRuntime();
   const spreadsheetId = getTeamAssetsSpreadsheetId();
@@ -869,6 +867,12 @@ export const fetchTeamAssetsData = createServerFn({ method: "GET" }).handler(asy
 
     return emptyTeamAssetsData(message, links);
   }
+}
+
+export const fetchTeamAssetsData = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireDashboardAuth } = await import("@/lib/auth.server");
+  await requireDashboardAuth();
+  return getTeamAssetsDataForServer();
 });
 
 export const addTeamAssetLink = createServerFn({ method: "POST" })

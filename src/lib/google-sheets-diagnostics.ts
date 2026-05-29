@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { ActiveBrandsDataFlowDiagnostics } from "@/lib/active-brands";
+import type { BillyAssistantHubDiagnostics } from "@/lib/billy-assistant-hub";
 import type { ContractReviewDiagnostics } from "@/lib/contract-review";
 import type { NotionKnowledgeDiagnostics } from "@/lib/notion-knowledge";
 import type { DashboardDataFlowDiagnostics } from "@/lib/sheets-public";
@@ -46,6 +47,7 @@ export type GoogleSheetsDiagnostics = {
   notion: NotionKnowledgeDiagnostics | null;
   contractReview: ContractReviewDiagnostics | null;
   slackNotifications: SlackNotificationDiagnostics | null;
+  billyAssistantHub: BillyAssistantHubDiagnostics | null;
 };
 
 const DIAGNOSTICS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -64,11 +66,13 @@ async function getEnvStatus(): Promise<EnvDiagnostic[]> {
   const notionKnowledge = await import("@/lib/notion-knowledge");
   const contractReview = await import("@/lib/contract-review");
   const slackNotifications = await import("@/lib/slack-notifications");
+  const billyAssistantHub = await import("@/lib/billy-assistant-hub");
   return [
     ...googleSheets.getGoogleEnvPresence(),
     ...notionKnowledge.getNotionEnvDiagnostics(),
     ...contractReview.getContractReviewEnvDiagnostics(),
     ...slackNotifications.getSlackNotificationEnvDiagnostics(),
+    ...billyAssistantHub.getBillyAssistantEnvDiagnostics(),
   ].filter(
     (item, index, items) => items.findIndex((candidate) => candidate.name === item.name) === index,
   );
@@ -189,6 +193,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       notion: null,
       contractReview: null,
       slackNotifications: null,
+      billyAssistantHub: null,
     } satisfies GoogleSheetsDiagnostics;
   }
 
@@ -196,6 +201,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     const notionKnowledge = await import("@/lib/notion-knowledge");
     const contractReview = await import("@/lib/contract-review");
     const slackNotifications = await import("@/lib/slack-notifications");
+    const billyAssistantHub = await import("@/lib/billy-assistant-hub");
     logDiagnostics("returning cached diagnostics", {
       expiresAt: new Date(diagnosticsCache.expiresAt).toISOString(),
     });
@@ -204,6 +210,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       notion: notionKnowledge.getNotionKnowledgeDiagnostics(),
       contractReview: contractReview.getContractReviewDiagnostics(),
       slackNotifications: await slackNotifications.getSlackNotificationDiagnostics(),
+      billyAssistantHub: await billyAssistantHub.getBillyAssistantHubDiagnosticsData(),
     };
   }
 
@@ -213,6 +220,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
   const notionKnowledge = await import("@/lib/notion-knowledge");
   const contractReview = await import("@/lib/contract-review");
   const slackNotifications = await import("@/lib/slack-notifications");
+  const billyAssistantHub = await import("@/lib/billy-assistant-hub");
   const [
     env,
     auth,
@@ -224,6 +232,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     notion,
     contractReviewFlow,
     slackNotificationsFlow,
+    billyAssistantHubFlow,
   ] = await Promise.all([
       getEnvStatus(),
       checkAuthStatus(),
@@ -235,6 +244,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
       notionKnowledge.getNotionKnowledgeDiagnostics(),
       contractReview.getContractReviewDiagnostics(),
       slackNotifications.getSlackNotificationDiagnostics(),
+      billyAssistantHub.getBillyAssistantHubDiagnosticsData(),
     ]);
 
   logDiagnostics("full diagnostics complete", {
@@ -256,6 +266,8 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     slackConnected: slackNotificationsFlow.slackConnected,
     slackOverdueCount: slackNotificationsFlow.overdueCount,
     slackRedisConfigured: slackNotificationsFlow.redisConfigured,
+    billyHubStorageMode: billyAssistantHubFlow.storageMode,
+    billyHubTopics: billyAssistantHubFlow.currentWeekTopicCount,
   });
 
   const diagnostics = {
@@ -270,6 +282,7 @@ export const getGoogleSheetsDiagnostics = createServerFn({ method: "GET" }).hand
     notion,
     contractReview: contractReviewFlow,
     slackNotifications: slackNotificationsFlow,
+    billyAssistantHub: billyAssistantHubFlow,
   } satisfies GoogleSheetsDiagnostics;
 
   diagnosticsCache = {

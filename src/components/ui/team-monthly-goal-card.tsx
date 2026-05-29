@@ -152,7 +152,7 @@ export function TeamMonthlyGoalCard({
         </div>
 
         <div className="mt-5 flex items-center justify-between rounded-2xl bg-card/55 px-3 py-2 text-xs font-bold text-foreground shadow-sm backdrop-blur">
-          <span>Open goals</span>
+          <span>Open Goals & Analytics</span>
           <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
         </div>
       </div>

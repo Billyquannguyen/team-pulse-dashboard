@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { TopExclusiveCreators } from "@/components/goals/TopExclusiveCreators";
 import {
   team as fallbackTeam,
   totalCommission,
@@ -40,8 +41,11 @@ const rootRoute = getRouteApi("__root__");
 export const Route = createFileRoute("/goals")({
   head: () => ({
     meta: [
-      { title: "Goals — Team Billion" },
-      { name: "description", content: "Track Team Billion monthly and progression goals." },
+      { title: "Goals & Analytics — Team Billion" },
+      {
+        name: "description",
+        content: "Track Team Billion monthly goals, progression, and performance analytics.",
+      },
     ],
   }),
   component: GoalsPage,
@@ -991,6 +995,8 @@ function GoalsPage() {
     [team],
   );
   const teamExclusiveCreators = team.reduce((sum, member) => sum + member.exclusiveCreators, 0);
+  const creators = data?.creators ?? [];
+  const deals = data?.deals ?? [];
 
   const getMonthlyTarget = (member: Teammate) => getMemberMonthlyGoal(settings, member);
   const getProgressionTarget = (member: Teammate) => getMemberProgressionGoal(settings, member);
@@ -1000,7 +1006,7 @@ function GoalsPage() {
   return (
     <div className="space-y-6">
       <AppHeader
-        title="Goals"
+        title="Goals & Analytics"
         subtitle="Monthly pending targets first, then long-term progression."
       />
 
@@ -1129,6 +1135,8 @@ function GoalsPage() {
           ))}
         </div>
       </section>
+
+      <TopExclusiveCreators creators={creators} deals={deals} />
 
       <AdminGoalControls
         members={team}

@@ -1,195 +1,505 @@
-import { useState, useRef, useEffect } from "react";
-import { Bot, FileText, RefreshCw, Send, Sparkles, X } from "lucide-react";
-import type { AuthRole } from "@/lib/auth";
-import { reviewContractPdf } from "@/lib/contract-review";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  askBillyGpt,
-  getBillyGptKnowledgeStatus,
-  syncNotionKnowledge,
-} from "@/lib/notion-knowledge";
+  Bot,
+  CalendarDays,
+  ChevronLeft,
+  ClipboardList,
+  FileText,
+  Handshake,
+  Loader2,
+  Send,
+  Sparkles,
+  UserRound,
+  X,
+} from "lucide-react";
+import { PersonalReportPanel } from "@/components/assistant/PersonalReportPanel";
+import { team as fallbackTeam } from "@/data/team";
+import type { Teammate } from "@/data/team";
+import { dashboardSheetQuery } from "@/lib/sheets-public";
+import {
+  billyAssistantDiagnosticsQuery,
+  meetingTopicsQuery,
+  saveMeetingTopic,
+  type MeetingTopic,
+} from "@/lib/billy-assistant-hub";
+import { useGoalSettings } from "@/lib/goal-settings";
+import type { AuthRole } from "@/lib/auth";
+import { teamAssetsQuery } from "@/lib/team-assets";
+import { resolveExternalGptLinksFromTeamAssets } from "@/lib/team-asset-link-resolver";
 import { cn } from "@/lib/utils";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type AssistantFeature = "home" | "meeting" | "report" | "contract" | "matching";
+type MeetingMode = "menu" | "add" | "view";
 
-const SUGGESTIONS = [
-  "How do I follow up with a creator?",
-  "What do I do if a brand asks for rates?",
-  "Where can I find the outreach script?",
+const featureCards: Array<{
+  id: Exclude<AssistantFeature, "home">;
+  title: string;
+  description: string;
+  icon: typeof CalendarDays;
+  tone: string;
+}> = [
+  {
+    id: "meeting",
+    title: "Meeting Content Memory",
+    description: "Save weekly meeting topics before they disappear from your brain.",
+    icon: CalendarDays,
+    tone: "bg-fun-lime",
+  },
+  {
+    id: "report",
+    title: "Personal Report",
+    description: "Generate a structured performance readout from dashboard metrics.",
+    icon: ClipboardList,
+    tone: "bg-fun-blue",
+  },
+  {
+    id: "contract",
+    title: "Contract Review",
+    description: "Future shortcut for creator and brand contract review.",
+    icon: FileText,
+    tone: "bg-fun-yellow",
+  },
+  {
+    id: "matching",
+    title: "Creator–Brand Matching",
+    description: "Future shortcut for matching creators with strong brand fits.",
+    icon: Handshake,
+    tone: "bg-fun-pink",
+  },
 ];
 
-const MAX_CONTRACT_PDF_BYTES = 10 * 1024 * 1024;
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString([], {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function FeatureCard({
+  title,
+  description,
+  icon: Icon,
+  tone,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  icon: typeof CalendarDays;
+  tone: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="tb-action tb-hover-lift rounded-3xl border border-border bg-background/75 p-5 text-left transition hover:bg-background"
+    >
+      <div className="flex items-start gap-3">
+        <div className={cn("tb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl", tone)}>
+          <Icon className="h-5 w-5" />
+        </div>
+        <div>
+          <h3 className="text-sm font-black">{title}</h3>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function HubShell({
+  title,
+  subtitle,
+  children,
+  footer,
+  onClose,
+  onBack,
+}: {
+  title: string;
+  subtitle: string;
+  children: ReactNode;
+  footer?: ReactNode;
+  onClose: () => void;
+  onBack?: () => void;
+}) {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const previousOverscrollBehavior = document.body.style.overscrollBehavior;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "contain";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscrollBehavior;
+    };
+  }, []);
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border">
+        <div className="shrink-0 border-b border-border p-5 md:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex min-w-0 items-start gap-3">
+              {onBack ? (
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="tb-action mt-0.5 rounded-full p-2 hover:bg-accent"
+                  aria-label="Back to Billy GPT home"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+              ) : (
+                <div className="tb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+                  <Bot className="h-5 w-5" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <h2 className="text-lg font-black">{title}</h2>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">{subtitle}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="tb-action shrink-0 rounded-full p-2 hover:bg-accent"
+              aria-label="Close Billy GPT"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 md:p-6">{children}</div>
+        {footer ? <div className="shrink-0 border-t border-border p-5 md:p-6">{footer}</div> : null}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function groupTopicsByMember(topics: MeetingTopic[]) {
+  return topics.reduce<Record<string, MeetingTopic[]>>((acc, topic) => {
+    acc[topic.memberName] = [...(acc[topic.memberName] ?? []), topic];
+    return acc;
+  }, {});
+}
+
+function MeetingMemoryPanel({ members }: { members: Teammate[] }) {
+  const queryClient = useQueryClient();
+  const { data: topicsData, isLoading } = useQuery(meetingTopicsQuery);
+  const [mode, setMode] = useState<MeetingMode>("menu");
+  const [memberName, setMemberName] = useState(members[0]?.name ?? "");
+  const [title, setTitle] = useState("");
+  const [details, setDetails] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const topics = topicsData?.topics ?? [];
+  const groupedTopics = groupTopicsByMember(topics);
+
+  useEffect(() => {
+    if (!memberName && members[0]?.name) {
+      setMemberName(members[0].name);
+    }
+  }, [memberName, members]);
+
+  const handleSave = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+
+    try {
+      const result = await saveMeetingTopic({
+        data: {
+          memberName,
+          title,
+          details,
+        },
+      });
+
+      setMessage(result.message);
+
+      if (result.ok) {
+        setTitle("");
+        setDetails("");
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: meetingTopicsQuery.queryKey }),
+          queryClient.invalidateQueries({ queryKey: billyAssistantDiagnosticsQuery.queryKey }),
+        ]);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save the meeting topic.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (mode === "add") {
+    return (
+      <form onSubmit={handleSave} className="space-y-4">
+        <button
+          type="button"
+          onClick={() => setMode("menu")}
+          className="tb-action inline-flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-xs font-bold hover:bg-accent"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+          Meeting options
+        </button>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <label>
+            <span className="text-xs font-bold text-muted-foreground">Member name</span>
+            <select
+              value={memberName}
+              onChange={(event) => setMemberName(event.target.value)}
+              className="tb-search mt-1 h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm font-bold outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              {members.map((member) => (
+                <option key={member.id} value={member.name}>
+                  {member.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span className="text-xs font-bold text-muted-foreground">Topic title</span>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="e.g. Better follow-up scripts"
+              className="tb-search mt-1 h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </label>
+        </div>
+
+        <label className="block">
+          <span className="text-xs font-bold text-muted-foreground">Details / notes</span>
+          <textarea
+            value={details}
+            onChange={(event) => setDetails(event.target.value)}
+            placeholder="Add the context you want to remember for the weekly meeting..."
+            rows={5}
+            className="tb-search mt-1 w-full resize-none rounded-2xl border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+          />
+        </label>
+
+        {message && (
+          <div
+            className={cn(
+              "rounded-2xl px-4 py-3 text-sm font-bold",
+              message.startsWith("Noted")
+                ? "bg-fun-lime/60 text-emerald-950"
+                : "bg-destructive/10 text-destructive",
+            )}
+          >
+            {message}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={saving || !memberName || !title.trim()}
+          className="tb-action inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          Save topic
+        </button>
+      </form>
+    );
+  }
+
+  if (mode === "view") {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => setMode("menu")}
+            className="tb-action inline-flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-xs font-bold hover:bg-accent"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            Meeting options
+          </button>
+          <div className="rounded-full bg-muted px-3 py-1 text-xs font-bold text-muted-foreground">
+            {topicsData?.weekLabel ?? "Current week"}
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="rounded-2xl bg-muted/50 p-5 text-sm font-bold text-muted-foreground">
+            Loading this week’s topics...
+          </div>
+        ) : topics.length === 0 ? (
+          <div className="rounded-3xl border border-border bg-background/75 p-6 text-center">
+            <div className="text-sm font-black">No meeting topics saved this week.</div>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Add one when something comes up, then it will appear here grouped by member.
+            </p>
+          </div>
+        ) : (
+          Object.entries(groupedTopics).map(([member, memberTopics]) => (
+            <section key={member} className="rounded-3xl border border-border bg-background/75 p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <UserRound className="h-4 w-4 text-primary" />
+                <h3 className="text-sm font-black">{member}</h3>
+                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-bold text-muted-foreground">
+                  {memberTopics.length}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {memberTopics.map((topic) => (
+                  <article key={topic.id} className="rounded-2xl bg-muted/45 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <h4 className="text-sm font-black">{topic.title}</h4>
+                      <span className="text-[11px] font-bold text-muted-foreground">
+                        {formatDateTime(topic.createdAt)}
+                      </span>
+                    </div>
+                    {topic.details ? (
+                      <p className="mt-2 whitespace-pre-line text-sm leading-6 text-muted-foreground">
+                        {topic.details}
+                      </p>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            </section>
+          ))
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <button
+        type="button"
+        onClick={() => setMode("add")}
+        className="tb-action tb-hover-lift rounded-3xl border border-border bg-fun-lime/45 p-5 text-left hover:bg-fun-lime/60"
+      >
+        <h3 className="text-sm font-black">Add Meeting Topic</h3>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          Save a topic now so it is ready for this week’s team meeting.
+        </p>
+      </button>
+      <button
+        type="button"
+        onClick={() => setMode("view")}
+        className="tb-action tb-hover-lift rounded-3xl border border-border bg-fun-blue/45 p-5 text-left hover:bg-fun-blue/60"
+      >
+        <h3 className="text-sm font-black">View This Week’s Meeting Topics</h3>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          Review saved topics grouped by team member.
+        </p>
+      </button>
+    </div>
+  );
+}
+
+function ExternalGptPanel({
+  type,
+  url,
+}: {
+  type: "contract" | "matching";
+  url: string | null | undefined;
+}) {
+  const isContract = type === "contract";
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
+      <section className="rounded-3xl border border-border bg-background/75 p-6">
+        <div className="flex items-start gap-3">
+          <div
+            className={cn(
+              "tb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl",
+              isContract ? "bg-fun-yellow" : "bg-fun-pink",
+            )}
+          >
+            {isContract ? <FileText className="h-5 w-5" /> : <Handshake className="h-5 w-5" />}
+          </div>
+          <div>
+            <h3 className="text-base font-black">
+              {isContract ? "Contract Review" : "Creator–Brand Matching"}
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {isContract
+                ? "Use this for reviewing creator or brand contracts."
+                : "Use this to match creators with potential brands based on creator profile and brand briefs."}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-border bg-muted/45 p-6">
+        <div className="text-sm font-black">External Custom GPT</div>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          This dashboard does not call an AI model here. It can open your external Custom GPT once a
+          link is configured.
+        </p>
+        {url ? (
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="tb-action mt-4 inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground hover:opacity-90"
+          >
+            {isContract ? "Open Contract Review GPT" : "Open Creator–Brand Matching GPT"}
+          </a>
+        ) : (
+          <button
+            type="button"
+            disabled
+            className="mt-4 inline-flex h-11 items-center justify-center rounded-2xl bg-muted px-5 text-sm font-bold text-muted-foreground"
+          >
+            GPT link not connected yet.
+          </button>
+        )}
+      </section>
+    </div>
+  );
+}
 
 export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Msg[]>([
-    {
-      role: "assistant",
-      content:
-        "Hey, I'm Billy GPT. Ask me anything from the Team Billion handbook.",
-    },
-  ]);
-  const [input, setInput] = useState("");
-  const [thinking, setThinking] = useState(false);
-  const [reviewingContract, setReviewingContract] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<string | null>(null);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeFeature, setActiveFeature] = useState<AssistantFeature>("home");
+  const [settings] = useGoalSettings();
+  const { data } = useQuery(dashboardSheetQuery);
+  const { data: diagnostics } = useQuery({
+    ...billyAssistantDiagnosticsQuery,
+    enabled: open,
+  });
+  const { data: teamAssetsData } = useQuery({
+    ...teamAssetsQuery,
+    enabled: open,
+  });
+  const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+  const members = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
+  const externalGptLinks = resolveExternalGptLinksFromTeamAssets(teamAssetsData?.assets ?? []);
+  const selectedFeature = featureCards.find((feature) => feature.id === activeFeature);
   const isAdmin = authRole === "admin";
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, thinking]);
+  const title = activeFeature === "home" ? "Billy GPT" : (selectedFeature?.title ?? "Billy GPT");
+  const subtitle =
+    activeFeature === "home"
+      ? "A function-based assistant hub for useful Team Billion dashboard actions."
+      : (selectedFeature?.description ?? "Choose an assistant action.");
 
-  useEffect(() => {
-    if (!open) return;
-
-    let cancelled = false;
-
-    getBillyGptKnowledgeStatus()
-      .then((status) => {
-        if (!cancelled) {
-          setLastSyncedAt(status.lastSyncTime);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setLastSyncedAt(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
-
-  const send = async (text: string) => {
-    if (!text.trim()) return;
-    setMessages((m) => [...m, { role: "user", content: text }]);
-    setInput("");
-    setThinking(true);
-
-    try {
-      const reply = await askBillyGpt({ data: { question: text } });
-      setMessages((m) => [...m, { role: "assistant", content: reply.answer }]);
-    } catch {
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: "Billy GPT could not answer right now. Try again in a moment.",
-        },
-      ]);
-    } finally {
-      setThinking(false);
-    }
-  };
-
-  const fileToBase64 = async (file: File) => {
-    const arrayBuffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-    let binary = "";
-    const chunkSize = 0x8000;
-
-    for (let index = 0; index < bytes.length; index += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-    }
-
-    return btoa(binary);
-  };
-
-  const reviewContract = async (file: File | undefined) => {
-    if (!file) return;
-
-    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: "Please upload a PDF contract. Other file types are not supported yet.",
-        },
-      ]);
-      return;
-    }
-
-    if (file.size > MAX_CONTRACT_PDF_BYTES) {
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: "Please upload a PDF under 10MB so Billy GPT can review it safely.",
-        },
-      ]);
-      return;
-    }
-
-    setMessages((m) => [
-      ...m,
-      { role: "user", content: `Uploaded ${file.name} for contract review.` },
-    ]);
-    setReviewingContract(true);
-    setThinking(true);
-
-    try {
-      const fileBase64 = await fileToBase64(file);
-      const result = await reviewContractPdf({
-        data: {
-          fileName: file.name,
-          mimeType: file.type || "application/pdf",
-          fileBase64,
-        },
-      });
-
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: result.ok
-            ? result.review
-            : result.message,
-        },
-      ]);
-    } catch {
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content:
-            "I could not review this PDF right now. Try a text-based PDF under 10MB and I’ll take another pass.",
-        },
-      ]);
-    } finally {
-      setReviewingContract(false);
-      setThinking(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
-
-  const syncKnowledge = async () => {
-    setSyncing(true);
-    setSyncStatus(null);
-
-    try {
-      const result = await syncNotionKnowledge();
-
-      if (result.isSynced) {
-        setSyncStatus(`Synced ${result.pagesIndexed} pages and ${result.chunksIndexed} chunks.`);
-        setLastSyncedAt(result.lastSyncTime);
-      } else {
-        setSyncStatus(result.errors[0] ?? result.setupIssue ?? "Notion sync needs attention.");
-      }
-    } catch (error) {
-      setSyncStatus(error instanceof Error ? error.message : "Notion sync failed.");
-    } finally {
-      setSyncing(false);
-    }
+  const resetPanel = () => {
+    setActiveFeature("home");
+    setOpen(false);
   };
 
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
+        type="button"
+        onClick={() => {
+          setActiveFeature("home");
+          setOpen(true);
+        }}
         className="tb-action fixed bottom-20 right-4 z-30 flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-xl transition hover:scale-105 lg:bottom-6 lg:right-6"
       >
         <Sparkles className="h-4 w-4" />
@@ -197,135 +507,81 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
       </button>
 
       {open && (
-        <div
-          className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-sm"
-          onClick={() => setOpen(false)}
+        <HubShell
+          title={title}
+          subtitle={subtitle}
+          onClose={resetPanel}
+          onBack={activeFeature === "home" ? undefined : () => setActiveFeature("home")}
+          footer={
+            activeFeature === "home" ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-muted-foreground">
+                <span>
+                  Meeting week: {diagnostics?.currentWeekKey ?? "loading"} · Topics:{" "}
+                  {diagnostics?.currentWeekTopicCount ?? 0}
+                </span>
+                <span>
+                  Storage:{" "}
+                  {diagnostics
+                    ? diagnostics.storageMode === "redis"
+                      ? "Redis"
+                      : diagnostics.storageMode === "local-dev"
+                        ? "Local dev server memory"
+                        : "Not configured"
+                    : "checking"}
+                </span>
+              </div>
+            ) : undefined
+          }
         >
-          <div
-            className="flex h-full w-full max-w-md flex-col bg-card shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-border p-4">
-              <div className="flex items-center gap-3">
-                <div className="tb-hover-icon flex h-10 w-10 items-center justify-center rounded-2xl bg-fun-lime">
-                  <Bot className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="text-sm font-semibold">Billy GPT</div>
-                  <div className="text-xs text-muted-foreground">
-                    {lastSyncedAt
-                      ? `Notion synced ${new Date(lastSyncedAt).toLocaleString()}`
-                      : "Sync the Team Billion playbook"}
-                  </div>
-                </div>
+          {activeFeature === "home" && (
+            <div className="space-y-5">
+              <div className="rounded-3xl bg-muted/45 p-5">
+                <div className="text-sm font-black">Assistant command center</div>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  No chat, no paid AI call. Pick a function and Billy GPT will route you to the
+                  right workflow.
+                </p>
               </div>
-              <div className="flex items-center gap-2">
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={syncKnowledge}
-                    disabled={syncing}
-                    className="tb-action inline-flex items-center gap-2 rounded-2xl bg-fun-yellow/70 px-3 py-2 text-xs font-bold transition hover:bg-fun-yellow disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
-                    {syncing ? "Syncing" : "Sync Notion"}
-                  </button>
-                )}
-                <button
-                  onClick={() => setOpen(false)}
-                  className="tb-action rounded-full p-2 hover:bg-accent"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+              <div className="grid gap-4 md:grid-cols-2">
+                {featureCards.map((feature) => (
+                  <FeatureCard
+                    key={feature.id}
+                    title={feature.title}
+                    description={feature.description}
+                    icon={feature.icon}
+                    tone={feature.tone}
+                    onClick={() => setActiveFeature(feature.id)}
+                  />
+                ))}
               </div>
             </div>
+          )}
 
-            <div className="flex-1 space-y-4 overflow-y-auto p-4">
-              {syncStatus && (
-                <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary">
-                  {syncStatus}
-                </div>
-              )}
-              {messages.map((m, i) => (
-                <div
-                  key={i}
-                  className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
-                >
-                  <div
-                    className={cn(
-                      "tb-hover-lift max-w-[85%] whitespace-pre-line rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
-                      m.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-foreground",
-                    )}
-                  >
-                    {m.content}
-                  </div>
-                </div>
-              ))}
-              {thinking && (
-                <div className="flex justify-start">
-                  <div className="rounded-2xl bg-muted px-4 py-2.5 text-sm text-muted-foreground">
-                    {reviewingContract ? "Reviewing contract..." : "Thinking..."}
-                  </div>
-                </div>
-              )}
-              {messages.length <= 1 && (
-                <div className="space-y-2 pt-2">
-                  <div className="text-xs font-medium text-muted-foreground">Try one of these</div>
-                  {SUGGESTIONS.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => send(s)}
-                      className="tb-action block w-full rounded-2xl bg-fun-yellow/60 px-4 py-2.5 text-left text-sm font-medium hover:bg-fun-yellow"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div ref={endRef} />
-            </div>
+          {activeFeature === "meeting" && <MeetingMemoryPanel members={members} />}
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                send(input);
-              }}
-              className="flex items-center gap-2 border-t border-border p-3"
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/pdf,.pdf"
-                className="hidden"
-                onChange={(event) => reviewContract(event.target.files?.[0])}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={thinking || reviewingContract}
-                className="tb-action flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-fun-yellow/70 hover:bg-fun-yellow disabled:cursor-not-allowed disabled:opacity-60"
-                title="Upload contract PDF"
-              >
-                <FileText className="h-4 w-4" />
-              </button>
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask anything..."
-                className="tb-search flex-1 rounded-2xl border border-border bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              />
-              <button
-                type="submit"
-                disabled={thinking || input.trim().length === 0}
-                className="tb-action flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Send className="h-4 w-4" />
-              </button>
-            </form>
-          </div>
-        </div>
+          {activeFeature === "report" && (
+            <PersonalReportPanel
+              members={members}
+              data={data}
+              settings={settings}
+              isAdmin={isAdmin}
+            />
+          )}
+
+          {activeFeature === "contract" && (
+            <ExternalGptPanel
+              type="contract"
+              url={externalGptLinks.contractReview.url}
+            />
+          )}
+
+          {activeFeature === "matching" && (
+            <ExternalGptPanel
+              type="matching"
+              url={externalGptLinks.creatorBrandMatching.url}
+            />
+          )}
+        </HubShell>
       )}
     </>
   );

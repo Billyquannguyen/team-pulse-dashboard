@@ -679,6 +679,91 @@ function SlackNotificationsDiagnosticsCard({
   );
 }
 
+function BillyAssistantHubDiagnosticsCard({
+  diagnostics,
+}: {
+  diagnostics: GoogleSheetsDiagnostics["billyAssistantHub"];
+}) {
+  if (!diagnostics) return null;
+
+  const ok =
+    diagnostics.storageMode !== "unavailable" &&
+    diagnostics.redisReadable &&
+    diagnostics.redisWritable;
+
+  return (
+    <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Billy GPT assistant hub</h3>
+          <p className="text-xs text-muted-foreground">
+            This checks the function-based Billy GPT hub, meeting memory, and future GPT links.
+          </p>
+        </div>
+        <StatusPill ok={ok} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <MetricBox label="Storage mode" value={diagnostics.storageMode} />
+        <MetricBox label="Redis configured" value={diagnostics.redisConfigured ? "Yes" : "No"} />
+        <MetricBox label="Redis readable" value={diagnostics.redisReadable ? "Yes" : "No"} />
+        <MetricBox label="Redis writable" value={diagnostics.redisWritable ? "Yes" : "No"} />
+        <MetricBox label="Week key" value={diagnostics.currentWeekKey} />
+        <MetricBox label="Topics this week" value={diagnostics.currentWeekTopicCount} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+          <div className="font-semibold">Meeting topic storage</div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>Rollover: {diagnostics.currentWeekStartsAtLabel}</div>
+            <div>
+              Last save:{" "}
+              {diagnostics.lastSaveAt ? new Date(diagnostics.lastSaveAt).toLocaleString() : "-"}
+            </div>
+            <div>
+              Last save status:{" "}
+              {diagnostics.lastSaveOk === null
+                ? "-"
+                : diagnostics.lastSaveOk
+                  ? "OK"
+                  : "Failed"}
+            </div>
+            <div>Last save error: {diagnostics.lastSaveError ?? "-"}</div>
+          </div>
+        </div>
+        <div className="rounded-2xl bg-muted/45 p-4 text-sm">
+          <div className="font-semibold">External GPT links</div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>
+              {diagnostics.externalGptLinks.contractReview.expectedTitle}:{" "}
+              {diagnostics.externalGptLinks.contractReview.configured
+                ? `Connected from ${diagnostics.externalGptLinks.contractReview.source}`
+                : "Missing from Team Assets"}
+            </div>
+            <div>
+              {diagnostics.externalGptLinks.creatorBrandMatching.expectedTitle}:{" "}
+              {diagnostics.externalGptLinks.creatorBrandMatching.configured
+                ? `Connected from ${diagnostics.externalGptLinks.creatorBrandMatching.source}`
+                : "Missing from Team Assets"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {!diagnostics.redisConfigured && (
+        <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
+          <div className="font-bold">Redis setup note</div>
+          <p className="mt-1 text-xs font-semibold text-muted-foreground">
+            Local preview can use server memory, but production meeting topics need
+            UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnostics }) {
   return (
     <div className="space-y-6">
@@ -826,6 +911,8 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
       <ContractReviewDiagnosticsCard diagnostics={diagnostics.contractReview} />
 
       <SlackNotificationsDiagnosticsCard diagnostics={diagnostics.slackNotifications} />
+
+      <BillyAssistantHubDiagnosticsCard diagnostics={diagnostics.billyAssistantHub} />
 
       <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3">

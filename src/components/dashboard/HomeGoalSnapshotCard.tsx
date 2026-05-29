@@ -76,11 +76,11 @@ export function HomeGoalSnapshotCard({
         <div>
           <h3 className="text-base font-semibold">Goal progress</h3>
           <p className="text-xs text-muted-foreground">
-            Read-only snapshot from the Goals page settings.
+            Read-only snapshot from Goals & Analytics settings.
           </p>
         </div>
         <Link to="/goals" className="tb-action text-xs font-semibold text-primary hover:underline">
-          View goals
+          View Goals & Analytics
         </Link>
       </div>
 
