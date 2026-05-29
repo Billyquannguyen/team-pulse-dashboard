@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 const SLACK_API_URL = "https://slack.com/api";
-const PROBE_USER_ID = "U08CX8BHVQ1";
 
 type SlackRawCall = {
   label: string;
@@ -91,7 +90,8 @@ async function readStoredSlackNotificationsForDebug(env: ReturnType<typeof readS
       redisKey: SLACK_NOTIFICATIONS_REDIS_KEY,
       error: "UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN is missing.",
       payload: null,
-      matchedRecords: [] as StoredSlackNotification[],
+      records: [] as StoredSlackNotification[],
+      allRecordSummary: [] as Array<Record<string, string | null>>,
     };
   }
 
@@ -116,7 +116,8 @@ async function readStoredSlackNotificationsForDebug(env: ReturnType<typeof readS
         redisKey: SLACK_NOTIFICATIONS_REDIS_KEY,
         error: redisResponse?.error ?? `Redis HTTP ${response.status}`,
         payload: redisResponse,
-        matchedRecords: [] as StoredSlackNotification[],
+        records: [] as StoredSlackNotification[],
+        allRecordSummary: [] as Array<Record<string, string | null>>,
       };
     }
 
@@ -136,7 +137,7 @@ async function readStoredSlackNotificationsForDebug(env: ReturnType<typeof readS
         count: payload?.count ?? items.length,
         warning: payload?.warning ?? null,
       },
-      matchedRecords: items.filter((item) => item.personUserId === PROBE_USER_ID),
+      records: items,
       allRecordSummary: items.map((item) => ({
         conversationId: item.conversationId ?? null,
         personUserId: item.personUserId ?? null,
@@ -152,7 +153,8 @@ async function readStoredSlackNotificationsForDebug(env: ReturnType<typeof readS
       redisKey: SLACK_NOTIFICATIONS_REDIS_KEY,
       error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
       payload: null,
-      matchedRecords: [] as StoredSlackNotification[],
+      records: [] as StoredSlackNotification[],
+      allRecordSummary: [] as Array<Record<string, string | null>>,
     };
   }
 }
@@ -202,32 +204,74 @@ function getChannelsFromSlackCall(call: SlackRawCall) {
   return Array.isArray(channels) ? (channels as SlackConversationRecord[]) : [];
 }
 
-function makeSourceDiagnosis({
-  redisMatchedRecords,
-  liveMatchedChannels,
-  hardcodedProbeOnly,
-}: {
-  redisMatchedRecords: StoredSlackNotification[];
-  liveMatchedChannels: SlackConversationRecord[];
-  hardcodedProbeOnly: boolean;
-}) {
-  if (redisMatchedRecords.length > 0 && liveMatchedChannels.length > 0) {
-    return "This ID is in Redis and also appears as channel.user from Slack conversations.list. The dashboard produced it from conversation.user.";
+function slackErrorReason(call: SlackRawCall | null) {
+  if (!call) return "missing_person_user_id";
+  if (call.fetchError) return call.fetchError;
+  if (!call.responseJson || typeof call.responseJson !== "object") {
+    return "invalid_or_empty_slack_response";
   }
 
-  if (redisMatchedRecords.length > 0) {
-    return "This ID is in Redis, but it was not found in the current conversations.list response. That points to stale Redis data, a deleted/no-longer-visible user, or a Slack Connect/external visibility issue.";
+  const body = call.responseJson as Record<string, unknown>;
+  if (body.ok !== true) {
+    const details = [
+      typeof body.error === "string" ? body.error : "unknown_slack_error",
+      typeof body.needed === "string" ? `needed=${body.needed}` : "",
+      typeof body.provided === "string" ? `provided=${body.provided}` : "",
+    ].filter(Boolean);
+
+    return details.join(" ");
   }
 
-  if (liveMatchedChannels.length > 0) {
-    return "This ID appears in Slack conversations.list as channel.user, but no stored notification currently points to it.";
+  return null;
+}
+
+function resolveNameFromUsersInfo(call: SlackRawCall | null) {
+  const error = slackErrorReason(call);
+  if (error) {
+    return {
+      resolved: false,
+      freshNameSource: null,
+      freshName: null,
+      unresolvedReason: error,
+    };
   }
 
-  if (hardcodedProbeOnly) {
-    return "This ID is currently only the hardcoded probe user in /api/slack-debug. It was not found in Redis or the current DM channel list returned by Slack.";
+  const body = call?.responseJson as
+    | {
+        user?: {
+          name?: string;
+          real_name?: string;
+          profile?: {
+            display_name?: string;
+            real_name?: string;
+            email?: string;
+          };
+        };
+      }
+    | undefined;
+  const user = body?.user;
+  const freshName =
+    user?.profile?.display_name?.trim() ||
+    user?.profile?.real_name?.trim() ||
+    user?.real_name?.trim() ||
+    user?.name?.trim() ||
+    "";
+
+  if (!freshName) {
+    return {
+      resolved: false,
+      freshNameSource: null,
+      freshName: null,
+      unresolvedReason: "users.info_ok_but_no_readable_profile_name",
+    };
   }
 
-  return "No source found for this ID in the debug checks.";
+  return {
+    resolved: true,
+    freshNameSource: "users.info",
+    freshName,
+    unresolvedReason: null,
+  };
 }
 
 async function callSlackApi({
@@ -319,6 +363,8 @@ export const Route = createFileRoute("/api/slack-debug")({
     handlers: {
       GET: async () => {
         const env = readSlackDebugEnv();
+        const storedNotifications = await readStoredSlackNotificationsForDebug(env);
+        const redisRecords = storedNotifications.records;
         const initialCalls = await Promise.all([
           callSlackApi({
             label: "1. auth.test using SLACK_USER_TOKEN",
@@ -331,13 +377,6 @@ export const Route = createFileRoute("/api/slack-debug")({
             method: "auth.test",
             token: env.slackBotToken,
             tokenSource: "SLACK_BOT_TOKEN",
-          }),
-          callSlackApi({
-            label: `3. users.info for ${PROBE_USER_ID} using SLACK_USER_TOKEN`,
-            method: "users.info",
-            token: env.slackUserToken,
-            tokenSource: "SLACK_USER_TOKEN",
-            params: { user: PROBE_USER_ID },
           }),
           callSlackApi({
             label: "Related scopes/source probe: conversations.list using SLACK_USER_TOKEN",
@@ -354,8 +393,19 @@ export const Route = createFileRoute("/api/slack-debug")({
             params: { types: "im", limit: 1, exclude_archived: true },
           }),
         ]);
+        const userInfoCalls = await Promise.all(
+          redisRecords.map((record, index) => {
+            if (!record.personUserId) return Promise.resolve(null);
 
-        const storedNotifications = await readStoredSlackNotificationsForDebug(env);
+            return callSlackApi({
+              label: `Redis notification ${index + 1}: users.info for ${record.personUserId}`,
+              method: "users.info",
+              token: env.slackUserToken,
+              tokenSource: "SLACK_USER_TOKEN",
+              params: { user: record.personUserId },
+            });
+          }),
+        );
         const userConversationListCall = initialCalls.find(
           (call) =>
             call.method === "conversations.list" && call.tokenSource === "SLACK_USER_TOKEN",
@@ -363,10 +413,19 @@ export const Route = createFileRoute("/api/slack-debug")({
         const dmChannels = userConversationListCall
           ? getChannelsFromSlackCall(userConversationListCall)
           : [];
-        const liveMatchedChannels = dmChannels.filter((channel) => channel.user === PROBE_USER_ID);
+        const redisPersonUserIds = Array.from(
+          new Set(
+            redisRecords
+              .map((record) => record.personUserId)
+              .filter((value): value is string => Boolean(value)),
+          ),
+        );
+        const liveMatchedChannels = dmChannels.filter(
+          (channel) => channel.user && redisPersonUserIds.includes(channel.user),
+        );
         const channelIdsToInspect = Array.from(
           new Set([
-            ...storedNotifications.matchedRecords
+            ...redisRecords
               .map((record) => record.conversationId)
               .filter((value): value is string => Boolean(value)),
             ...liveMatchedChannels.map((channel) => channel.id).filter((value): value is string =>
@@ -385,7 +444,32 @@ export const Route = createFileRoute("/api/slack-debug")({
             }),
           ),
         );
-        const calls = [...initialCalls, ...historyCalls];
+        const redisUserInfoProbes = redisRecords.map((record, index) => {
+          const usersInfoResponse = userInfoCalls[index];
+          const resolution = resolveNameFromUsersInfo(usersInfoResponse);
+
+          return {
+            recordIndex: index,
+            conversationId: record.conversationId ?? null,
+            personUserId: record.personUserId ?? null,
+            storedPersonName: record.personName ?? null,
+            storedPersonNameSource: record.personNameSource ?? "redis_legacy",
+            sourceRecord: record,
+            freshLookupAttempted: Boolean(record.personUserId),
+            freshNameResolved: resolution.resolved,
+            freshNameSource: resolution.freshNameSource,
+            freshName: resolution.freshName,
+            unresolvedReason: resolution.unresolvedReason,
+            usersInfoResponse,
+            matchingDmChannelFromConversationsList:
+              dmChannels.find((channel) => channel.user === record.personUserId) ?? null,
+          };
+        });
+        const calls = [
+          ...initialCalls,
+          ...userInfoCalls.filter((call): call is SlackRawCall => Boolean(call)),
+          ...historyCalls,
+        ];
         const scopesReturned = Array.from(
           new Set(calls.flatMap((call) => collectScopesFromJson(call.responseJson))),
         ).sort();
@@ -395,30 +479,28 @@ export const Route = createFileRoute("/api/slack-debug")({
           temporary: true,
           publicDebugEndpoint: true,
           checkedAt: new Date().toISOString(),
-          probeUserId: PROBE_USER_ID,
+          probeMode: "Redis notification personUserId values",
           tokenShapes: env.tokens,
-          sourceTraceForProbeUser: {
-            investigatedUserId: PROBE_USER_ID,
-            hardcodedInThisDebugEndpoint: true,
+          redisNotificationUserProbes: {
+            hardcodedProbeRemoved: true,
+            redisKey: SLACK_NOTIFICATIONS_REDIS_KEY,
+            uniquePersonUserIdsFromRedis: redisPersonUserIds,
+            recordsChecked: redisRecords.length,
             redis: storedNotifications,
             dmChannelList: {
               checkedVia: "conversations.list using SLACK_USER_TOKEN",
               totalChannelsReturnedInFirstPage: dmChannels.length,
-              matchedByChannelUser: liveMatchedChannels,
+              matchedByRedisPersonUserId: liveMatchedChannels,
             },
             extractionRuleInDashboardSync:
               "personUserId is saved as conversation.user ?? latestMeaningfulMessage.user",
+            userInfoResultsByRedisRecord: redisUserInfoProbes,
             matchingHistoryCalls: historyCalls.map((call) => ({
               label: call.label,
               method: call.method,
               requestParams: call.requestParams,
               responseJson: call.responseJson,
             })),
-            diagnosis: makeSourceDiagnosis({
-              redisMatchedRecords: storedNotifications.matchedRecords,
-              liveMatchedChannels,
-              hardcodedProbeOnly: true,
-            }),
           },
           runtimeTokenSource: {
             slackNotificationSystemDefault: "SLACK_USER_TOKEN",
