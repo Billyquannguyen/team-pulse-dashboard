@@ -18,6 +18,7 @@ import { Route as AssetsRouteImport } from './routes/assets'
 import { Route as ActiveBrandsRouteImport } from './routes/active-brands'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
+import { Route as ApiSlackDebugRouteImport } from './routes/api/slack-debug'
 
 const LeaderboardRoute = LeaderboardRouteImport.update({
   id: '/leaderboard',
@@ -64,6 +65,11 @@ const ApiSlackFollowupsRoute = ApiSlackFollowupsRouteImport.update({
   path: '/api/slack-followups',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSlackDebugRoute = ApiSlackDebugRouteImport.update({
+  id: '/api/slack-debug',
+  path: '/api/slack-debug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -74,6 +80,7 @@ export interface FileRoutesByFullPath {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
 }
 export interface FileRoutesByTo {
@@ -85,6 +92,7 @@ export interface FileRoutesByTo {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
 }
 export interface FileRoutesById {
@@ -97,6 +105,7 @@ export interface FileRoutesById {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
 }
 export interface FileRouteTypes {
@@ -110,6 +119,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/api/slack-debug'
     | '/api/slack-followups'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -121,6 +131,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/api/slack-debug'
     | '/api/slack-followups'
   id:
     | '__root__'
@@ -132,6 +143,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/api/slack-debug'
     | '/api/slack-followups'
   fileRoutesById: FileRoutesById
 }
@@ -144,6 +156,7 @@ export interface RootRouteChildren {
   DiagnosticsRoute: typeof DiagnosticsRoute
   GoalsRoute: typeof GoalsRoute
   LeaderboardRoute: typeof LeaderboardRoute
+  ApiSlackDebugRoute: typeof ApiSlackDebugRoute
   ApiSlackFollowupsRoute: typeof ApiSlackFollowupsRoute
 }
 
@@ -212,6 +225,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSlackFollowupsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/slack-debug': {
+      id: '/api/slack-debug'
+      path: '/api/slack-debug'
+      fullPath: '/api/slack-debug'
+      preLoaderRoute: typeof ApiSlackDebugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -224,6 +244,7 @@ const rootRouteChildren: RootRouteChildren = {
   DiagnosticsRoute: DiagnosticsRoute,
   GoalsRoute: GoalsRoute,
   LeaderboardRoute: LeaderboardRoute,
+  ApiSlackDebugRoute: ApiSlackDebugRoute,
   ApiSlackFollowupsRoute: ApiSlackFollowupsRoute,
 }
 export const routeTree = rootRouteImport
