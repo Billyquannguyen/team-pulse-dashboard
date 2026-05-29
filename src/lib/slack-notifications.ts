@@ -106,6 +106,8 @@ type SlackSyncResult = {
   count: number;
   warnings: string[];
   error: string | null;
+  resetStoredNotifications?: boolean;
+  storedNotificationsRewritten?: boolean;
 };
 
 type SlackNameLookupSource =
@@ -368,6 +370,10 @@ async function redisSetJson(key: string, value: unknown, ttlSeconds?: number) {
   await redisCommand<"OK">(command);
 }
 
+async function redisDelete(key: string) {
+  await redisCommand<number>(["DEL", key]);
+}
+
 function stateKey(conversationId: string) {
   return `${STATE_KEY_PREFIX}:${conversationId}`;
 }
@@ -421,13 +427,18 @@ async function readStoredNotifications(): Promise<SlackNotificationsPayload> {
 }
 
 async function writeStoredNotificationsPayload(payload: SlackNotificationsPayload) {
+  const cleanPayload = {
+    ...payload,
+    warning: filterLegacySlackWarning(payload.warning),
+  } satisfies SlackNotificationsPayload;
+
   if (canUseLocalDevStore()) {
-    localDevNotifications = payload;
-    return payload;
+    localDevNotifications = cleanPayload;
+    return cleanPayload;
   }
 
-  await redisSetJson(NOTIFICATIONS_KEY, payload, REDIS_NOTIFICATION_TTL_SECONDS);
-  return payload;
+  await redisSetJson(NOTIFICATIONS_KEY, cleanPayload, REDIS_NOTIFICATION_TTL_SECONDS);
+  return cleanPayload;
 }
 
 async function writeStoredNotifications(items: SlackNotificationItem[], warning: string | null) {
@@ -606,6 +617,64 @@ async function fetchSlackPersonName(
     name,
     source: "users.info" as const,
     error: null,
+  };
+}
+
+function shouldRefreshStoredSlackName(item: SlackNotificationItem) {
+  if (!item.personUserId) return false;
+
+  return (
+    !item.personNameSource ||
+    item.personNameSource === "redis_legacy" ||
+    item.personNameSource === "fallback" ||
+    item.personName.trim() === "" ||
+    item.personName === `Slack user ${item.personUserId}` ||
+    item.personName.startsWith("Slack user U")
+  );
+}
+
+async function refreshStoredNotificationNames(payload: SlackNotificationsPayload) {
+  const scopeSet = new Set<string>();
+  const warnings: string[] = [];
+  let changed = false;
+  let refreshedCount = 0;
+
+  const items = await Promise.all(
+    payload.items.map(async (item) => {
+      if (!shouldRefreshStoredSlackName(item)) return item;
+
+      const lookup = await fetchSlackPersonName(item.personUserId ?? undefined, scopeSet, undefined, warnings);
+
+      if (lookup.error || lookup.source === "fallback") {
+        return item;
+      }
+
+      refreshedCount += 1;
+      changed = true;
+
+      return {
+        ...item,
+        personName: lookup.name,
+        personNameSource: lookup.source,
+      } satisfies SlackNotificationItem;
+    }),
+  );
+
+  const warning = filterLegacySlackWarning(payload.warning);
+  if (warning !== payload.warning) {
+    changed = true;
+  }
+
+  return {
+    changed,
+    refreshedCount,
+    payload: {
+      ...payload,
+      checkedAt: nowIso(),
+      count: items.length,
+      items,
+      warning,
+    } satisfies SlackNotificationsPayload,
   };
 }
 
@@ -948,6 +1017,44 @@ export async function syncSlackNotifications(
   }
 }
 
+export async function forceRefreshSlackNotificationsServer({
+  resetStoredNotifications = false,
+}: {
+  resetStoredNotifications?: boolean;
+} = {}) {
+  slackUserNameCache.clear();
+
+  if (resetStoredNotifications) {
+    if (canUseLocalDevStore()) {
+      localDevNotifications = null;
+    } else if (getRedisConfig()) {
+      await redisDelete(NOTIFICATIONS_KEY);
+    }
+  }
+
+  const result = await syncSlackNotifications({ source: "diagnostics" });
+  let storedNotificationsRewritten = false;
+  let refreshedCount = 0;
+
+  if (result.ok) {
+    const stored = await readStoredNotifications();
+    const refreshed = await refreshStoredNotificationNames(stored);
+    storedNotificationsRewritten = refreshed.changed;
+    refreshedCount = refreshed.refreshedCount;
+
+    if (refreshed.changed) {
+      await writeStoredNotificationsPayload(refreshed.payload);
+    }
+  }
+
+  return {
+    ...result,
+    resetStoredNotifications,
+    storedNotificationsRewritten,
+    refreshedCount,
+  };
+}
+
 export const fetchSlackNotifications = createServerFn({ method: "GET" }).handler(async () => {
   const { requireDashboardAuth } = await import("@/lib/auth.server");
   await requireDashboardAuth();
@@ -967,7 +1074,14 @@ export const fetchSlackNotifications = createServerFn({ method: "GET" }).handler
   }
 
   try {
-    return await readStoredNotifications();
+    const stored = await readStoredNotifications();
+    const refreshed = await refreshStoredNotificationNames(stored);
+
+    if (refreshed.changed) {
+      await writeStoredNotificationsPayload(refreshed.payload);
+    }
+
+    return refreshed.payload;
   } catch (error) {
     return {
       checkedAt: nowIso(),
@@ -1052,8 +1166,7 @@ export const forceRefreshSlackNotifications = createServerFn({ method: "POST" })
     const { requireAdminAuth } = await import("@/lib/auth.server");
     await requireAdminAuth();
 
-    slackUserNameCache.clear();
-    const result = await syncSlackNotifications({ source: "diagnostics" });
+    const result = await forceRefreshSlackNotificationsServer({ resetStoredNotifications: true });
 
     return {
       ok: result.ok,

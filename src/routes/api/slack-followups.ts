@@ -1,5 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { syncSlackNotifications } from "@/lib/slack-notifications";
+import {
+  forceRefreshSlackNotificationsServer,
+  syncSlackNotifications,
+} from "@/lib/slack-notifications";
 
 function jsonResponse(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -30,7 +33,12 @@ export const Route = createFileRoute("/api/slack-followups")({
           return jsonResponse({ ok: false, error: "Unauthorized cron request." }, 401);
         }
 
-        const result = await syncSlackNotifications({ source: "cron" });
+        const url = new URL(request.url);
+        const forceRefresh = url.searchParams.get("force") === "1";
+        const resetStoredNotifications = url.searchParams.get("reset") === "1";
+        const result = forceRefresh
+          ? await forceRefreshSlackNotificationsServer({ resetStoredNotifications })
+          : await syncSlackNotifications({ source: "cron" });
 
         return jsonResponse(result, result.ok ? 200 : 500);
       },
