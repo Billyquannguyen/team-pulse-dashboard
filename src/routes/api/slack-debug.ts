@@ -181,20 +181,6 @@ export const Route = createFileRoute("/api/slack-debug")({
   server: {
     handlers: {
       GET: async () => {
-        const { requireAdminAuth } = await import("@/lib/auth.server");
-
-        try {
-          await requireAdminAuth();
-        } catch {
-          return jsonResponse(
-            {
-              ok: false,
-              error: "Admin access required.",
-            },
-            401,
-          );
-        }
-
         const env = readSlackDebugEnv();
         const calls = await Promise.all([
           callSlackApi({
@@ -239,6 +225,7 @@ export const Route = createFileRoute("/api/slack-debug")({
         return jsonResponse({
           ok: true,
           temporary: true,
+          publicDebugEndpoint: true,
           checkedAt: new Date().toISOString(),
           probeUserId: PROBE_USER_ID,
           tokenShapes: env.tokens,
