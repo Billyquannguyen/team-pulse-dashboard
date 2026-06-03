@@ -3,6 +3,17 @@ import type { AssetLink } from "@/data/assets";
 export const CONTRACT_REVIEW_GPT_ASSET_TITLE = "Contract Review GPT";
 export const CREATOR_BRAND_MATCHING_GPT_ASSET_TITLE = "Creator–Brand Matching GPT";
 
+const ASSET_TITLE_ALIASES: Record<string, string[]> = {
+  [CONTRACT_REVIEW_GPT_ASSET_TITLE]: ["Contract Review"],
+  [CREATOR_BRAND_MATCHING_GPT_ASSET_TITLE]: [
+    "Creator Brand Matching GPT",
+    "Creator Brand Matching",
+    "Creator–Brand Matching",
+    "Creator-Brand Matching GPT",
+    "Creator-Brand Matching",
+  ],
+};
+
 export type ExternalGptAssetLink = {
   source: "Team Assets";
   expectedTitle: string;
@@ -22,10 +33,15 @@ function normalizeAssetTitle(value: string) {
 }
 
 function resolveAssetUrlByTitle(assets: AssetLink[], expectedTitle: string): ExternalGptAssetLink {
-  const expectedKey = normalizeAssetTitle(expectedTitle);
+  const expectedKeys = [expectedTitle, ...(ASSET_TITLE_ALIASES[expectedTitle] ?? [])].map(
+    normalizeAssetTitle,
+  );
   const asset =
-    assets.find((item) => normalizeAssetTitle(item.title) === expectedKey) ??
-    assets.find((item) => normalizeAssetTitle(item.title).includes(expectedKey));
+    assets.find((item) => expectedKeys.includes(normalizeAssetTitle(item.title))) ??
+    assets.find((item) => {
+      const titleKey = normalizeAssetTitle(item.title);
+      return expectedKeys.some((expectedKey) => titleKey.includes(expectedKey));
+    });
   const url = asset?.url?.trim() || null;
 
   return {

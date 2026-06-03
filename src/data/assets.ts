@@ -96,4 +96,16 @@ export const fallbackAssetLinks: AssetLink[] = [
     enabled: true,
     sortOrder: 50,
   },
+  {
+    id: "creator-brand-matching-gpt",
+    title: "Creator–Brand Matching GPT",
+    description: "Match creators with brand opportunities",
+    url: "https://chatgpt.com/g/g-6a208774547081919b6a23eee8e5f6eb-creator-brand-matching",
+    icon: "link",
+    color: "pink",
+    accent: "from-pink-500/20 to-fuchsia-500/20",
+    category: "GPT",
+    enabled: true,
+    sortOrder: 120,
+  },
 ];

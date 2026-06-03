@@ -1,0 +1,133 @@
+name: Monthly Opportunity Intelligence Refresh
+
+on:
+  schedule:
+    - cron: "0 8 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monthly-opportunity-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Build monthly GPT Knowledge package
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+      GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+      GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      OPPORTUNITY_DATABASE_SPREADSHEET_ID: ${{ secrets.OPPORTUNITY_DATABASE_SPREADSHEET_ID }}
+      EMAIL_PROVIDER_API_KEY: ${{ secrets.EMAIL_PROVIDER_API_KEY }}
+      MONTHLY_REFRESH_EMAIL_TO: ${{ secrets.MONTHLY_REFRESH_EMAIL_TO }}
+      MONTHLY_REFRESH_EMAIL_FROM: ${{ secrets.MONTHLY_REFRESH_EMAIL_FROM }}
+      MONTHLY_REFRESH_OUTPUT_DIR: .opportunity-ingestion/monthly-refresh/${{ github.run_id }}-${{ github.run_attempt }}
+      MONTHLY_REFRESH_LOG_DIR: .opportunity-ingestion/monthly-refresh/${{ github.run_id }}-${{ github.run_attempt }}/logs
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run monthly refresh
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          export MONTHLY_REFRESH_OUTPUT_DIR="$PWD/$MONTHLY_REFRESH_OUTPUT_DIR"
+          export MONTHLY_REFRESH_LOG_DIR="$PWD/$MONTHLY_REFRESH_LOG_DIR"
+          mkdir -p "$MONTHLY_REFRESH_LOG_DIR"
+
+          echo "MONTHLY_REFRESH_OUTPUT_DIR=$MONTHLY_REFRESH_OUTPUT_DIR" >> "$GITHUB_ENV"
+          echo "MONTHLY_REFRESH_LOG_DIR=$MONTHLY_REFRESH_LOG_DIR" >> "$GITHUB_ENV"
+
+          CURRENT_STEP="Initialize monthly refresh"
+          CURRENT_LOG="$MONTHLY_REFRESH_LOG_DIR/initialize.log"
+
+          write_failure() {
+            local exit_code="$?"
+            FAILED_STEP="$CURRENT_STEP" FAILED_LOG="$CURRENT_LOG" EXIT_CODE="$exit_code" node --input-type=module <<'NODE'
+          import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+          import path from "node:path";
+
+          const outputDir = process.env.MONTHLY_REFRESH_OUTPUT_DIR;
+          mkdirSync(outputDir, { recursive: true });
+          const failedLog = process.env.FAILED_LOG || "";
+          const logTail = failedLog && existsSync(failedLog)
+            ? readFileSync(failedLog, "utf8").split("\n").slice(-80).join("\n").trim()
+            : "";
+          const failure = {
+            failedAt: new Date().toISOString(),
+            failedStep: process.env.FAILED_STEP || "Unknown step",
+            exitCode: Number(process.env.EXIT_CODE || 1),
+            logFile: failedLog ? path.relative(process.cwd(), failedLog) : null,
+            errorMessage: logTail || "The command failed before a log tail was captured.",
+          };
+          writeFileSync(path.join(outputDir, "failure.json"), JSON.stringify(failure, null, 2));
+          NODE
+            exit "$exit_code"
+          }
+
+          trap write_failure ERR
+
+          run_stage() {
+            CURRENT_STEP="$1"
+            shift
+            local slug
+            slug="$(echo "$CURRENT_STEP" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//')"
+            CURRENT_LOG="$MONTHLY_REFRESH_LOG_DIR/${slug}.log"
+            echo "::group::$CURRENT_STEP"
+            echo "$CURRENT_STEP" > "$MONTHLY_REFRESH_OUTPUT_DIR/current-stage.txt"
+            "$@" 2>&1 | tee "$CURRENT_LOG"
+            echo "::endgroup::"
+          }
+
+          run_stage "Credential validation" npm run opportunity:validate-credentials
+          run_stage "Preflight checks" npm run opportunity:preflight
+          run_stage "Create backup" npm run opportunity:create-backup
+          run_stage "Gmail ingestion" npm run opportunity:ingest
+          run_stage "Intelligence refresh" npm run opportunity:quality-cleanup
+          run_stage "GPT export generation" npm run opportunity:export
+          run_stage "GPT upload package generation" npm run opportunity:monthly-refresh -- prepare --output-dir "$MONTHLY_REFRESH_OUTPUT_DIR" --logs-dir "$MONTHLY_REFRESH_LOG_DIR"
+
+      - name: Upload GPT Knowledge package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: team-billion-gpt-knowledge-refresh
+          path: |
+            ${{ env.MONTHLY_REFRESH_OUTPUT_DIR }}/team-billion-gpt-knowledge-refresh.zip
+            ${{ env.MONTHLY_REFRESH_OUTPUT_DIR }}/monthly-gpt-refresh-summary.md
+            ${{ env.MONTHLY_REFRESH_OUTPUT_DIR }}/monthly-refresh-artifacts.json
+          retention-days: 90
+
+      - name: Upload refresh logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-opportunity-refresh-logs
+          path: ${{ env.MONTHLY_REFRESH_OUTPUT_DIR }}
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Email success notification
+        if: success()
+        run: npm run opportunity:monthly-refresh -- notify-success --output-dir "$MONTHLY_REFRESH_OUTPUT_DIR"
+
+      - name: Email failure notification
+        if: failure()
+        run: npm run opportunity:monthly-refresh -- notify-failure --output-dir "$MONTHLY_REFRESH_OUTPUT_DIR"

@@ -24,6 +24,8 @@
     "opportunity:quality-cleanup": "node scripts/opportunity-ingestion/quality-cleanup.mjs",
     "opportunity:quality-cleanup:dry-run": "node scripts/opportunity-ingestion/quality-cleanup.mjs --dry-run",
     "opportunity:gpt-export": "node scripts/opportunity-ingestion/gpt-export.mjs",
+    "opportunity:export": "node scripts/opportunity-ingestion/gpt-export.mjs",
+    "opportunity:monthly-refresh": "node scripts/opportunity-ingestion/monthly-refresh.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

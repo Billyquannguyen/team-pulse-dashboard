@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Award, ClipboardList, Target, TrendingUp } from "lucide-react";
+import { Award, ClipboardList, Target, TrendingUp, UserRound } from "lucide-react";
 import { DashboardSelect } from "@/components/ui/dashboard-select";
 import type { Teammate } from "@/data/team";
 import type { GoalSettings } from "@/lib/goal-settings";
@@ -50,30 +50,107 @@ export function PersonalReportPanel({
   settings: GoalSettings;
   isAdmin: boolean;
 }) {
-  const [memberName, setMemberName] = useState(members[0]?.name ?? "");
-  const member = members.find((item) => item.name === memberName) ?? members[0] ?? null;
-  const report = buildPersonalReport(data, members, member, settings);
+  const [memberName, setMemberName] = useState("");
+  const [draftMemberName, setDraftMemberName] = useState(members[0]?.name ?? "");
+  const [isPickerOpen, setIsPickerOpen] = useState(true);
+  const member = memberName ? members.find((item) => item.name === memberName) ?? null : null;
+  const report = member ? buildPersonalReport(data, members, member, settings) : null;
+  const hasMembers = members.length > 0;
+  const pickerOpen = hasMembers && (!memberName || isPickerOpen);
 
   useEffect(() => {
-    if (!memberName && members[0]?.name) {
-      setMemberName(members[0].name);
+    if (!members.some((item) => item.name === draftMemberName) && members[0]?.name) {
+      setDraftMemberName(members[0].name);
+    }
+  }, [draftMemberName, members]);
+
+  useEffect(() => {
+    if (memberName && !members.some((item) => item.name === memberName)) {
+      setMemberName("");
+      setIsPickerOpen(true);
     }
   }, [memberName, members]);
 
+  const showReportForDraftMember = () => {
+    if (!draftMemberName) return;
+    setMemberName(draftMemberName);
+    setIsPickerOpen(false);
+  };
+
   return (
     <div className="space-y-5">
-      <div className="block max-w-sm">
-        <span className="text-xs font-bold text-muted-foreground">Member name</span>
-        <DashboardSelect
-          value={memberName}
-          onChange={setMemberName}
-          options={members.map((memberOption) => ({
-            value: memberOption.name,
-            label: memberOption.name,
-          }))}
-          triggerClassName="h-12 px-4 text-sm font-bold"
-        />
-      </div>
+      {pickerOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm">
+          <section className="w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="tb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-fun-blue">
+                <UserRound className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black">Choose report member</h3>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Personal reports are private. Pick the member first, then Billy will show that
+                  report only.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <span className="text-xs font-bold text-muted-foreground">Member name</span>
+              <DashboardSelect
+                value={draftMemberName}
+                onChange={setDraftMemberName}
+                options={members.map((memberOption) => ({
+                  value: memberOption.name,
+                  label: memberOption.name,
+                }))}
+                triggerClassName="h-12 px-4 text-sm font-bold"
+              />
+            </div>
+
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              {memberName && (
+                <button
+                  type="button"
+                  onClick={() => setIsPickerOpen(false)}
+                  className="tb-action inline-flex h-11 items-center justify-center rounded-2xl bg-muted px-5 text-sm font-bold hover:bg-accent"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={showReportForDraftMember}
+                disabled={!draftMemberName}
+                className="tb-action inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Show report
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {memberName && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-border bg-background/75 p-4">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Personal report
+            </div>
+            <div className="mt-1 text-sm font-black">{memberName}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setDraftMemberName(memberName);
+              setIsPickerOpen(true);
+            }}
+            className="tb-action inline-flex h-10 items-center justify-center rounded-2xl bg-muted px-4 text-sm font-bold hover:bg-accent"
+          >
+            Change member
+          </button>
+        </div>
+      )}
 
       {report ? (
         <div className="space-y-5">
