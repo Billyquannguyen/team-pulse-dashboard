@@ -661,10 +661,13 @@ function buildOutreachDashboardData(
   const members = team.map((member) => {
     const memberName = canonicalMemberName(member.name);
     const rows = outreachRows.filter((row) => canonicalMemberName(row.memberName) === memberName);
-    const contacted = rows.filter((row) => row.emailed || row.igOutreach).length;
+    const pipelineReply = (row: OutreachRow) => row.replied || row.bookedCall || row.signedFromStatus;
+    const pipelineContacted = (row: OutreachRow) =>
+      row.emailed || row.igOutreach || pipelineReply(row);
+    const contacted = rows.filter(pipelineContacted).length;
     const emailed = rows.filter((row) => row.emailed).length;
     const igOutreach = rows.filter((row) => row.igOutreach).length;
-    const replies = rows.filter((row) => row.replied).length;
+    const replies = rows.filter(pipelineReply).length;
     const bookedCalls = rows.filter((row) => row.bookedCall).length;
     const signedFromStatus = rows.filter((row) => row.signedFromStatus).length;
     const hasOutcomeData = rows.some((row) => row.finalStatus.trim());

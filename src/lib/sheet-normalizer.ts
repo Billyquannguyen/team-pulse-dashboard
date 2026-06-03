@@ -221,6 +221,14 @@ function isEndedStatus(value: string) {
   );
 }
 
+function isBookedCallActivity(bookedCallValue: string, finalStatus: string, replied: boolean) {
+  if (parseBoolean(bookedCallValue)) return true;
+  if (isBookedCallStatus(finalStatus) || isSignedStatus(finalStatus)) return true;
+
+  // In the sourcing sheet, Ended is a post-conversation outcome, not "no call happened".
+  return replied && isEndedStatus(finalStatus);
+}
+
 export function getMissingOutreachHeaders(headers: string[]) {
   return getMissingHeaders(
     headers,
@@ -350,9 +358,12 @@ export function normalizeMemberOutreachRows(tabName: string, rows: SheetRow[]): 
       const finalStatus = getHeaderCell(row, lookup, "finalStatus");
       const hasBookedCallColumn = lookup.bookedCall !== undefined && lookup.bookedCall >= 0;
       const bookedCallValue = getHeaderCell(row, lookup, "bookedCall");
+      const emailed = parseBoolean(getHeaderCell(row, lookup, "emailed"));
+      const igOutreach = parseBoolean(getHeaderCell(row, lookup, "igOutreach"));
+      const replied = parseBoolean(getHeaderCell(row, lookup, "replied"));
       const bookedCall = hasBookedCallColumn
-        ? parseBoolean(bookedCallValue)
-        : isBookedCallStatus(finalStatus);
+        ? isBookedCallActivity(bookedCallValue, finalStatus, replied)
+        : isBookedCallActivity("", finalStatus, replied);
       const notes = getHeaderCell(row, lookup, "notes");
 
       return {
@@ -366,9 +377,9 @@ export function normalizeMemberOutreachRows(tabName: string, rows: SheetRow[]): 
         email: getHeaderCell(row, lookup, "email") || undefined,
         niche: getHeaderCell(row, lookup, "niche"),
         mainPlatform: parsePlatform(getHeaderCell(row, lookup, "mainPlatform")),
-        emailed: parseBoolean(getHeaderCell(row, lookup, "emailed")),
-        igOutreach: parseBoolean(getHeaderCell(row, lookup, "igOutreach")),
-        replied: parseBoolean(getHeaderCell(row, lookup, "replied")),
+        emailed,
+        igOutreach,
+        replied,
         finalStatus,
         bookedCall,
         signedFromStatus: isSignedStatus(finalStatus),
