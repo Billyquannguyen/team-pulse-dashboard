@@ -658,22 +658,23 @@ function buildOutreachDashboardData(
     signedByMember.set(memberName, (signedByMember.get(memberName) ?? 0) + 1);
   }
 
+  let totalCallConversions = 0;
+
   const members = team.map((member) => {
     const memberName = canonicalMemberName(member.name);
     const rows = outreachRows.filter((row) => canonicalMemberName(row.memberName) === memberName);
-    const pipelineReply = (row: OutreachRow) => row.replied || row.bookedCall || row.signedFromStatus;
-    const pipelineContacted = (row: OutreachRow) =>
-      row.emailed || row.igOutreach || pipelineReply(row);
-    const contacted = rows.filter(pipelineContacted).length;
+    const contacted = rows.filter((row) => row.emailed || row.igOutreach).length;
     const emailed = rows.filter((row) => row.emailed).length;
     const igOutreach = rows.filter((row) => row.igOutreach).length;
-    const replies = rows.filter(pipelineReply).length;
+    const replies = rows.filter((row) => row.replied).length;
     const bookedCalls = rows.filter((row) => row.bookedCall).length;
     const signedFromStatus = rows.filter((row) => row.signedFromStatus).length;
+    const callConversions = rows.filter((row) => row.bookedCall && row.signedFromStatus).length;
     const hasOutcomeData = rows.some((row) => row.finalStatus.trim());
     const signed = hasOutcomeData ? signedFromStatus : (signedByMember.get(memberName) ?? 0);
     const ended = rows.filter((row) => row.ended).length;
     const overallClosingRate = percentage(signed, contacted);
+    totalCallConversions += callConversions;
 
     return {
       memberName: member.name,
@@ -688,7 +689,7 @@ function buildOutreachDashboardData(
       ended,
       replyRate: percentage(replies, contacted),
       bookingRate: percentage(bookedCalls, contacted),
-      callClosingRate: percentage(signed, bookedCalls),
+      callClosingRate: percentage(callConversions, bookedCalls),
       overallClosingRate,
       conversionRate: overallClosingRate,
       topNiche: mostCommon(rows.map((row) => row.niche)),
@@ -721,7 +722,7 @@ function buildOutreachDashboardData(
       ...totalsBase,
       replyRate: percentage(totalsBase.replies, totalsBase.contacted),
       bookingRate: percentage(totalsBase.bookedCalls, totalsBase.contacted),
-      callClosingRate: percentage(totalsBase.signed, totalsBase.bookedCalls),
+      callClosingRate: percentage(totalCallConversions, totalsBase.bookedCalls),
       overallClosingRate: percentage(totalsBase.signed, totalsBase.contacted),
       conversionRate: percentage(totalsBase.signed, totalsBase.contacted),
       topNiche: mostCommon(outreachRows.map((row) => row.niche)),

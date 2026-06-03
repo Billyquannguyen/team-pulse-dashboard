@@ -221,14 +221,6 @@ function isEndedStatus(value: string) {
   );
 }
 
-function isBookedCallActivity(bookedCallValue: string, finalStatus: string, replied: boolean) {
-  if (parseBoolean(bookedCallValue)) return true;
-  if (isBookedCallStatus(finalStatus) || isSignedStatus(finalStatus)) return true;
-
-  // In the sourcing sheet, Ended is a post-conversation outcome, not "no call happened".
-  return replied && isEndedStatus(finalStatus);
-}
-
 export function getMissingOutreachHeaders(headers: string[]) {
   return getMissingHeaders(
     headers,
@@ -362,8 +354,8 @@ export function normalizeMemberOutreachRows(tabName: string, rows: SheetRow[]): 
       const igOutreach = parseBoolean(getHeaderCell(row, lookup, "igOutreach"));
       const replied = parseBoolean(getHeaderCell(row, lookup, "replied"));
       const bookedCall = hasBookedCallColumn
-        ? isBookedCallActivity(bookedCallValue, finalStatus, replied)
-        : isBookedCallActivity("", finalStatus, replied);
+        ? parseBoolean(bookedCallValue)
+        : isBookedCallStatus(finalStatus);
       const notes = getHeaderCell(row, lookup, "notes");
 
       return {
