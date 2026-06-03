@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { DashboardSelectField } from "@/components/ui/dashboard-select";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
 
@@ -62,35 +63,6 @@ function formatLinkLabel(url: string) {
 
 function uniqueSorted(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
-}
-
-function FilterSelect({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="min-w-[150px] flex-1 sm:flex-none">
-      <span className="text-xs font-semibold text-muted-foreground">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="tb-search mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/30"
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
 }
 
 function DealsPage() {
@@ -269,21 +241,21 @@ function DealsPage() {
               <Filter className="h-3.5 w-3.5" />
               Smart filters
             </div>
-            <FilterSelect label="Member" value={member} options={members} onChange={setMember} />
-            <FilterSelect label="Status" value={status} options={statuses} onChange={setStatus} />
-            <FilterSelect
+            <DashboardSelectField label="Member" value={member} options={members} onChange={setMember} />
+            <DashboardSelectField label="Status" value={status} options={statuses} onChange={setStatus} />
+            <DashboardSelectField
               label="Platform"
               value={platform}
               options={platforms}
               onChange={setPlatform}
             />
-            <FilterSelect
+            <DashboardSelectField
               label="Payment"
               value={payment}
               options={[...paymentFilters]}
               onChange={(value) => setPayment(value as PaymentFilter)}
             />
-            <FilterSelect
+            <DashboardSelectField
               label="Links"
               value={links}
               options={[...linkFilters]}

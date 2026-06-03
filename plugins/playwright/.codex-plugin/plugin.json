@@ -1,0 +1,28 @@
+{
+  "name": "playwright",
+  "version": "0.1.0",
+  "description": "Playwright testing workflow helper for Codex projects.",
+  "author": {
+    "name": "Team Billion"
+  },
+  "homepage": "https://playwright.dev/",
+  "repository": "https://github.com/microsoft/playwright",
+  "license": "Apache-2.0",
+  "keywords": ["playwright", "testing", "e2e", "browser"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Playwright",
+    "shortDescription": "Add and run browser tests for web apps.",
+    "longDescription": "Guides Codex through adding Playwright, creating smoke tests, running local browser checks, and debugging end-to-end test failures.",
+    "developerName": "Team Billion",
+    "category": "Development",
+    "capabilities": ["Testing", "Browser Automation", "Diagnostics"],
+    "websiteURL": "https://playwright.dev/",
+    "defaultPrompt": [
+      "Add a Playwright smoke test.",
+      "Debug my failing Playwright test.",
+      "Check this page with Playwright."
+    ],
+    "brandColor": "#2EAD33"
+  }
+}

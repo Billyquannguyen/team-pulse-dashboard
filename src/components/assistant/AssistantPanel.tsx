@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { PersonalReportPanel } from "@/components/assistant/PersonalReportPanel";
+import { DashboardSelect } from "@/components/ui/dashboard-select";
 import { team as fallbackTeam } from "@/data/team";
 import type { Teammate } from "@/data/team";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
@@ -32,6 +33,12 @@ import { cn } from "@/lib/utils";
 
 type AssistantFeature = "home" | "meeting" | "report" | "contract" | "matching";
 type MeetingMode = "menu" | "add" | "view";
+type MeetingMemberOption = Pick<Teammate, "id" | "name">;
+
+const billyMeetingMember: MeetingMemberOption = {
+  id: "billy",
+  name: "Billy",
+};
 
 const featureCards: Array<{
   id: Exclude<AssistantFeature, "home">;
@@ -187,11 +194,23 @@ function groupTopicsByMember(topics: MeetingTopic[]) {
   }, {});
 }
 
-function MeetingMemoryPanel({ members }: { members: Teammate[] }) {
+function buildMeetingMemberOptions(members: Teammate[]): MeetingMemberOption[] {
+  const seen = new Set<string>();
+  return [billyMeetingMember, ...members]
+    .filter((member) => {
+      const key = member.name.trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((member) => ({ id: member.id, name: member.name }));
+}
+
+function MeetingMemoryPanel({ members }: { members: MeetingMemberOption[] }) {
   const queryClient = useQueryClient();
   const { data: topicsData, isLoading } = useQuery(meetingTopicsQuery);
   const [mode, setMode] = useState<MeetingMode>("menu");
-  const [memberName, setMemberName] = useState(members[0]?.name ?? "");
+  const [memberName, setMemberName] = useState("Billy");
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
   const [saving, setSaving] = useState(false);
@@ -200,7 +219,7 @@ function MeetingMemoryPanel({ members }: { members: Teammate[] }) {
   const groupedTopics = groupTopicsByMember(topics);
 
   useEffect(() => {
-    if (!memberName && members[0]?.name) {
+    if (!members.some((member) => member.name === memberName) && members[0]?.name) {
       setMemberName(members[0].name);
     }
   }, [memberName, members]);
@@ -249,20 +268,15 @@ function MeetingMemoryPanel({ members }: { members: Teammate[] }) {
         </button>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <label>
+          <div>
             <span className="text-xs font-bold text-muted-foreground">Member name</span>
-            <select
+            <DashboardSelect
               value={memberName}
-              onChange={(event) => setMemberName(event.target.value)}
-              className="tb-search mt-1 h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm font-bold outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              {members.map((member) => (
-                <option key={member.id} value={member.name}>
-                  {member.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={setMemberName}
+              options={members.map((member) => ({ value: member.name, label: member.name }))}
+              triggerClassName="h-12 px-4 text-sm font-bold"
+            />
+          </div>
 
           <label>
             <span className="text-xs font-bold text-muted-foreground">Topic title</span>
@@ -477,6 +491,7 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
   });
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
   const members = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
+  const meetingMembers = useMemo(() => buildMeetingMemberOptions(members), [members]);
   const externalGptLinks = resolveExternalGptLinksFromTeamAssets(teamAssetsData?.assets ?? []);
   const selectedFeature = featureCards.find((feature) => feature.id === activeFeature);
   const isAdmin = authRole === "admin";
@@ -557,7 +572,7 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
             </div>
           )}
 
-          {activeFeature === "meeting" && <MeetingMemoryPanel members={members} />}
+          {activeFeature === "meeting" && <MeetingMemoryPanel members={meetingMembers} />}
 
           {activeFeature === "report" && (
             <PersonalReportPanel

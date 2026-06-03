@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Award, ClipboardList, Target, TrendingUp } from "lucide-react";
+import { DashboardSelect } from "@/components/ui/dashboard-select";
 import type { Teammate } from "@/data/team";
 import type { GoalSettings } from "@/lib/goal-settings";
 import type { DashboardSheetData } from "@/lib/sheets-public";
@@ -61,20 +62,18 @@ export function PersonalReportPanel({
 
   return (
     <div className="space-y-5">
-      <label className="block max-w-sm">
+      <div className="block max-w-sm">
         <span className="text-xs font-bold text-muted-foreground">Member name</span>
-        <select
+        <DashboardSelect
           value={memberName}
-          onChange={(event) => setMemberName(event.target.value)}
-          className="tb-search mt-1 h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm font-bold outline-none focus:ring-2 focus:ring-primary/30"
-        >
-          {members.map((memberOption) => (
-            <option key={memberOption.id} value={memberOption.name}>
-              {memberOption.name}
-            </option>
-          ))}
-        </select>
-      </label>
+          onChange={setMemberName}
+          options={members.map((memberOption) => ({
+            value: memberOption.name,
+            label: memberOption.name,
+          }))}
+          triggerClassName="h-12 px-4 text-sm font-bold"
+        />
+      </div>
 
       {report ? (
         <div className="space-y-5">
