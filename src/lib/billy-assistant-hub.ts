@@ -53,9 +53,7 @@ const saveMeetingTopicInput = z.object({
 });
 
 declare global {
-  var __teamBillionBillyMeetingTopics:
-    | Map<string, MeetingTopic[]>
-    | undefined;
+  var __teamBillionBillyMeetingTopics: Map<string, MeetingTopic[]> | undefined;
   var __teamBillionBillySaveDiagnostics: SaveDiagnostics | null | undefined;
 }
 
@@ -124,11 +122,8 @@ export function getCurrentMeetingWeek() {
   const berlin = getBerlinParts();
   const berlinDateAsUtc = new Date(Date.UTC(berlin.year, berlin.month - 1, berlin.day));
   const berlinDayOfWeek = berlinDateAsUtc.getUTCDay();
-  const daysSinceReset =
-    berlinDayOfWeek === 0 && berlin.hour < 12 ? 7 : berlinDayOfWeek;
-  const resetDate = new Date(
-    Date.UTC(berlin.year, berlin.month - 1, berlin.day - daysSinceReset),
-  );
+  const daysSinceReset = berlinDayOfWeek === 0 && berlin.hour < 12 ? 7 : berlinDayOfWeek;
+  const resetDate = new Date(Date.UTC(berlin.year, berlin.month - 1, berlin.day - daysSinceReset));
   const weekStartDate = formatDateKey(resetDate);
 
   return {
@@ -157,9 +152,10 @@ async function redisCommand<T>(command: Array<string | number>) {
     body: JSON.stringify(command),
     cache: "no-store",
   });
-  const payload = (await response.json().catch(() => null)) as
-    | { result?: T; error?: string }
-    | null;
+  const payload = (await response.json().catch(() => null)) as {
+    result?: T;
+    error?: string;
+  } | null;
 
   if (!response.ok || payload?.error) {
     throw new Error(payload?.error ?? `Redis request failed with ${response.status}.`);
@@ -277,7 +273,7 @@ export async function getBillyAssistantHubDiagnosticsData(): Promise<BillyAssist
   try {
     const { getTeamAssetsDataForServer } = await import("@/lib/team-assets");
     const teamAssetsData = await getTeamAssetsDataForServer();
-    externalGptLinks = resolveExternalGptLinksFromTeamAssets(teamAssetsData.assets);
+    externalGptLinks = resolveExternalGptLinksFromTeamAssets(teamAssetsData.allAssets);
   } catch {
     externalGptLinks = resolveExternalGptLinksFromTeamAssets([]);
   }

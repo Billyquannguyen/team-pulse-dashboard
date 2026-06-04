@@ -33,6 +33,7 @@ type TeamAssetsReadDebug = {
   headerCount: number;
   rowCount: number;
   enabledRows: number;
+  internalRows: number;
   assetCount: number;
   warnings: string[];
 };
@@ -67,6 +68,7 @@ type TeamAssetsWorksheet = {
 
 export type TeamAssetsSheetData = {
   assets: AssetLink[];
+  allAssets: AssetLink[];
   source: "google-sheet" | "fallback" | "error";
   error?: string;
   warning?: string;
@@ -98,6 +100,7 @@ export type TeamAssetsDataFlowDiagnostics = {
     headers: number;
     rows: number;
     enabledRows: number;
+    internalRows: number;
     assets: number;
   };
   cache: {
@@ -128,6 +131,10 @@ const TEAM_ASSET_COLUMN_ALIASES: Record<TeamAssetField, string[]> = {
   enabled: ["enabled", "active", "show", "visible", "status"],
   sortOrder: ["sort_order", "sort order", "order", "sort", "position"],
 };
+
+const INTERNAL_ASSET_CATEGORIES = new Set(["gpt", "internal", "internal link", "internal links"]);
+
+const INTERNAL_ASSET_TITLES = new Set(["contract review gpt", "creator brand matching gpt"]);
 
 const ICON_ALIASES: Record<string, AssetIconName> = {
   asset: "folder",
@@ -267,10 +274,17 @@ function withTeamAssetsWarning(data: TeamAssetsSheetData, warning: string): Team
 function normalizeKey(value: string) {
   return value
     .toLowerCase()
-    .replace(/[_-]+/g, " ")
+    .replace(/[_–—-]+/g, " ")
     .replace(/[^\p{L}\p{N} ]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isInternalAsset(title: string, category: string) {
+  const titleKey = normalizeKey(title);
+  const categoryKey = normalizeKey(category);
+
+  return INTERNAL_ASSET_TITLES.has(titleKey) || INTERNAL_ASSET_CATEGORIES.has(categoryKey);
 }
 
 function normalizeSheetKey(value: string) {
@@ -357,6 +371,7 @@ function emptyDebug(): TeamAssetsReadDebug {
     headerCount: 0,
     rowCount: 0,
     enabledRows: 0,
+    internalRows: 0,
     assetCount: 0,
     warnings: [],
   };
@@ -378,26 +393,28 @@ function normalizeAssetRows(headers: string[], rows: string[][], debug: TeamAsse
   }
 
   const assets: AssetLink[] = [];
+  const allAssets: AssetLink[] = [];
 
   rows.forEach((row, index) => {
     const title = toTitleCase(getCell(row, lookup, "title"));
     const url = cleanAssetUrl(getCell(row, lookup, "url"));
     const enabled = parseEnabled(getCell(row, lookup, "enabled"));
+    const category = getCell(row, lookup, "category") || "Team";
+    const internal = isInternalAsset(title, category);
 
     if (title || url) {
-      debug.enabledRows += enabled ? 1 : 0;
+      debug.enabledRows += enabled && !internal ? 1 : 0;
+      debug.internalRows += internal ? 1 : 0;
     }
 
-    if (!enabled || !title || !url) {
+    if (!title || !url) {
       if (title || url) {
-        debug.warnings.push(
-          `Skipped row ${index + 2}: ${!enabled ? "disabled" : "missing title or url"}.`,
-        );
+        debug.warnings.push(`Skipped row ${index + 2}: missing title or url.`);
       }
       return;
     }
 
-    assets.push({
+    const asset = {
       id: `${index + 2}-${slugify(title, index)}`,
       title,
       description: getCell(row, lookup, "subtitle") || "Team resource",
@@ -405,19 +422,33 @@ function normalizeAssetRows(headers: string[], rows: string[][], debug: TeamAsse
       icon: normalizeIcon(getCell(row, lookup, "icon")),
       color: normalizeColor(getCell(row, lookup, "color"), index),
       accent: normalizeAccent(getCell(row, lookup, "color"), index),
-      category: getCell(row, lookup, "category") || "Team",
+      category,
       enabled,
       sortOrder: parseSortOrder(getCell(row, lookup, "sortOrder"), index),
       sourceRowNumber: index + 2,
-    });
+    };
+
+    if (enabled || internal) {
+      allAssets.push(asset);
+    }
+
+    if (!enabled || internal) {
+      debug.warnings.push(`Skipped row ${index + 2}: ${internal ? "internal link" : "disabled"}.`);
+      return;
+    }
+
+    assets.push(asset);
   });
 
   assets.sort(
     (left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title),
   );
+  allAssets.sort(
+    (left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title),
+  );
 
   debug.assetCount = assets.length;
-  return assets;
+  return { assets, allAssets };
 }
 
 const getGoogleSheetsServer = createServerOnlyFn(async () => import("@/lib/google-sheets.server"));
@@ -546,12 +577,7 @@ function buildTeamAssetNameLinkRow(
   const urlIndex = lookup.url;
   const url = cleanAssetUrl(input.url);
 
-  if (
-    titleIndex === undefined ||
-    titleIndex < 0 ||
-    urlIndex === undefined ||
-    urlIndex < 0
-  ) {
+  if (titleIndex === undefined || titleIndex < 0 || urlIndex === undefined || urlIndex < 0) {
     throw new Error(`${TEAM_ASSETS_TAB_NAME} tab is missing required title or url column.`);
   }
 
@@ -611,7 +637,7 @@ async function readTeamAssetsSheetData(
   const worksheet = await loadTeamAssetsWorksheet(config, spreadsheetId);
   debug.availableTabs = worksheet.availableTabs;
   debug.foundTabName = worksheet.sheet.sheetName;
-  const assets = normalizeAssetRows(worksheet.headers, worksheet.rows, debug);
+  const { assets, allAssets } = normalizeAssetRows(worksheet.headers, worksheet.rows, debug);
 
   logTeamAssets("team assets loaded from google sheets", {
     sheetName: worksheet.sheet.sheetName,
@@ -621,6 +647,7 @@ async function readTeamAssetsSheetData(
 
   return {
     assets,
+    allAssets,
     source: "google-sheet",
     links,
     updatedAt: new Date().toISOString(),
@@ -631,8 +658,13 @@ function fallbackTeamAssetsData(
   error: string,
   links: TeamAssetsSheetData["links"],
 ): TeamAssetsSheetData {
+  const assets = fallbackAssetLinks.filter(
+    (asset) => !isInternalAsset(asset.title, asset.category),
+  );
+
   return {
-    assets: fallbackAssetLinks,
+    assets,
+    allAssets: fallbackAssetLinks,
     source: "fallback",
     error,
     warning: "Local development fallback: Team Assets could not be loaded from Google Sheets.",
@@ -647,6 +679,7 @@ function emptyTeamAssetsData(
 ): TeamAssetsSheetData {
   return {
     assets: [],
+    allAssets: [],
     source: "error",
     error,
     links,
@@ -801,6 +834,7 @@ export async function getTeamAssetsDataFlowDiagnostics(): Promise<TeamAssetsData
         headers: debug.headerCount,
         rows: debug.rowCount,
         enabledRows: debug.enabledRows,
+        internalRows: debug.internalRows,
         assets: debug.assetCount,
       },
       cache: makeCacheDiagnostics(result.cacheStatus, result.cacheExpiresAt),
@@ -832,6 +866,7 @@ export async function getTeamAssetsDataFlowDiagnostics(): Promise<TeamAssetsData
         headers: debug.headerCount,
         rows: debug.rowCount,
         enabledRows: debug.enabledRows,
+        internalRows: debug.internalRows,
         assets: debug.assetCount,
       },
       cache: makeCacheDiagnostics(
@@ -939,7 +974,7 @@ export const removeTeamAssetLink = createServerFn({ method: "POST" })
   });
 
 export const teamAssetsQuery = {
-  queryKey: ["team-billion-team-assets", "google-sheet-v1"],
+  queryKey: ["team-billion-team-assets", "google-sheet-v2"],
   queryFn: () => fetchTeamAssetsData(),
   refetchInterval: QUERY_REFETCH_INTERVAL_MS,
   staleTime: QUERY_STALE_TIME_MS,

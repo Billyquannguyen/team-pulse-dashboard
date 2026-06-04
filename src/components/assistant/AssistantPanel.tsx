@@ -104,7 +104,12 @@ function FeatureCard({
       className="tb-action tb-hover-lift rounded-3xl border border-border bg-background/75 p-5 text-left transition hover:bg-background"
     >
       <div className="flex items-start gap-3">
-        <div className={cn("tb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl", tone)}>
+        <div
+          className={cn(
+            "tb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl",
+            tone,
+          )}
+        >
           <Icon className="h-5 w-5" />
         </div>
         <div>
@@ -490,9 +495,14 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
     enabled: open,
   });
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
-  const members = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
+  const members = useMemo(
+    () => data?.team ?? (canUseLocalFallback ? fallbackTeam : []),
+    [canUseLocalFallback, data?.team],
+  );
   const meetingMembers = useMemo(() => buildMeetingMemberOptions(members), [members]);
-  const externalGptLinks = resolveExternalGptLinksFromTeamAssets(teamAssetsData?.assets ?? []);
+  const externalGptLinks = resolveExternalGptLinksFromTeamAssets(
+    teamAssetsData?.allAssets ?? teamAssetsData?.assets ?? [],
+  );
   const selectedFeature = featureCards.find((feature) => feature.id === activeFeature);
   const isAdmin = authRole === "admin";
 
@@ -584,17 +594,11 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
           )}
 
           {activeFeature === "contract" && (
-            <ExternalGptPanel
-              type="contract"
-              url={externalGptLinks.contractReview.url}
-            />
+            <ExternalGptPanel type="contract" url={externalGptLinks.contractReview.url} />
           )}
 
           {activeFeature === "matching" && (
-            <ExternalGptPanel
-              type="matching"
-              url={externalGptLinks.creatorBrandMatching.url}
-            />
+            <ExternalGptPanel type="matching" url={externalGptLinks.creatorBrandMatching.url} />
           )}
         </HubShell>
       )}
