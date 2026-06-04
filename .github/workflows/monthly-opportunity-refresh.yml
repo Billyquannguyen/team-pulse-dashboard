@@ -29,15 +29,16 @@ jobs:
       MONTHLY_REFRESH_EMAIL_FROM: ${{ secrets.MONTHLY_REFRESH_EMAIL_FROM }}
       MONTHLY_REFRESH_OUTPUT_DIR: .opportunity-ingestion/monthly-refresh/${{ github.run_id }}-${{ github.run_attempt }}
       MONTHLY_REFRESH_LOG_DIR: .opportunity-ingestion/monthly-refresh/${{ github.run_id }}-${{ github.run_attempt }}/logs
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
@@ -106,7 +107,7 @@ jobs:
 
       - name: Upload GPT Knowledge package
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: team-billion-gpt-knowledge-refresh
           path: |
@@ -114,15 +115,17 @@ jobs:
             ${{ env.MONTHLY_REFRESH_OUTPUT_DIR }}/monthly-gpt-refresh-summary.md
             ${{ env.MONTHLY_REFRESH_OUTPUT_DIR }}/monthly-refresh-artifacts.json
           retention-days: 90
+          include-hidden-files: true
 
       - name: Upload refresh logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: monthly-opportunity-refresh-logs
           path: ${{ env.MONTHLY_REFRESH_OUTPUT_DIR }}
           retention-days: 30
           if-no-files-found: ignore
+          include-hidden-files: true
 
       - name: Email success notification
         if: success()
