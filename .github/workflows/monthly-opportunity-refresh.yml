@@ -27,6 +27,7 @@ jobs:
       EMAIL_PROVIDER_API_KEY: ${{ secrets.EMAIL_PROVIDER_API_KEY }}
       MONTHLY_REFRESH_EMAIL_TO: ${{ secrets.MONTHLY_REFRESH_EMAIL_TO }}
       MONTHLY_REFRESH_EMAIL_FROM: ${{ secrets.MONTHLY_REFRESH_EMAIL_FROM }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       MONTHLY_REFRESH_OUTPUT_DIR: .opportunity-ingestion/monthly-refresh/${{ github.run_id }}-${{ github.run_attempt }}
       MONTHLY_REFRESH_LOG_DIR: .opportunity-ingestion/monthly-refresh/${{ github.run_id }}-${{ github.run_attempt }}/logs
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -133,6 +134,11 @@ jobs:
       - name: Email success notification
         if: success()
         run: npm run opportunity:monthly-refresh -- notify-success --output-dir "$MONTHLY_REFRESH_OUTPUT_DIR"
+
+      - name: Discord success notification
+        if: success()
+        continue-on-error: true
+        run: npm run opportunity:monthly-refresh -- notify-discord --output-dir "$MONTHLY_REFRESH_OUTPUT_DIR"
 
       - name: Email failure notification
         if: failure()

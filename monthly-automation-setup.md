@@ -6,6 +6,8 @@ It does not depend on Codex, ChatGPT, your laptop, or Vercel Cron.
 
 The Custom GPT upload still stays manual because GPT Knowledge files cannot be safely updated automatically from this workflow.
 
+The automation belongs to your GitHub repo, your Google credentials, and your email provider account. Codex is only used to edit or improve the system. If you stop using Codex later, this scheduled workflow keeps running as long as the repo, secrets, Google access, and email provider remain active.
+
 ## What Runs
 
 Every monthly run does this:
@@ -21,6 +23,7 @@ Every monthly run does this:
 9. Creates `monthly-gpt-refresh-summary.md`
 10. Uploads the package as a GitHub Actions artifact
 11. Emails the refresh result
+12. Optionally posts a no-files summary to Discord if `DISCORD_WEBHOOK_URL` is configured
 
 ## GitHub Secrets Setup
 
@@ -30,17 +33,18 @@ In GitHub, open the repo, then go to:
 
 Add these secrets:
 
-| Secret | Purpose |
-| --- | --- |
-| `GMAIL_CLIENT_ID` | Gmail OAuth client ID used by the scanner |
-| `GMAIL_CLIENT_SECRET` | Gmail OAuth client secret |
-| `GMAIL_REFRESH_TOKEN` | Gmail refresh token for the mailbox |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | Google service account email |
-| `GOOGLE_PRIVATE_KEY` | Google service account private key |
-| `OPPORTUNITY_DATABASE_SPREADSHEET_ID` | Opportunity Intelligence database spreadsheet ID |
-| `EMAIL_PROVIDER_API_KEY` | Resend API key |
-| `MONTHLY_REFRESH_EMAIL_TO` | Recipient email address for monthly reports |
-| `MONTHLY_REFRESH_EMAIL_FROM` | Verified sender email address in Resend |
+| Secret                                | Purpose                                                   |
+| ------------------------------------- | --------------------------------------------------------- |
+| `GMAIL_CLIENT_ID`                     | Gmail OAuth client ID used by the scanner                 |
+| `GMAIL_CLIENT_SECRET`                 | Gmail OAuth client secret                                 |
+| `GMAIL_REFRESH_TOKEN`                 | Gmail refresh token for the mailbox                       |
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL`        | Google service account email                              |
+| `GOOGLE_PRIVATE_KEY`                  | Google service account private key                        |
+| `OPPORTUNITY_DATABASE_SPREADSHEET_ID` | Opportunity Intelligence database spreadsheet ID          |
+| `EMAIL_PROVIDER_API_KEY`              | Resend API key                                            |
+| `MONTHLY_REFRESH_EMAIL_TO`            | Recipient email address for monthly reports               |
+| `MONTHLY_REFRESH_EMAIL_FROM`          | Verified sender email address in Resend                   |
+| `DISCORD_WEBHOOK_URL`                 | Optional Discord channel webhook for team monthly summary |
 
 Keep `GOOGLE_PRIVATE_KEY` exactly as a secret. It can be pasted with real newlines or escaped `\n` newlines because the scripts normalize both formats.
 
@@ -57,6 +61,57 @@ The workflow uses Resend.
 
 If the ZIP is too large for email, the workflow still uploads it as a GitHub Actions artifact and the email tells you to download it from the run page.
 
+## Monthly Email Contents
+
+The success email includes:
+
+- Emails scanned
+- New opportunities
+- Updated opportunities
+- New brands
+- New agencies
+- New contacts
+- Review queue count
+- Opportunities moved to review
+- Priority A opportunities added
+- Top 20 new brands discovered
+- Top 20 new agencies discovered
+- Priority distribution
+- Backup confirmation
+- Upload package instructions
+- The GPT Knowledge ZIP attachment when it is small enough
+
+Priority A means a newly added opportunity with a strong priority score or Tier 1 export status.
+
+## Optional Discord Team Notice
+
+Discord is executable through a webhook.
+
+Use this when you want the team to see the monthly opportunity refresh without receiving the GPT upload files.
+
+Setup:
+
+1. In Discord, open the target channel settings.
+2. Go to `Integrations` → `Webhooks`.
+3. Create a webhook for the channel.
+4. Copy the webhook URL.
+5. Add it to GitHub as the repository secret `DISCORD_WEBHOOK_URL`.
+
+The Discord message includes:
+
+- Emails scanned
+- New opportunities
+- Updated opportunities
+- Priority A opportunities added
+- Opportunities moved to review
+- New brands
+- New agencies
+- Priority distribution
+- Short top brand and agency lists
+- GitHub Actions run link
+
+The Discord message does not attach GPT files.
+
 ## Monthly Schedule
 
 The workflow lives here:
@@ -70,6 +125,19 @@ It runs on this cron schedule:
 That means the first day of every month at 08:00 UTC.
 
 In Berlin time, this is usually 09:00 during winter time and 10:00 during summer time.
+
+## If You Later Want Weekly Scanning
+
+Current setup is monthly refresh only.
+
+If you later decide to scan Gmail weekly but only package GPT files monthly, the clean path is:
+
+1. Add a separate weekly GitHub Actions workflow.
+2. Run credential validation, preflight, backup, Gmail ingestion, and intelligence refresh.
+3. Skip GPT ZIP packaging and GPT upload instructions on weekly runs.
+4. Keep this monthly workflow for the GPT Knowledge package.
+
+That is a small Codex change, not a rebuild. After the change is committed and pushed, GitHub runs the weekly schedule automatically. You only need to manually rerun the workflow if you want to test it immediately or trigger a scan before the next scheduled time.
 
 ## Monthly Operating Cost
 
