@@ -41,8 +41,11 @@ jobs:
           node-version: "24"
           cache: npm
 
+      - name: Sync lockfile in runner
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Run monthly refresh
         shell: bash
