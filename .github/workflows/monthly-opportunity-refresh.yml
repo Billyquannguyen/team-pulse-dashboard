@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "0 8 1 * *"
   workflow_dispatch:
+    inputs:
+      notification_test_only:
+        description: "Send test email + Discord message only. No Gmail ingestion or Sheet writes."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -48,7 +54,12 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Send notification test
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.notification_test_only }}
+        run: npm run opportunity:monthly-refresh -- notify-test
+
       - name: Run monthly refresh
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.notification_test_only) }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -110,7 +121,7 @@ jobs:
           run_stage "GPT upload package generation" npm run opportunity:monthly-refresh -- prepare --output-dir "$MONTHLY_REFRESH_OUTPUT_DIR" --logs-dir "$MONTHLY_REFRESH_LOG_DIR"
 
       - name: Upload GPT Knowledge package
-        if: success()
+        if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.notification_test_only) }}
         uses: actions/upload-artifact@v7
         with:
           name: team-billion-gpt-knowledge-refresh
@@ -132,14 +143,14 @@ jobs:
           include-hidden-files: true
 
       - name: Email success notification
-        if: success()
+        if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.notification_test_only) }}
         run: npm run opportunity:monthly-refresh -- notify-success --output-dir "$MONTHLY_REFRESH_OUTPUT_DIR"
 
       - name: Discord success notification
-        if: success()
+        if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.notification_test_only) }}
         continue-on-error: true
         run: npm run opportunity:monthly-refresh -- notify-discord --output-dir "$MONTHLY_REFRESH_OUTPUT_DIR"
 
       - name: Email failure notification
-        if: failure()
+        if: ${{ failure() && !(github.event_name == 'workflow_dispatch' && inputs.notification_test_only) }}
         run: npm run opportunity:monthly-refresh -- notify-failure --output-dir "$MONTHLY_REFRESH_OUTPUT_DIR"

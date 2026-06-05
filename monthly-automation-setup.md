@@ -126,6 +126,26 @@ That means the first day of every month at 08:00 UTC.
 
 In Berlin time, this is usually 09:00 during winter time and 10:00 during summer time.
 
+## Test Email And Discord Notifications
+
+Use this after changing Resend, email sender, recipient, or the Discord webhook.
+
+1. Go to GitHub.
+2. Open `team-pulse-dashboard`.
+3. Click `Actions`.
+4. Click `Monthly Opportunity Intelligence Refresh`.
+5. Click `Run workflow`.
+6. Tick `Send test email + Discord message only`.
+7. Click the green `Run workflow` button.
+
+This test does not run Gmail ingestion, does not write to the Google Sheet, and does not regenerate GPT exports.
+
+Expected result:
+
+- Your email receives `Team Billion Monthly Refresh Notification Test`.
+- Discord receives `Team Billion monthly refresh notification test`.
+- The GitHub Actions run should finish in under one minute.
+
 ## If You Later Want Weekly Scanning
 
 Current setup is monthly refresh only.

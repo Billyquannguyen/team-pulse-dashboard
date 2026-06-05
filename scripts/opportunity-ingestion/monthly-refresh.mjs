@@ -64,6 +64,11 @@ async function main() {
     return;
   }
 
+  if (command === "notify-test") {
+    await notifyTest();
+    return;
+  }
+
   throw new Error(`Unknown monthly refresh command: ${command}`);
 }
 
@@ -114,6 +119,7 @@ Commands:
   node scripts/opportunity-ingestion/monthly-refresh.mjs prepare
   node scripts/opportunity-ingestion/monthly-refresh.mjs notify-success
   node scripts/opportunity-ingestion/monthly-refresh.mjs notify-failure --failed-step "Gmail ingestion"
+  node scripts/opportunity-ingestion/monthly-refresh.mjs notify-test
 
 What it does:
   - packages only approved Custom GPT Knowledge files
@@ -482,6 +488,44 @@ async function notifyDiscord(options) {
   const message = buildDiscordMessage(artifact);
   await sendDiscordMessage(webhookUrl, message);
   console.log("Discord notification sent.");
+}
+
+async function notifyTest() {
+  const runUrl = githubRunUrl();
+  const timestamp = new Date().toISOString();
+  const emailText = `Team Billion notification test.
+
+This is only a test of the monthly refresh email setup.
+No Gmail ingestion ran.
+No Sheet rows were changed.
+No GPT export files were regenerated.
+
+Sent at: ${timestamp}
+GitHub Actions run: ${runUrl}
+`;
+
+  await sendResendEmail({
+    subject: "Team Billion Monthly Refresh Notification Test",
+    text: emailText,
+    attachments: [],
+  });
+  console.log("Test email notification sent.");
+
+  const webhookUrl = requiredEnv("DISCORD_WEBHOOK_URL").trim();
+  await sendDiscordMessage(
+    webhookUrl,
+    [
+      "**Team Billion monthly refresh notification test**",
+      "",
+      "This is only a test.",
+      "No Gmail ingestion ran.",
+      "No Sheet rows were changed.",
+      "No GPT export files were regenerated.",
+      `Sent at: ${timestamp}`,
+      `Run: ${runUrl}`,
+    ].join("\n"),
+  );
+  console.log("Test Discord notification sent.");
 }
 
 async function notifyFailure(options) {
