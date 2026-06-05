@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, BarChart3, ExternalLink, Search, Sparkles, X } from "lucide-react";
+import { BarChart3, ExternalLink, Search, Sparkles, X } from "lucide-react";
 import type { Creator } from "@/data/creators";
 import type { Deal } from "@/data/deals";
 import {
   buildExclusiveCreatorPerformance,
   type CreatorPerformance,
-  type CreatorMatchingDiagnostics,
 } from "@/lib/exclusive-creator-performance";
 import { cn } from "@/lib/utils";
 
@@ -50,8 +49,8 @@ function CreatorValueBar({
             </span>
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {creator.totalDeals.toLocaleString()} total deals ·{" "}
-            {creator.liveDeals.toLocaleString()} live
+            {creator.totalDeals.toLocaleString()} total deals · {creator.liveDeals.toLocaleString()}{" "}
+            live
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -72,7 +71,9 @@ function CreatorValueBar({
       </div>
 
       <div className="mt-3">
-        <div className={cn("relative overflow-hidden rounded-full bg-muted", compact ? "h-3" : "h-4")}>
+        <div
+          className={cn("relative overflow-hidden rounded-full bg-muted", compact ? "h-3" : "h-4")}
+        >
           <div
             className="absolute inset-y-0 left-0 rounded-full bg-primary/20"
             style={{ width: `${totalWidth}%` }}
@@ -178,7 +179,9 @@ function CreatorDetailsModal({
             ["Avg Deal Value", formatMoney(creator.avgDealValue)],
             [
               "Highest Value Deal",
-              highestDeal ? `${highestDeal.brand} · ${formatMoney(highestDeal.totalPricingGbp)}` : "-",
+              highestDeal
+                ? `${highestDeal.brand} · ${formatMoney(highestDeal.totalPricingGbp)}`
+                : "-",
             ],
           ].map(([label, value]) => (
             <div key={label} className="rounded-2xl border border-border bg-background/75 p-4">
@@ -330,87 +333,7 @@ function AllCreatorsModal({
   );
 }
 
-function MatchingDiagnostics({ diagnostics }: { diagnostics: CreatorMatchingDiagnostics }) {
-  const issueCount =
-    diagnostics.unmatchedExclusiveCreators.length +
-    diagnostics.fuzzyMatchedDeals.length +
-    diagnostics.possibleDuplicateCreators.length +
-    diagnostics.dealCreatorsWithoutExclusiveMatch.length;
-
-  return (
-    <details className="rounded-2xl border border-dashed border-border bg-background/60 p-4">
-      <summary className="cursor-pointer text-sm font-bold">
-        Matching diagnostics · {issueCount.toLocaleString()} items to review
-      </summary>
-      <div className="mt-4 grid gap-4 text-xs text-muted-foreground lg:grid-cols-2">
-        <DiagnosticList
-          title="Unmatched exclusive creators"
-          empty="Every exclusive creator has at least one matched deal."
-          rows={diagnostics.unmatchedExclusiveCreators.map(
-            (item) => `${item.creator}${item.aliases.length ? ` · ${item.aliases.join(", ")}` : ""}`,
-          )}
-        />
-        <DiagnosticList
-          title="Deals matched by fuzzy logic"
-          empty="No fuzzy deal matches were needed."
-          rows={diagnostics.fuzzyMatchedDeals.map(
-            (item) =>
-              `${item.dealCreator} → ${item.matchedCreator} · ${item.brand} · ${item.confidence}%`,
-          )}
-        />
-        <DiagnosticList
-          title="Possible duplicate creators"
-          empty="No duplicate creator aliases detected."
-          rows={diagnostics.possibleDuplicateCreators.map(
-            (item) => `${item.sharedAlias} · ${item.creators.join(", ")}`,
-          )}
-        />
-        <DiagnosticList
-          title="Deal creators with no exclusive match"
-          empty="Every deal creator matched an exclusive creator."
-          rows={diagnostics.dealCreatorsWithoutExclusiveMatch.map(
-            (item) => `${item.dealCreator} · ${item.brand} · ${formatMoney(item.value)}`,
-          )}
-        />
-      </div>
-    </details>
-  );
-}
-
-function DiagnosticList({
-  title,
-  rows,
-  empty,
-}: {
-  title: string;
-  rows: string[];
-  empty: string;
-}) {
-  return (
-    <section>
-      <h5 className="mb-2 font-black text-foreground">{title}</h5>
-      {rows.length > 0 ? (
-        <ul className="max-h-28 space-y-1 overflow-y-auto pr-2">
-          {rows.slice(0, 8).map((row) => (
-            <li key={row} className="rounded-xl bg-muted/60 px-3 py-2">
-              {row}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="rounded-xl bg-muted/40 px-3 py-2">{empty}</p>
-      )}
-    </section>
-  );
-}
-
-export function TopExclusiveCreators({
-  creators,
-  deals,
-}: {
-  creators: Creator[];
-  deals: Deal[];
-}) {
+export function TopExclusiveCreators({ creators, deals }: { creators: Creator[]; deals: Deal[] }) {
   const [allOpen, setAllOpen] = useState(false);
   const [selectedCreator, setSelectedCreator] = useState<CreatorPerformance | null>(null);
   const performance = useMemo(
@@ -463,7 +386,7 @@ export function TopExclusiveCreators({
         )}
       </div>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
         <div className="rounded-2xl bg-fun-lime/60 p-4">
           <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-900/70">
             Exclusive creators
@@ -475,19 +398,6 @@ export function TopExclusiveCreators({
             With matched deals
           </div>
           <div className="mt-1 text-2xl font-black">{matchedCreatorCount}</div>
-        </div>
-        <div className="rounded-2xl bg-fun-yellow/70 p-4">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-900/70">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            Matching watchlist
-          </div>
-          <div className="mt-1 text-2xl font-black">
-            {(
-              performance.diagnostics.fuzzyMatchedDeals.length +
-              performance.diagnostics.possibleDuplicateCreators.length +
-              performance.diagnostics.dealCreatorsWithoutExclusiveMatch.length
-            ).toLocaleString()}
-          </div>
         </div>
       </div>
 
@@ -506,10 +416,6 @@ export function TopExclusiveCreators({
             Bold bar = posted live deal value
           </div>
         </div>
-      </div>
-
-      <div className="mt-4">
-        <MatchingDiagnostics diagnostics={performance.diagnostics} />
       </div>
 
       {allOpen && (
