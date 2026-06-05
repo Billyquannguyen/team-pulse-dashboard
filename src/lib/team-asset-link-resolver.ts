@@ -2,6 +2,7 @@ import type { AssetLink } from "@/data/assets";
 
 export const CONTRACT_REVIEW_GPT_ASSET_TITLE = "Contract Review GPT";
 export const CREATOR_BRAND_MATCHING_GPT_ASSET_TITLE = "Creator–Brand Matching GPT";
+export const GENERAL_FAQS_GPT_ASSET_TITLE = "General FAQs";
 
 const ASSET_TITLE_ALIASES: Record<string, string[]> = {
   [CONTRACT_REVIEW_GPT_ASSET_TITLE]: ["Contract Review"],
@@ -11,6 +12,12 @@ const ASSET_TITLE_ALIASES: Record<string, string[]> = {
     "Creator–Brand Matching",
     "Creator-Brand Matching GPT",
     "Creator-Brand Matching",
+  ],
+  [GENERAL_FAQS_GPT_ASSET_TITLE]: [
+    "General FAQ",
+    "General FAQs",
+    "Talent Manager Trainer",
+    "Team Billion Talent Manager Trainer",
   ],
 };
 
@@ -56,9 +63,7 @@ function resolveAssetUrlByTitle(assets: AssetLink[], expectedTitle: string): Ext
 export function resolveExternalGptLinksFromTeamAssets(assets: AssetLink[]) {
   return {
     contractReview: resolveAssetUrlByTitle(assets, CONTRACT_REVIEW_GPT_ASSET_TITLE),
-    creatorBrandMatching: resolveAssetUrlByTitle(
-      assets,
-      CREATOR_BRAND_MATCHING_GPT_ASSET_TITLE,
-    ),
+    creatorBrandMatching: resolveAssetUrlByTitle(assets, CREATOR_BRAND_MATCHING_GPT_ASSET_TITLE),
+    generalFaqs: resolveAssetUrlByTitle(assets, GENERAL_FAQS_GPT_ASSET_TITLE),
   };
 }

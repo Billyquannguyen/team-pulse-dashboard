@@ -27,6 +27,7 @@ export type BillyAssistantHubDiagnostics = {
   externalGptLinks: {
     contractReview: ExternalGptAssetLink;
     creatorBrandMatching: ExternalGptAssetLink;
+    generalFaqs: ExternalGptAssetLink;
   };
 };
 

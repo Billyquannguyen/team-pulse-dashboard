@@ -351,9 +351,7 @@ function NotionKnowledgeDiagnosticsCard({
           <div>Token env: {diagnostics.tokenEnvName}</div>
           <div>Last duration: {diagnostics.lastDurationMs ?? "-"}ms</div>
           <div>Recursive subpages: enabled up to the configured nested block depth</div>
-          <div>
-            Storage: private server-side index. Page contents are not shown in diagnostics.
-          </div>
+          <div>Storage: private server-side index. Page contents are not shown in diagnostics.</div>
           <div>
             Web provider: {diagnostics.web.provider}
             {diagnostics.web.braveConfigured ? " with Brave key" : " public fallback"}
@@ -418,7 +416,10 @@ function ContractReviewDiagnosticsCard({
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <MetricBox label="OpenAI key" value={diagnostics.openAiKeyPresent ? "Present" : "Missing"} />
+        <MetricBox
+          label="OpenAI key"
+          value={diagnostics.openAiKeyPresent ? "Present" : "Missing"}
+        />
         <MetricBox label="Model" value={diagnostics.modelUsed} />
         <MetricBox label="Upload status" value={diagnostics.uploadStatus} />
         <MetricBox label="Extraction" value={diagnostics.extractionStatus} />
@@ -474,7 +475,9 @@ function CreateTestSlackNotificationButton() {
       setMessage(result.message);
       await queryClient.invalidateQueries({ queryKey: slackNotificationsQuery.queryKey });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not create the test notification.");
+      setMessage(
+        error instanceof Error ? error.message : "Could not create the test notification.",
+      );
     } finally {
       setIsCreating(false);
     }
@@ -557,7 +560,8 @@ function SlackNotificationsDiagnosticsCard({
 }) {
   if (!diagnostics) return null;
 
-  const ok = diagnostics.slackConnected && diagnostics.dmFetchSuccess && diagnostics.redisConfigured;
+  const ok =
+    diagnostics.slackConnected && diagnostics.dmFetchSuccess && diagnostics.redisConfigured;
 
   return (
     <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
@@ -623,8 +627,7 @@ function SlackNotificationsDiagnosticsCard({
           <div className="mt-2 space-y-1 text-xs text-muted-foreground">
             <div>Vercel Cron: hourly via /api/slack-followups</div>
             <div>
-              Production threshold locked:{" "}
-              {diagnostics.productionThresholdLocked ? "Yes" : "No"}
+              Production threshold locked: {diagnostics.productionThresholdLocked ? "Yes" : "No"}
             </div>
             <div>Redis readable: {diagnostics.redisReadable ? "Yes" : "No"}</div>
             <div>Redis writable: {diagnostics.redisWritable ? "Yes" : "No"}</div>
@@ -723,11 +726,7 @@ function BillyAssistantHubDiagnosticsCard({
             </div>
             <div>
               Last save status:{" "}
-              {diagnostics.lastSaveOk === null
-                ? "-"
-                : diagnostics.lastSaveOk
-                  ? "OK"
-                  : "Failed"}
+              {diagnostics.lastSaveOk === null ? "-" : diagnostics.lastSaveOk ? "OK" : "Failed"}
             </div>
             <div>Last save error: {diagnostics.lastSaveError ?? "-"}</div>
           </div>
@@ -746,6 +745,12 @@ function BillyAssistantHubDiagnosticsCard({
               {diagnostics.externalGptLinks.creatorBrandMatching.configured
                 ? `Connected from ${diagnostics.externalGptLinks.creatorBrandMatching.source}`
                 : "Missing from Team Assets"}
+            </div>
+            <div>
+              {diagnostics.externalGptLinks.generalFaqs.expectedTitle}:{" "}
+              {diagnostics.externalGptLinks.generalFaqs.configured
+                ? `Connected from ${diagnostics.externalGptLinks.generalFaqs.source}`
+                : "Using built-in Billy GPT link"}
             </div>
           </div>
         </div>

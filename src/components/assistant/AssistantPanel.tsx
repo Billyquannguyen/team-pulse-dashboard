@@ -31,9 +31,12 @@ import { teamAssetsQuery } from "@/lib/team-assets";
 import { resolveExternalGptLinksFromTeamAssets } from "@/lib/team-asset-link-resolver";
 import { cn } from "@/lib/utils";
 
-type AssistantFeature = "home" | "meeting" | "report" | "contract" | "matching";
+type AssistantFeature = "home" | "meeting" | "report" | "contract" | "matching" | "faqs";
 type MeetingMode = "menu" | "add" | "view";
 type MeetingMemberOption = Pick<Teammate, "id" | "name">;
+
+const GENERAL_FAQS_GPT_URL =
+  "https://chatgpt.com/g/g-6a22a5dcedb08191870b43beeede683b-team-billion-talent-manager-trainer";
 
 const billyMeetingMember: MeetingMemberOption = {
   id: "billy",
@@ -74,6 +77,13 @@ const featureCards: Array<{
     description: "Future shortcut for matching creators with strong brand fits.",
     icon: Handshake,
     tone: "bg-fun-pink",
+  },
+  {
+    id: "faqs",
+    title: "General FAQs",
+    description: "Open the Team Billion talent manager trainer for common team questions.",
+    icon: Bot,
+    tone: "bg-fun-purple",
   },
 ];
 
@@ -422,10 +432,11 @@ function ExternalGptPanel({
   type,
   url,
 }: {
-  type: "contract" | "matching";
+  type: "contract" | "matching" | "faqs";
   url: string | null | undefined;
 }) {
   const isContract = type === "contract";
+  const isFaqs = type === "faqs";
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
@@ -434,19 +445,27 @@ function ExternalGptPanel({
           <div
             className={cn(
               "tb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl",
-              isContract ? "bg-fun-yellow" : "bg-fun-pink",
+              isContract ? "bg-fun-yellow" : isFaqs ? "bg-fun-purple" : "bg-fun-pink",
             )}
           >
-            {isContract ? <FileText className="h-5 w-5" /> : <Handshake className="h-5 w-5" />}
+            {isContract ? (
+              <FileText className="h-5 w-5" />
+            ) : isFaqs ? (
+              <Bot className="h-5 w-5" />
+            ) : (
+              <Handshake className="h-5 w-5" />
+            )}
           </div>
           <div>
             <h3 className="text-base font-black">
-              {isContract ? "Contract Review" : "Creator–Brand Matching"}
+              {isContract ? "Contract Review" : isFaqs ? "General FAQs" : "Creator–Brand Matching"}
             </h3>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {isContract
                 ? "Use this for reviewing creator or brand contracts."
-                : "Use this to match creators with potential brands based on creator profile and brand briefs."}
+                : isFaqs
+                  ? "Use this for general Team Billion training, FAQs, and talent manager guidance."
+                  : "Use this to match creators with potential brands based on creator profile and brand briefs."}
             </p>
           </div>
         </div>
@@ -465,7 +484,11 @@ function ExternalGptPanel({
             rel="noreferrer"
             className="tb-action mt-4 inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground hover:opacity-90"
           >
-            {isContract ? "Open Contract Review GPT" : "Open Creator–Brand Matching GPT"}
+            {isContract
+              ? "Open Contract Review GPT"
+              : isFaqs
+                ? "Open General FAQs GPT"
+                : "Open Creator–Brand Matching GPT"}
           </a>
         ) : (
           <button
@@ -503,6 +526,7 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
   const externalGptLinks = resolveExternalGptLinksFromTeamAssets(
     teamAssetsData?.allAssets ?? teamAssetsData?.assets ?? [],
   );
+  const generalFaqsUrl = externalGptLinks.generalFaqs.url ?? GENERAL_FAQS_GPT_URL;
   const selectedFeature = featureCards.find((feature) => feature.id === activeFeature);
   const isAdmin = authRole === "admin";
 
@@ -600,6 +624,8 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
           {activeFeature === "matching" && (
             <ExternalGptPanel type="matching" url={externalGptLinks.creatorBrandMatching.url} />
           )}
+
+          {activeFeature === "faqs" && <ExternalGptPanel type="faqs" url={generalFaqsUrl} />}
         </HubShell>
       )}
     </>
