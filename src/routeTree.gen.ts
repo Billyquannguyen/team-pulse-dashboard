@@ -14,6 +14,7 @@ import { Route as GoalsRouteImport } from './routes/goals'
 import { Route as DiagnosticsRouteImport } from './routes/diagnostics'
 import { Route as DealsRouteImport } from './routes/deals'
 import { Route as CreatorsRouteImport } from './routes/creators'
+import { Route as BrandFinderRouteImport } from './routes/brand-finder'
 import { Route as AssetsRouteImport } from './routes/assets'
 import { Route as ActiveBrandsRouteImport } from './routes/active-brands'
 import { Route as IndexRouteImport } from './routes/index'
@@ -43,6 +44,11 @@ const DealsRoute = DealsRouteImport.update({
 const CreatorsRoute = CreatorsRouteImport.update({
   id: '/creators',
   path: '/creators',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BrandFinderRoute = BrandFinderRouteImport.update({
+  id: '/brand-finder',
+  path: '/brand-finder',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AssetsRoute = AssetsRouteImport.update({
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/active-brands': typeof ActiveBrandsRoute
   '/assets': typeof AssetsRoute
+  '/brand-finder': typeof BrandFinderRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
   '/diagnostics': typeof DiagnosticsRoute
@@ -87,6 +94,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/active-brands': typeof ActiveBrandsRoute
   '/assets': typeof AssetsRoute
+  '/brand-finder': typeof BrandFinderRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
   '/diagnostics': typeof DiagnosticsRoute
@@ -100,6 +108,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/active-brands': typeof ActiveBrandsRoute
   '/assets': typeof AssetsRoute
+  '/brand-finder': typeof BrandFinderRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
   '/diagnostics': typeof DiagnosticsRoute
@@ -114,6 +123,7 @@ export interface FileRouteTypes {
     | '/'
     | '/active-brands'
     | '/assets'
+    | '/brand-finder'
     | '/creators'
     | '/deals'
     | '/diagnostics'
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/'
     | '/active-brands'
     | '/assets'
+    | '/brand-finder'
     | '/creators'
     | '/deals'
     | '/diagnostics'
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/'
     | '/active-brands'
     | '/assets'
+    | '/brand-finder'
     | '/creators'
     | '/deals'
     | '/diagnostics'
@@ -151,6 +163,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ActiveBrandsRoute: typeof ActiveBrandsRoute
   AssetsRoute: typeof AssetsRoute
+  BrandFinderRoute: typeof BrandFinderRoute
   CreatorsRoute: typeof CreatorsRoute
   DealsRoute: typeof DealsRoute
   DiagnosticsRoute: typeof DiagnosticsRoute
@@ -197,6 +210,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CreatorsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/brand-finder': {
+      id: '/brand-finder'
+      path: '/brand-finder'
+      fullPath: '/brand-finder'
+      preLoaderRoute: typeof BrandFinderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/assets': {
       id: '/assets'
       path: '/assets'
@@ -239,6 +259,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActiveBrandsRoute: ActiveBrandsRoute,
   AssetsRoute: AssetsRoute,
+  BrandFinderRoute: BrandFinderRoute,
   CreatorsRoute: CreatorsRoute,
   DealsRoute: DealsRoute,
   DiagnosticsRoute: DiagnosticsRoute,

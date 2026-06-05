@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   LinkIcon,
+  SearchCheck,
   Sparkles,
   Store,
   Table2,
@@ -21,6 +22,7 @@ const items = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/deals", label: "Deals", icon: Table2 },
   { to: "/creators", label: "Creators", icon: Users },
+  { to: "/brand-finder", label: "Brand Finder", icon: SearchCheck },
   { to: "/active-brands", label: "Active Brands", icon: Store },
   { to: "/goals", label: "Goals & Analytics", icon: Target },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
