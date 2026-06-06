@@ -10,39 +10,44 @@ import {
   FileSpreadsheet,
   History,
   Inbox,
+  Loader2,
   Mail,
   RotateCcw,
   Search,
   Send,
+  Settings2,
   Sparkles,
   Upload,
-  UserRound,
+  X as XIcon,
 } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { DashboardSelectField } from "@/components/ui/dashboard-select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { activeBrandsQuery } from "@/lib/active-brands";
+import { searchAleadsContacts, type AleadsContactResult } from "@/lib/a-leads";
+import { createGmailDrafts, type GmailDraftResult } from "@/lib/gmail-drafts";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/brand-finder")({
   head: () => ({
     meta: [
-      { title: "Creator Brand Outreach — Team Billion" },
+      { title: "Brand Finder - Team Billion" },
       {
         name: "description",
-        content: "Clean creator dream brands, find brand contacts, and prepare outreach drafts.",
+        content:
+          "Upload creator dream brand sheets, find A-Leads contacts, and create Gmail drafts.",
       },
     ],
   }),
   component: BrandFinderPage,
 });
 
-const STORAGE_KEY = "team-billion-brand-finder-v2";
-const MANUAL_CREATOR_ID = "manual";
+const STORAGE_KEY = "team-billion-brand-finder-v4";
 const ALL_BRANDS = "All brands";
-const ALL_CONFIDENCE = "All confidence";
+const ALL_DECISIONS = "All decisions";
+const ALL_CREATORS = "All creators";
 
 const DEFAULT_SUBJECT_TEMPLATE = "Creator partnership for {{brand_name}}";
 const DEFAULT_BODY_TEMPLATE = `Hi {{first_name}},
@@ -54,21 +59,28 @@ Would you be open to reviewing a paid creator partnership?
 Best,
 {{sender_name}}`;
 
-const ROLE_FILTERS = [
-  "Influencer Marketing",
-  "Creator Partnerships",
-  "Brand Partnerships",
-  "Partnerships",
-  "Affiliate",
-  "PR",
-  "Public Relations",
-  "Social Media",
+const DEFAULT_JOB_TITLES = [
+  "Influencer Marketing Manager",
+  "Creator Partnerships Manager",
+  "Brand Partnerships Manager",
+  "Affiliate Manager",
+  "PR Manager",
+  "Social Media Manager",
   "Brand Manager",
-  "Growth Marketing",
+  "Growth Marketing Manager",
   "Head of Marketing",
-  "Marketing Manager",
   "Founder",
 ];
+
+const DEFAULT_DEPARTMENTS = [
+  "Marketing",
+  "Brand Marketing",
+  "Partnerships",
+  "Public Relations",
+  "Social Media",
+];
+
+const DEFAULT_SENIORITY = ["Manager", "Director", "Head", "Founder", "Owner"];
 
 const TEMPLATE_FIELDS = [
   "first_name",
@@ -83,23 +95,22 @@ const TEMPLATE_FIELDS = [
   "sender_name",
 ] as const;
 
-const confidenceOptions = [ALL_CONFIDENCE, "High", "Medium", "Low"] as const;
-type ConfidenceFilter = (typeof confidenceOptions)[number];
-type ContactConfidence = "High" | "Medium" | "Low";
-type TemplateTarget = "subject" | "body";
-type BrandSearchStatus = "ready" | "needs-domain" | "already-found" | "existing-relationship";
-type BrandHistorySource = "Active Brands" | "Deals" | "Current search";
+const confidenceOptions = ["All confidence", "High", "Medium", "Low"] as const;
+const decisionOptions = [ALL_DECISIONS, "Approved", "Rejected", "Needs review"] as const;
+const searchTypeOptions = [
+  { value: "total", label: "Total" },
+  { value: "new", label: "Net new" },
+  { value: "saved", label: "Saved" },
+] as const;
 
-type CreatorOption = {
-  id: string;
-  label: string;
-  name: string;
-  handle: string;
-  owner: string;
-  niche: string;
-  platform: string;
-  rate: string;
-};
+type ConfidenceFilter = (typeof confidenceOptions)[number];
+type DecisionFilter = (typeof decisionOptions)[number];
+type ContactConfidence = "High" | "Medium" | "Low";
+type ContactDecision = "pending" | "approved" | "rejected";
+type TemplateTarget = "subject" | "body";
+type BrandSearchStatus = "ready" | "name-only" | "already-found" | "existing-relationship";
+type BrandHistorySource = "Active Brands" | "Deals" | "Current search";
+type SearchType = "new" | "saved" | "total";
 
 type KnownBrand = {
   name: string;
@@ -109,43 +120,64 @@ type KnownBrand = {
   hasDeals: boolean;
 };
 
-type BrandSeed = {
+type SheetBrand = {
   id: string;
+  rowNumber: number;
+  creatorName: string;
   rawName: string;
   name: string;
   domain: string;
-  creatorName: string;
   matchedKnownName: string;
   parserNote: string;
   status: BrandSearchStatus;
   statusMessage: string;
 };
 
+type BrandOverride = {
+  name?: string;
+  domain?: string;
+};
+
 type ContactCandidate = {
   id: string;
+  brandId: string;
   creatorName: string;
   brandName: string;
   domain: string;
   name: string;
+  firstName: string;
+  lastName: string;
   title: string;
   company: string;
   email: string;
   linkedin: string;
   confidence: ContactConfidence;
   reason: string;
-  source: "A-Leads CSV" | "A-Leads API";
+  source: "A-Leads API" | "A-Leads CSV";
+};
+
+type AleadsFilterState = {
+  jobTitlesText: string;
+  departmentsText: string;
+  seniorityText: string;
+  searchType: SearchType;
+  maxContactsPerBrand: number;
+  requireEmail: boolean;
+  enrichMissingEmails: boolean;
 };
 
 type SavedBrandFinderState = {
-  selectedCreatorId?: string;
-  manualCreatorName?: string;
+  sheetInput?: string;
+  sheetFileName?: string;
   senderName?: string;
-  dreamBrandInput?: string;
   subjectTemplate?: string;
   bodyTemplate?: string;
+  filters?: AleadsFilterState;
+  brandOverrides?: Record<string, BrandOverride>;
+  brandSearchOverrides?: Record<string, boolean>;
   contacts?: ContactCandidate[];
-  selectedIds?: string[];
-  preparedDraftIds?: string[];
+  contactDecisions?: Record<string, ContactDecision>;
+  gmailResults?: Record<string, GmailDraftResult>;
 };
 
 type DraftPreview = {
@@ -154,6 +186,13 @@ type DraftPreview = {
   subject: string;
   body: string;
   contact: ContactCandidate;
+};
+
+type CreatorMeta = {
+  handle: string;
+  owner: string;
+  niche: string;
+  platform: string;
 };
 
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
@@ -178,6 +217,16 @@ const COMMON_BRAND_FIXES: Record<string, string> = {
   revolve: "Revolve",
   "white fox": "White Fox",
   cider: "Cider",
+};
+
+const DEFAULT_FILTER_STATE: AleadsFilterState = {
+  jobTitlesText: DEFAULT_JOB_TITLES.join("\n"),
+  departmentsText: DEFAULT_DEPARTMENTS.join("\n"),
+  seniorityText: DEFAULT_SENIORITY.join("\n"),
+  searchType: "total",
+  maxContactsPerBrand: 3,
+  requireEmail: true,
+  enrichMissingEmails: true,
 };
 
 function normalizeText(value: string) {
@@ -281,6 +330,12 @@ function parseCsv(text: string) {
   return { headers, rows: bodyRows };
 }
 
+function normalizedHeader(value: string) {
+  return normalizeText(value)
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function parseLooseTable(text: string) {
   const cleaned = text.trim();
   if (!cleaned) return { headers: [] as string[], rows: [] as string[][] };
@@ -289,7 +344,9 @@ function parseLooseTable(text: string) {
     const [firstRow = [], ...bodyRows] = rows;
     const firstRowText = firstRow.map(normalizedHeader).join(" ");
     const looksLikeHeader =
-      /\b(creator|talent|dream brand|brand|company|website|domain|url)\b/.test(firstRowText);
+      /\b(creator|talent|influencer|handle|dream brand|brand|company|website|domain|url)\b/.test(
+        firstRowText,
+      );
 
     return looksLikeHeader
       ? { headers: firstRow, rows: bodyRows }
@@ -326,12 +383,6 @@ function parseLooseTable(text: string) {
   };
 }
 
-function normalizedHeader(value: string) {
-  return normalizeText(value)
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
 function pickColumn(headers: string[], aliases: string[], deniedTerms: string[] = []) {
   const normalizedAliases = aliases.map(normalizedHeader);
   const normalizedDenied = deniedTerms.map(normalizedHeader);
@@ -353,6 +404,34 @@ function pickColumn(headers: string[], aliases: string[], deniedTerms: string[] 
 function getCell(headers: string[], row: string[], aliases: string[], deniedTerms: string[] = []) {
   const index = pickColumn(headers, aliases, deniedTerms);
   return index >= 0 ? (row[index]?.trim() ?? "") : "";
+}
+
+function brandColumnIndexes(headers: string[]) {
+  const indexes = headers
+    .map((header, index) => ({ header: normalizedHeader(header), index }))
+    .filter(({ header }) => {
+      const looksLikeBrand =
+        header.includes("brand") ||
+        header.includes("company") ||
+        header.includes("wishlist") ||
+        header.includes("dream");
+      const denied =
+        header.includes("website") ||
+        header.includes("domain") ||
+        header.includes("url") ||
+        header.includes("email") ||
+        header.includes("creator") ||
+        header.includes("talent") ||
+        header.includes("influencer") ||
+        header.includes("handle");
+      return looksLikeBrand && !denied;
+    })
+    .map(({ index }) => index);
+
+  if (indexes.length > 0) return indexes;
+
+  const fallback = pickColumn(headers, ["dream brand", "brand", "brand name", "company"]);
+  return fallback >= 0 ? [fallback] : [];
 }
 
 function levenshtein(left: string, right: string) {
@@ -411,43 +490,15 @@ function copyToClipboard(value: string) {
   return navigator.clipboard.writeText(value);
 }
 
-function getDisplayCreatorName(creator: CreatorOption | null, manualCreatorName: string) {
-  if (creator?.id && creator.id !== MANUAL_CREATOR_ID) return creator.handle || creator.name;
-  return manualCreatorName.trim() || "Selected creator";
-}
-
-function buildCreatorOptions(
-  creators: Array<{
-    id: string;
-    handle: string;
-    owner: string;
-    niche: string;
-    platform: string;
-    estimatedRate?: string;
-  }>,
-) {
-  return [
-    {
-      id: MANUAL_CREATOR_ID,
-      label: "Manual creator",
-      name: "",
-      handle: "",
-      owner: "",
-      niche: "",
-      platform: "",
-      rate: "",
-    },
-    ...creators.map((creator) => ({
-      id: creator.id,
-      label: `${creator.handle} · ${creator.owner}`,
-      name: creator.handle.replace(/^@/, ""),
-      handle: creator.handle,
-      owner: creator.owner,
-      niche: creator.niche,
-      platform: creator.platform,
-      rate: creator.estimatedRate ?? "",
-    })),
-  ];
+function splitList(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/\r?\n|,/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function addKnownBrand(
@@ -497,21 +548,41 @@ function findKnownBrand(knownBrands: KnownBrand[], rawName: string, domain: stri
   return best && best.score >= 0.84 ? best : null;
 }
 
-function parseDreamBrands(
+function statusForBrand(options: {
+  domain: string;
+  hasSessionContacts: boolean;
+  hasKnownContacts: boolean;
+  hasKnownDeals: boolean;
+}) {
+  if (options.hasSessionContacts || options.hasKnownContacts) return "already-found";
+  if (options.hasKnownDeals) return "existing-relationship";
+  return options.domain ? "ready" : "name-only";
+}
+
+function brandStatusMessage(status: BrandSearchStatus) {
+  if (status === "already-found") {
+    return "This brand's contacts have already been found. Check email history or Active Brands before searching again.";
+  }
+  if (status === "existing-relationship") {
+    return "This brand is already in deal history. Check the relationship before searching again.";
+  }
+  if (status === "name-only") {
+    return "Search will use the brand name. Add a website if you want tighter matching.";
+  }
+  return "Ready for A-Leads search.";
+}
+
+function defaultBrandUse(status: BrandSearchStatus) {
+  return status === "ready" || status === "name-only";
+}
+
+function parseDreamSheet(
   input: string,
-  selectedCreatorName: string,
   knownBrands: KnownBrand[],
   contacts: ContactCandidate[],
-): BrandSeed[] {
+): SheetBrand[] {
   const { headers, rows } = parseLooseTable(input);
-  const creatorIndex = pickColumn(headers, ["creator", "talent", "handle", "name"]);
-  const brandIndex = pickColumn(headers, [
-    "dream brand",
-    "brand",
-    "brand name",
-    "company",
-    "company name",
-  ]);
+  const creatorIndex = pickColumn(headers, ["creator", "talent", "influencer", "handle", "name"]);
   const domainIndex = pickColumn(headers, [
     "website",
     "domain",
@@ -519,80 +590,97 @@ function parseDreamBrands(
     "company website",
     "url",
   ]);
-  const seen = new Set<string>();
-  const sessionContactBrands = new Set(contacts.map((contact) => compactKey(contact.brandName)));
+  const brandIndexes = brandColumnIndexes(headers);
+  const sessionContactBrands = new Set(
+    contacts.map((contact) => compactKey(contact.domain || contact.brandName)),
+  );
+  const parsed: SheetBrand[] = [];
 
-  return rows
-    .map((row) => {
-      const rowCreator = creatorIndex >= 0 ? (row[creatorIndex]?.trim() ?? "") : "";
-      if (
-        rowCreator &&
-        selectedCreatorName !== "Selected creator" &&
-        compactKey(rowCreator) !== compactKey(selectedCreatorName)
-      ) {
-        return null;
-      }
+  rows.forEach((row, rowIndex) => {
+    const rowCreator = creatorIndex >= 0 ? (row[creatorIndex]?.trim() ?? "") : "";
+    const creatorName = rowCreator || "Unassigned creator";
+    const rowText = row.join(" | ");
+    const explicitDomain = domainIndex >= 0 ? (row[domainIndex]?.trim() ?? "") : "";
+    const brandCells =
+      brandIndexes.length > 0
+        ? brandIndexes.map((index) => row[index]?.trim() ?? "").filter(Boolean)
+        : [
+            row.find((cell) => cell.trim() && !extractDomain(cell) && !/@/.test(cell))?.trim() ||
+              rowText,
+          ];
 
-      const fallbackLine = row.join(" | ");
-      const rawBrand =
-        (brandIndex >= 0 ? row[brandIndex]?.trim() : "") ||
-        row.find((cell) => cell.trim() && !extractDomain(cell) && !/@/.test(cell))?.trim() ||
-        fallbackLine;
-      const explicitDomain = domainIndex >= 0 ? (row[domainIndex]?.trim() ?? "") : "";
-      const extractedDomain = extractDomain(explicitDomain || fallbackLine);
+    brandCells.forEach((brandCell, brandCellIndex) => {
+      const rawBrand = brandCell.replace(extractDomain(brandCell), "").trim() || brandCell;
+      const extractedDomain = extractDomain(explicitDomain || brandCell || rowText);
       const fixedName = COMMON_BRAND_FIXES[normalizeText(rawBrand)] ?? rawBrand;
       const knownMatch = findKnownBrand(knownBrands, fixedName, extractedDomain);
       const cleanName =
         knownMatch?.brand.name || titleCase(fixedName.replace(extractedDomain, "").trim());
       const domain = knownMatch?.brand.domain || extractedDomain;
-      const key = compactKey(domain || cleanName);
-      const hasSessionContacts = sessionContactBrands.has(compactKey(cleanName));
-      const hasKnownContacts = Boolean(knownMatch?.brand.hasContacts);
-      const hasKnownDeals = Boolean(knownMatch?.brand.hasDeals);
+      const hasSessionContacts = sessionContactBrands.has(compactKey(domain || cleanName));
+      const status = statusForBrand({
+        domain,
+        hasSessionContacts,
+        hasKnownContacts: Boolean(knownMatch?.brand.hasContacts),
+        hasKnownDeals: Boolean(knownMatch?.brand.hasDeals),
+      });
       const parserNote =
         knownMatch && compactKey(knownMatch.brand.name) !== compactKey(rawBrand)
           ? `Cleaned "${rawBrand}" to "${knownMatch.brand.name}"`
           : cleanName !== rawBrand
             ? `Cleaned "${rawBrand}" to "${cleanName}"`
             : "";
-      const status: BrandSearchStatus =
-        hasSessionContacts || hasKnownContacts
-          ? "already-found"
-          : hasKnownDeals
-            ? "existing-relationship"
-            : domain
-              ? "ready"
-              : "needs-domain";
-      const statusMessage =
-        status === "already-found"
-          ? "Contacts for this brand have already been found. Check email history or Active Brands before searching again."
-          : status === "existing-relationship"
-            ? "This brand appears in deal history. Check the relationship before searching again."
-            : status === "needs-domain"
-              ? "Add a website/domain to make the A-Leads match safer."
-              : "Ready for A-Leads search.";
+      const id = compactKey([creatorName, domain || cleanName, rowIndex, brandCellIndex].join("|"));
 
-      if (!key || seen.has(key)) return null;
-      seen.add(key);
+      if (!cleanName || !id) return;
 
-      return {
-        id: key,
+      parsed.push({
+        id,
+        rowNumber: rowIndex + 2,
+        creatorName,
         rawName: rawBrand,
-        name: cleanName || rawBrand,
+        name: cleanName,
         domain,
-        creatorName: selectedCreatorName,
         matchedKnownName: knownMatch?.brand.name ?? "",
         parserNote,
         status,
-        statusMessage,
-      };
-    })
-    .filter((brand): brand is BrandSeed => brand !== null);
+        statusMessage: brandStatusMessage(status),
+      });
+    });
+  });
+
+  return parsed;
 }
 
-function findMatchingBrand(brands: BrandSeed[], company: string, domain: string): BrandSeed | null {
-  if (brands.length === 0) return null;
+function applyBrandOverrides(brands: SheetBrand[], overrides: Record<string, BrandOverride>) {
+  return brands.map((brand) => {
+    const override = overrides[brand.id];
+    if (!override) return brand;
 
+    const name = override.name?.trim() || brand.name;
+    const domain = normalizeDomain(override.domain ?? brand.domain);
+    const status =
+      brand.status === "name-only" && domain
+        ? "ready"
+        : brand.status === "ready" && !domain
+          ? "name-only"
+          : brand.status;
+
+    return {
+      ...brand,
+      name,
+      domain,
+      status,
+      statusMessage: brandStatusMessage(status),
+    };
+  });
+}
+
+function brandKey(brand: Pick<SheetBrand, "name" | "domain">) {
+  return compactKey(brand.domain || brand.name);
+}
+
+function findMatchingBrand(brands: SheetBrand[], company: string, domain: string) {
   const normalizedDomain = normalizeDomain(domain);
   if (normalizedDomain) {
     const domainMatch = brands.find((brand) => brand.domain && brand.domain === normalizedDomain);
@@ -602,10 +690,8 @@ function findMatchingBrand(brands: BrandSeed[], company: string, domain: string)
   const companyKey = compactKey(company);
   if (companyKey) {
     const companyMatch = brands.find((brand) => {
-      const brandKey = compactKey(brand.name);
-      return (
-        companyKey === brandKey || companyKey.includes(brandKey) || brandKey.includes(companyKey)
-      );
+      const key = compactKey(brand.name);
+      return companyKey === key || companyKey.includes(key) || key.includes(companyKey);
     });
     if (companyMatch) return companyMatch;
   }
@@ -635,7 +721,6 @@ function scoreContact(
   add(2, "social", [/social/]);
   add(2, "brand", [/brand/]);
   add(2, "marketing", [/marketing/]);
-  add(1, "growth/community", [/growth/, /community/]);
   add(2, "senior contact", [/\bhead\b/, /director/, /\bvp\b/, /vice president/]);
   add(1, "manager/lead", [/manager/, /\blead\b/]);
   add(1, "founder fallback", [/founder/, /owner/]);
@@ -669,88 +754,104 @@ function buildContactId(contact: Omit<ContactCandidate, "id">) {
   );
 }
 
-function parseAleadsContacts(csvText: string, brands: BrandSeed[]): ContactCandidate[] {
+function apiContactToCandidate(contact: AleadsContactResult, brand: SheetBrand): ContactCandidate {
+  const score = scoreContact(contact.title, contact.email);
+  const withoutId: Omit<ContactCandidate, "id"> = {
+    brandId: brand.id,
+    creatorName: brand.creatorName,
+    brandName: brand.name,
+    domain: contact.domain || brand.domain,
+    name: contact.name,
+    firstName: contact.firstName,
+    lastName: contact.lastName,
+    title: contact.title,
+    company: contact.company || brand.name,
+    email: contact.email,
+    linkedin: contact.linkedin,
+    confidence: score.confidence,
+    reason: `${score.reason}; matched to ${brand.domain || brand.name}`,
+    source: "A-Leads API",
+  };
+
+  return {
+    ...withoutId,
+    id: buildContactId(withoutId),
+  };
+}
+
+function expandApiContacts(apiContacts: AleadsContactResult[], brands: SheetBrand[]) {
+  return apiContacts.flatMap((contact) => {
+    const matches = brands.filter((brand) => {
+      if (contact.brandId === brand.id) return true;
+      const contactDomain = normalizeDomain(contact.domain);
+      if (contactDomain && brand.domain === contactDomain) return true;
+      return compactKey(contact.brandName) === compactKey(brand.name);
+    });
+    const usableMatches = matches.length > 0 ? matches : brands.slice(0, 1);
+    return usableMatches.map((brand) => apiContactToCandidate(contact, brand));
+  });
+}
+
+function parseAleadsContacts(csvText: string, brands: SheetBrand[]): ContactCandidate[] {
   const { headers, rows } = parseCsv(csvText);
-  const contacts = rows
+  return rows
     .map((row) => {
       const firstName = getCell(headers, row, ["first name", "firstname"]);
       const lastName = getCell(headers, row, ["last name", "lastname"]);
-      const fullName =
+      const name =
         getCell(headers, row, ["name", "full name", "contact name", "person name"]) ||
         [firstName, lastName].filter(Boolean).join(" ");
-      const title = getCell(headers, row, [
-        "job title",
-        "title",
-        "position",
-        "current title",
-        "role",
-      ]);
-      const company = getCell(headers, row, ["company", "company name", "organization", "account"]);
+      const title = getCell(headers, row, ["job title", "title", "position", "role"]);
+      const company = getCell(headers, row, ["company", "company name", "organization"]);
       const email = getCell(
         headers,
         row,
         ["email", "email address", "work email", "business email", "verified email"],
-        ["status", "valid", "verification", "confidence"],
+        ["status", "valid", "verification"],
       );
       const linkedin = getCell(headers, row, [
         "linkedin",
         "linkedin url",
         "linkedin profile",
-        "person linkedin",
         "profile url",
       ]);
       const rowDomain =
-        getCell(headers, row, [
-          "company domain",
-          "domain",
-          "website",
-          "company website",
-          "organization website",
-        ]) || extractDomain(row.join(" "));
+        getCell(headers, row, ["company domain", "domain", "website", "company website"]) ||
+        extractDomain(row.join(" "));
       const domain = normalizeDomain(rowDomain);
       const matchedBrand = findMatchingBrand(brands, company, domain);
       const brandName = matchedBrand?.name || company || domainToName(domain) || "Imported brand";
-      const brandDomain = matchedBrand?.domain || domain;
       const score = scoreContact(title, email);
-      const contactWithoutId: Omit<ContactCandidate, "id"> = {
-        creatorName: matchedBrand?.creatorName || "Selected creator",
+      const withoutId: Omit<ContactCandidate, "id"> = {
+        brandId: matchedBrand?.id || compactKey(brandName),
+        creatorName: matchedBrand?.creatorName || "Unassigned creator",
         brandName,
-        domain: brandDomain,
-        name: fullName || "Unknown contact",
+        domain: matchedBrand?.domain || domain,
+        name: name || "Unknown contact",
+        firstName,
+        lastName,
         title: title || "Title missing",
         company: company || brandName,
         email,
         linkedin,
         confidence: score.confidence,
         reason: matchedBrand
-          ? `${score.reason}; matched to ${matchedBrand.domain ? matchedBrand.domain : matchedBrand.name}`
+          ? `${score.reason}; matched to ${matchedBrand.domain || matchedBrand.name}`
           : score.reason,
         source: "A-Leads CSV",
       };
 
       return {
-        ...contactWithoutId,
-        id: buildContactId(contactWithoutId),
+        ...withoutId,
+        id: buildContactId(withoutId),
       };
     })
-    .filter(
-      (contact) =>
-        contact.name !== "Unknown contact" || contact.email || contact.title !== "Title missing",
-    );
-
-  const seen = new Set<string>();
-  return contacts.filter((contact) => {
-    if (!contact.id || seen.has(contact.id)) return false;
-    seen.add(contact.id);
-    return true;
-  });
+    .filter((contact) => contact.email || contact.name !== "Unknown contact");
 }
 
 function mergeContacts(existing: ContactCandidate[], incoming: ContactCandidate[]) {
   const byId = new Map(existing.map((contact) => [contact.id, contact]));
-  incoming.forEach((contact) => {
-    byId.set(contact.id, contact);
-  });
+  incoming.forEach((contact) => byId.set(contact.id, contact));
   return Array.from(byId.values()).sort((a, b) => {
     const confidenceOrder = { High: 0, Medium: 1, Low: 2 };
     return (
@@ -773,15 +874,17 @@ function readSavedState(): SavedBrandFinderState {
   }
 }
 
+function creatorLookupKey(value: string) {
+  return compactKey(value.replace(/^@/, ""));
+}
+
 function fillTemplate(
   template: string,
   contact: ContactCandidate,
-  creator: CreatorOption | null,
-  manualCreatorName: string,
+  creatorMeta: CreatorMeta | null,
   senderName: string,
 ) {
-  const firstName = contact.name.split(/\s+/)[0] || contact.name;
-  const creatorName = contact.creatorName || getDisplayCreatorName(creator, manualCreatorName);
+  const firstName = contact.firstName || contact.name.split(/\s+/)[0] || contact.name;
   const replacements: Record<string, string> = {
     brand_name: contact.brandName,
     company_name: contact.company,
@@ -789,12 +892,11 @@ function fillTemplate(
     first_name: firstName,
     title: contact.title,
     domain: contact.domain,
-    creator_name: creatorName || "[creator name]",
-    creator_handle: creator?.handle || creatorName || "[creator handle]",
-    creator_niche: creator?.niche || "[creator niche]",
-    creator_platform: creator?.platform || "[creator platform]",
-    creator_owner: creator?.owner || "[creator owner]",
-    creator_rate: creator?.rate || "[creator rate]",
+    creator_name: contact.creatorName || "[creator name]",
+    creator_handle: creatorMeta?.handle || contact.creatorName || "[creator handle]",
+    creator_niche: creatorMeta?.niche || "[creator niche]",
+    creator_platform: creatorMeta?.platform || "[creator platform]",
+    creator_owner: creatorMeta?.owner || "[creator owner]",
     sender_name: senderName || "[your name]",
   };
 
@@ -811,10 +913,26 @@ function statusTone(confidence: ContactConfidence) {
 
 function brandStatusTone(status: BrandSearchStatus) {
   if (status === "ready") return "border-fun-lime/50 bg-fun-lime/20 text-foreground";
-  if (status === "needs-domain") return "border-fun-yellow/60 bg-fun-yellow/20 text-foreground";
+  if (status === "name-only") return "border-fun-yellow/60 bg-fun-yellow/20 text-foreground";
   if (status === "existing-relationship")
     return "border-fun-blue/60 bg-fun-blue/20 text-foreground";
   return "border-destructive/25 bg-destructive/10 text-destructive";
+}
+
+function decisionLabel(decision: ContactDecision) {
+  if (decision === "approved") return "Approved";
+  if (decision === "rejected") return "Rejected";
+  return "Needs review";
+}
+
+function decisionTone(decision: ContactDecision) {
+  if (decision === "approved") return "bg-fun-lime/25 text-foreground";
+  if (decision === "rejected") return "bg-destructive/10 text-destructive";
+  return "bg-muted text-muted-foreground";
+}
+
+function metricValue(value: number) {
+  return value.toLocaleString();
 }
 
 function BrandFinderPage() {
@@ -823,36 +941,58 @@ function BrandFinderPage() {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const { data: dashboardData } = useQuery(dashboardSheetQuery);
   const { data: activeBrandsData } = useQuery(activeBrandsQuery);
-  const creatorOptions = useMemo(
-    () => buildCreatorOptions(dashboardData?.creators ?? []),
-    [dashboardData?.creators],
-  );
-  const [selectedCreatorId, setSelectedCreatorId] = useState(
-    saved.selectedCreatorId ?? MANUAL_CREATOR_ID,
-  );
-  const [manualCreatorName, setManualCreatorName] = useState(saved.manualCreatorName ?? "");
+  const [sheetInput, setSheetInput] = useState(saved.sheetInput ?? "");
+  const [sheetFileName, setSheetFileName] = useState(saved.sheetFileName ?? "");
   const [senderName, setSenderName] = useState(saved.senderName ?? "");
-  const [dreamBrandInput, setDreamBrandInput] = useState(saved.dreamBrandInput ?? "");
   const [subjectTemplate, setSubjectTemplate] = useState(
     saved.subjectTemplate ?? DEFAULT_SUBJECT_TEMPLATE,
   );
   const [bodyTemplate, setBodyTemplate] = useState(saved.bodyTemplate ?? DEFAULT_BODY_TEMPLATE);
   const [templateTarget, setTemplateTarget] = useState<TemplateTarget>("body");
+  const [filters, setFilters] = useState<AleadsFilterState>({
+    ...DEFAULT_FILTER_STATE,
+    ...(saved.filters ?? {}),
+  });
+  const [brandOverrides, setBrandOverrides] = useState<Record<string, BrandOverride>>(
+    saved.brandOverrides ?? {},
+  );
+  const [brandSearchOverrides, setBrandSearchOverrides] = useState<Record<string, boolean>>(
+    saved.brandSearchOverrides ?? {},
+  );
   const [csvInput, setCsvInput] = useState("");
   const [contacts, setContacts] = useState<ContactCandidate[]>(saved.contacts ?? []);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(saved.selectedIds ?? []),
+  const [contactDecisions, setContactDecisions] = useState<Record<string, ContactDecision>>(
+    saved.contactDecisions ?? {},
   );
-  const [preparedDraftIds, setPreparedDraftIds] = useState<Set<string>>(
-    () => new Set(saved.preparedDraftIds ?? []),
+  const [gmailResults, setGmailResults] = useState<Record<string, GmailDraftResult>>(
+    saved.gmailResults ?? {},
   );
   const [q, setQ] = useState("");
   const [brandFilter, setBrandFilter] = useState(ALL_BRANDS);
-  const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>(ALL_CONFIDENCE);
+  const [creatorFilter, setCreatorFilter] = useState(ALL_CREATORS);
+  const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("All confidence");
+  const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>(ALL_DECISIONS);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const selectedCreator =
-    creatorOptions.find((creator) => creator.id === selectedCreatorId) ?? creatorOptions[0] ?? null;
-  const selectedCreatorName = getDisplayCreatorName(selectedCreator, manualCreatorName);
+  const [searchMessage, setSearchMessage] = useState("");
+  const [searchError, setSearchError] = useState("");
+  const [draftError, setDraftError] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [isCreatingDrafts, setIsCreatingDrafts] = useState(false);
+
+  const creatorLookup = useMemo(() => {
+    const map = new Map<string, CreatorMeta>();
+    dashboardData?.creators.forEach((creator) => {
+      const meta = {
+        handle: creator.handle,
+        owner: creator.owner,
+        niche: creator.niche,
+        platform: creator.platform,
+      };
+      map.set(creatorLookupKey(creator.handle), meta);
+      map.set(creatorLookupKey(creator.handle.replace(/^@/, "")), meta);
+    });
+    return map;
+  }, [dashboardData?.creators]);
 
   const knownBrands = useMemo(() => {
     const map = new Map<string, KnownBrand>();
@@ -890,64 +1030,64 @@ function BrandFinderPage() {
     return Array.from(map.values());
   }, [activeBrandsData?.headers, activeBrandsData?.rows, contacts, dashboardData?.deals]);
 
-  const brands = useMemo(
-    () => parseDreamBrands(dreamBrandInput, selectedCreatorName, knownBrands, contacts),
-    [contacts, dreamBrandInput, knownBrands, selectedCreatorName],
+  const parsedBrands = useMemo(
+    () => parseDreamSheet(sheetInput, knownBrands, contacts),
+    [contacts, knownBrands, sheetInput],
   );
-  const brandsToSearch = useMemo(
-    () => brands.filter((brand) => brand.status !== "already-found"),
+  const brands = useMemo(
+    () => applyBrandOverrides(parsedBrands, brandOverrides),
+    [brandOverrides, parsedBrands],
+  );
+  const selectedSearchBrands = useMemo(
+    () =>
+      brands.filter((brand) => {
+        const override = brandSearchOverrides[brand.id];
+        return override ?? defaultBrandUse(brand.status);
+      }),
+    [brandSearchOverrides, brands],
+  );
+  const uniqueCreators = useMemo(
+    () => Array.from(new Set(brands.map((brand) => brand.creatorName))).filter(Boolean),
     [brands],
   );
-  const alreadyFoundCount = brands.filter((brand) => brand.status === "already-found").length;
-  const needsReviewCount = brands.filter(
-    (brand) => brand.status === "needs-domain" || brand.status === "existing-relationship",
-  ).length;
-  const highConfidenceCount = contacts.filter((contact) => contact.confidence === "High").length;
+  const creatorOptions = useMemo(() => [ALL_CREATORS, ...uniqueCreators], [uniqueCreators]);
   const brandOptions = useMemo(
     () => [
       ALL_BRANDS,
       ...Array.from(
-        new Set([...brands.map((brand) => brand.name), ...contacts.map((c) => c.brandName)]),
+        new Set([
+          ...brands.map((brand) => brand.name),
+          ...contacts.map((contact) => contact.brandName),
+        ]),
       )
         .filter(Boolean)
         .sort((a, b) => a.localeCompare(b)),
     ],
     [brands, contacts],
   );
-  const selectedContacts = useMemo(
-    () => contacts.filter((contact) => selectedIds.has(contact.id)),
-    [contacts, selectedIds],
+  const approvedContacts = useMemo(
+    () => contacts.filter((contact) => contactDecisions[contact.id] === "approved"),
+    [contactDecisions, contacts],
   );
+  const approvedWithEmail = approvedContacts.filter((contact) => contact.email);
   const draftPreviews: DraftPreview[] = useMemo(
     () =>
-      contacts
-        .filter((contact) => preparedDraftIds.has(contact.id))
-        .map((contact) => ({
+      approvedWithEmail.map((contact) => {
+        const creatorMeta = creatorLookup.get(creatorLookupKey(contact.creatorName)) ?? null;
+        return {
           id: contact.id,
           email: contact.email,
-          subject: fillTemplate(
-            subjectTemplate,
-            contact,
-            selectedCreator,
-            manualCreatorName,
-            senderName,
-          ),
-          body: fillTemplate(bodyTemplate, contact, selectedCreator, manualCreatorName, senderName),
+          subject: fillTemplate(subjectTemplate, contact, creatorMeta, senderName),
+          body: fillTemplate(bodyTemplate, contact, creatorMeta, senderName),
           contact,
-        })),
-    [
-      bodyTemplate,
-      contacts,
-      manualCreatorName,
-      preparedDraftIds,
-      selectedCreator,
-      senderName,
-      subjectTemplate,
-    ],
+        };
+      }),
+    [approvedWithEmail, bodyTemplate, creatorLookup, senderName, subjectTemplate],
   );
   const filteredContacts = useMemo(() => {
     const query = q.trim().toLowerCase();
     return contacts.filter((contact) => {
+      const decision = contactDecisions[contact.id] ?? "pending";
       const searchable = [
         contact.creatorName,
         contact.brandName,
@@ -963,44 +1103,57 @@ function BrandFinderPage() {
         .toLowerCase();
       const matchesQuery = !query || searchable.includes(query);
       const matchesBrand = brandFilter === ALL_BRANDS || contact.brandName === brandFilter;
+      const matchesCreator =
+        creatorFilter === ALL_CREATORS || contact.creatorName === creatorFilter;
       const matchesConfidence =
-        confidenceFilter === ALL_CONFIDENCE || contact.confidence === confidenceFilter;
-      return matchesQuery && matchesBrand && matchesConfidence;
+        confidenceFilter === "All confidence" || contact.confidence === confidenceFilter;
+      const matchesDecision =
+        decisionFilter === ALL_DECISIONS || decisionLabel(decision) === decisionFilter;
+      return matchesQuery && matchesBrand && matchesCreator && matchesConfidence && matchesDecision;
     });
-  }, [brandFilter, confidenceFilter, contacts, q]);
+  }, [brandFilter, confidenceFilter, contactDecisions, contacts, creatorFilter, decisionFilter, q]);
   const contactsByBrand = useMemo(() => {
     const map = new Map<string, number>();
     contacts.forEach((contact) => {
-      map.set(contact.brandName, (map.get(contact.brandName) ?? 0) + 1);
+      map.set(brandKey(contact), (map.get(brandKey(contact)) ?? 0) + 1);
     });
     return map;
   }, [contacts]);
-  const readySelectedCount = selectedContacts.filter((contact) => contact.email).length;
+  const alreadyFoundCount = brands.filter((brand) => brand.status === "already-found").length;
+  const needsCheckCount = brands.filter(
+    (brand) => brand.status === "name-only" || brand.status === "existing-relationship",
+  ).length;
+  const highConfidenceCount = contacts.filter((contact) => contact.confidence === "High").length;
+  const createdDraftCount = Object.values(gmailResults).filter((result) => result.ok).length;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const nextState: SavedBrandFinderState = {
-      selectedCreatorId,
-      manualCreatorName,
+      sheetInput,
+      sheetFileName,
       senderName,
-      dreamBrandInput,
       subjectTemplate,
       bodyTemplate,
+      filters,
+      brandOverrides,
+      brandSearchOverrides,
       contacts,
-      selectedIds: Array.from(selectedIds),
-      preparedDraftIds: Array.from(preparedDraftIds),
+      contactDecisions,
+      gmailResults,
     };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
   }, [
     bodyTemplate,
+    brandOverrides,
+    brandSearchOverrides,
+    contactDecisions,
     contacts,
-    dreamBrandInput,
-    manualCreatorName,
-    preparedDraftIds,
-    selectedCreatorId,
-    selectedIds,
+    filters,
+    gmailResults,
     senderName,
+    sheetFileName,
+    sheetInput,
     subjectTemplate,
   ]);
 
@@ -1032,167 +1185,473 @@ function BrandFinderPage() {
     }, 0);
   };
 
+  const handleDreamSheetFile = async (file: File | undefined) => {
+    if (!file) return;
+    const text = await file.text();
+    setSheetInput(text);
+    setSheetFileName(file.name);
+    setSearchMessage("");
+    setSearchError("");
+  };
+
+  const updateBrandOverride = (brandId: string, patch: BrandOverride) => {
+    setBrandOverrides((current) => ({
+      ...current,
+      [brandId]: {
+        ...(current[brandId] ?? {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const setBrandUse = (brandId: string, useInSearch: boolean) => {
+    setBrandSearchOverrides((current) => ({
+      ...current,
+      [brandId]: useInSearch,
+    }));
+  };
+
+  const setDecision = (contactId: string, decision: ContactDecision) => {
+    setContactDecisions((current) => ({
+      ...current,
+      [contactId]: decision,
+    }));
+  };
+
+  const approveRecommended = () => {
+    setContactDecisions((current) => {
+      const next = { ...current };
+      contacts
+        .filter((contact) => contact.email && contact.confidence !== "Low")
+        .forEach((contact) => {
+          next[contact.id] = "approved";
+        });
+      return next;
+    });
+  };
+
+  const clearDecisions = () => {
+    setContactDecisions({});
+    setGmailResults({});
+  };
+
   const importCsvText = (text: string) => {
     const imported = parseAleadsContacts(text, brands);
     setContacts((current) => mergeContacts(current, imported));
     setCsvInput("");
+    setSearchMessage(`Imported ${imported.length} contacts from CSV.`);
   };
 
-  const handleFileImport = async (file: File | undefined) => {
+  const handleContactCsvImport = async (file: File | undefined) => {
     if (!file) return;
     const text = await file.text();
     importCsvText(text);
   };
 
-  const toggleContact = (contactId: string, checked: boolean) => {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (checked) {
-        next.add(contactId);
-      } else {
-        next.delete(contactId);
-      }
-      return next;
-    });
+  const runAleadsSearch = async () => {
+    setSearchError("");
+    setSearchMessage("");
 
-    if (!checked) {
-      setPreparedDraftIds((current) => {
-        const next = new Set(current);
-        next.delete(contactId);
-        return next;
+    if (selectedSearchBrands.length === 0) {
+      setSearchError("Select at least one brand to search.");
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const result = await searchAleadsContacts({
+        data: {
+          brands: selectedSearchBrands.map((brand) => ({
+            id: brand.id,
+            creatorName: brand.creatorName,
+            name: brand.name,
+            domain: brand.domain,
+          })),
+          filters: {
+            jobTitles: splitList(filters.jobTitlesText),
+            departments: splitList(filters.departmentsText),
+            seniority: splitList(filters.seniorityText),
+            searchType: filters.searchType,
+            maxContactsPerBrand: filters.maxContactsPerBrand,
+            requireEmail: filters.requireEmail,
+            enrichMissingEmails: filters.enrichMissingEmails,
+          },
+        },
       });
+      const candidates = expandApiContacts(result.contacts, selectedSearchBrands);
+      setContacts((current) => mergeContacts(current, candidates));
+      setSearchMessage(
+        `A-Leads returned ${result.contacts.length} contacts for ${result.searchedBrands} brands.`,
+      );
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : "A-Leads search failed.");
+    } finally {
+      setIsSearching(false);
     }
   };
 
-  const selectRecommended = () => {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      contacts
-        .filter((contact) => contact.email && contact.confidence !== "Low")
-        .forEach((contact) => next.add(contact.id));
-      return next;
-    });
-  };
+  const createDrafts = async () => {
+    setDraftError("");
 
-  const clearSelections = () => {
-    setSelectedIds(new Set());
-    setPreparedDraftIds(new Set());
-  };
+    if (draftPreviews.length === 0) {
+      setDraftError("Approve at least one contact with an email first.");
+      return;
+    }
 
-  const prepareDrafts = () => {
-    setPreparedDraftIds((current) => {
-      const next = new Set(current);
-      selectedContacts
-        .filter((contact) => contact.email)
-        .forEach((contact) => next.add(contact.id));
-      return next;
-    });
+    setIsCreatingDrafts(true);
+    try {
+      const result = await createGmailDrafts({
+        data: {
+          drafts: draftPreviews.map((draft) => ({
+            id: draft.id,
+            to: draft.email,
+            subject: draft.subject,
+            body: draft.body,
+          })),
+        },
+      });
+      setGmailResults((current) => {
+        const next = { ...current };
+        result.results.forEach((item) => {
+          next[item.id] = item;
+        });
+        return next;
+      });
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : "Gmail draft creation failed.");
+    } finally {
+      setIsCreatingDrafts(false);
+    }
   };
 
   const resetWorkspace = () => {
     const confirmed = window.confirm("Clear the Brand Finder workspace?");
     if (!confirmed) return;
 
-    setSelectedCreatorId(MANUAL_CREATOR_ID);
-    setManualCreatorName("");
+    setSheetInput("");
+    setSheetFileName("");
     setSenderName("");
-    setDreamBrandInput("");
     setSubjectTemplate(DEFAULT_SUBJECT_TEMPLATE);
     setBodyTemplate(DEFAULT_BODY_TEMPLATE);
+    setFilters(DEFAULT_FILTER_STATE);
+    setBrandOverrides({});
+    setBrandSearchOverrides({});
     setCsvInput("");
     setContacts([]);
-    setSelectedIds(new Set());
-    setPreparedDraftIds(new Set());
+    setContactDecisions({});
+    setGmailResults({});
     setQ("");
     setBrandFilter(ALL_BRANDS);
-    setConfidenceFilter(ALL_CONFIDENCE);
+    setCreatorFilter(ALL_CREATORS);
+    setConfidenceFilter("All confidence");
+    setDecisionFilter(ALL_DECISIONS);
+    setSearchMessage("");
+    setSearchError("");
+    setDraftError("");
     window.localStorage.removeItem(STORAGE_KEY);
   };
 
   return (
     <div className="space-y-6">
       <AppHeader
-        title="Creator Brand Outreach"
-        subtitle="Clean dream brands, avoid duplicate searches, and prepare creator-specific drafts."
+        title="Brand Finder"
+        subtitle="Upload dream brand sheets, run A-Leads, approve contacts, and create Gmail drafts."
       />
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricTile label="Dream brands" value={brands.length.toLocaleString()} icon={Inbox} />
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <MetricTile label="Creators" value={metricValue(uniqueCreators.length)} icon={Inbox} />
         <MetricTile
-          label="Already found"
-          value={alreadyFoundCount.toLocaleString()}
-          icon={History}
+          label="Brands parsed"
+          value={metricValue(brands.length)}
+          icon={FileSpreadsheet}
         />
-        <MetricTile
-          label="Needs check"
-          value={needsReviewCount.toLocaleString()}
-          icon={AlertTriangle}
-        />
-        <MetricTile
-          label="Drafts ready"
-          value={draftPreviews.length.toLocaleString()}
-          icon={Mail}
-        />
+        <MetricTile label="Already found" value={metricValue(alreadyFoundCount)} icon={History} />
+        <MetricTile label="Contacts found" value={metricValue(contacts.length)} icon={Sparkles} />
+        <MetricTile label="Gmail drafts" value={metricValue(createdDraftCount)} icon={Mail} />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.72fr)]">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.64fr)]">
         <div className="space-y-4">
-          <div className="rounded-3xl bg-card p-6 ring-1 ring-border">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-bold">Creator setup</h2>
-                <p className="mt-1 text-xs font-medium text-muted-foreground">
-                  Select the creator before adding dream brands.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={brandsToSearch.length === 0}
-                  onClick={() =>
-                    downloadCsv("creator-dream-brands-a-leads-search.csv", [
-                      ["Creator", "Brand", "Website", "Status"],
-                      ...brandsToSearch.map((brand) => [
-                        brand.creatorName,
-                        brand.name,
-                        brand.domain,
-                        brand.status,
-                      ]),
-                    ])
-                  }
-                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Download className="h-4 w-4" />
-                  A-Leads CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await copyToClipboard(ROLE_FILTERS.join(", "));
-                    flashCopied("filters");
+          <Panel
+            title="Dream brand sheet"
+            subtitle={
+              sheetFileName ? sheetFileName : "Upload CSV/TSV export or paste Google Sheet rows."
+            }
+            action={
+              <label className="tb-action inline-flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90">
+                <Upload className="h-4 w-4" />
+                Upload sheet
+                <input
+                  type="file"
+                  accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+                  className="sr-only"
+                  onChange={(event) => {
+                    void handleDreamSheetFile(event.target.files?.[0]);
+                    event.currentTarget.value = "";
                   }}
-                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90"
-                >
-                  {copiedKey === "filters" ? (
-                    <Check className="h-4 w-4" />
-                  ) : (
-                    <Clipboard className="h-4 w-4" />
+                />
+              </label>
+            }
+          >
+            <Textarea
+              value={sheetInput}
+              onChange={(event) => {
+                setSheetInput(event.target.value);
+                setSheetFileName("");
+              }}
+              placeholder={
+                "Creator\tDream Brand 1\tDream Brand 2\tWebsite\n@creator\tRhode\tGym shark\trhodeskin.com"
+              }
+              className="min-h-40 rounded-2xl bg-background text-sm"
+            />
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-muted-foreground">
+              <span>
+                {brands.length > 0
+                  ? `${brands.length} brands parsed from ${uniqueCreators.length} creators.`
+                  : "No sheet loaded yet."}
+              </span>
+              <button
+                type="button"
+                onClick={resetWorkspace}
+                className="tb-action inline-flex h-9 items-center gap-2 rounded-2xl bg-muted px-3 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset
+              </button>
+            </div>
+          </Panel>
+
+          <Panel
+            title="Parsed brands"
+            subtitle={`${selectedSearchBrands.length} selected for A-Leads search.`}
+            action={
+              <button
+                type="button"
+                disabled={brands.length === 0}
+                onClick={() =>
+                  downloadCsv("team-billion-brand-finder-search-list.csv", [
+                    ["Use", "Creator", "Brand", "Website", "Status", "Note"],
+                    ...brands.map((brand) => [
+                      String(brandSearchOverrides[brand.id] ?? defaultBrandUse(brand.status)),
+                      brand.creatorName,
+                      brand.name,
+                      brand.domain,
+                      brand.status,
+                      brand.parserNote || brand.statusMessage,
+                    ]),
+                  ])
+                }
+                className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Download className="h-4 w-4" />
+                Export list
+              </button>
+            }
+          >
+            <div className="overflow-x-auto rounded-2xl border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="w-12 px-3 py-2.5 text-left font-medium">Use</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Creator</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Brand</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Website</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Status</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Contacts</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {brands.length === 0 && (
+                    <tr className="border-t border-border/60">
+                      <td
+                        colSpan={6}
+                        className="px-3 py-8 text-center text-sm text-muted-foreground"
+                      >
+                        Upload a dream brand sheet to start.
+                      </td>
+                    </tr>
                   )}
-                  Role filters
-                </button>
-              </div>
+                  {brands.map((brand) => {
+                    const useInSearch =
+                      brandSearchOverrides[brand.id] ?? defaultBrandUse(brand.status);
+                    return (
+                      <tr key={brand.id} className="tb-row-hover border-t border-border/60">
+                        <td className="px-3 py-3">
+                          <Checkbox
+                            checked={useInSearch}
+                            onCheckedChange={(checked) => setBrandUse(brand.id, checked === true)}
+                            aria-label={`Search ${brand.name}`}
+                          />
+                        </td>
+                        <td className="min-w-[160px] px-3 py-3 text-muted-foreground">
+                          {brand.creatorName}
+                        </td>
+                        <td className="min-w-[190px] px-3 py-3">
+                          <input
+                            value={brand.name}
+                            onChange={(event) =>
+                              updateBrandOverride(brand.id, { name: event.target.value })
+                            }
+                            className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                          {brand.parserNote && (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {brand.parserNote}
+                            </div>
+                          )}
+                        </td>
+                        <td className="min-w-[180px] px-3 py-3">
+                          <input
+                            value={brand.domain}
+                            onChange={(event) =>
+                              updateBrandOverride(brand.id, { domain: event.target.value })
+                            }
+                            placeholder="domain.com"
+                            className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                        </td>
+                        <td className="min-w-[300px] px-3 py-3">
+                          <span
+                            className={cn(
+                              "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold",
+                              brandStatusTone(brand.status),
+                            )}
+                          >
+                            {brand.status === "already-found"
+                              ? "Already found"
+                              : brand.status === "existing-relationship"
+                                ? "Seen before"
+                                : brand.status === "name-only"
+                                  ? "Name only"
+                                  : "Ready"}
+                          </span>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {brand.statusMessage}
+                          </div>
+                        </td>
+                        <td className="px-3 py-3">
+                          <span
+                            className={cn(
+                              "rounded-full px-2.5 py-1 text-xs font-bold",
+                              contactsByBrand.has(brandKey(brand))
+                                ? "bg-fun-lime/25 text-foreground"
+                                : "bg-muted text-muted-foreground",
+                            )}
+                          >
+                            {contactsByBrand.get(brandKey(brand)) ?? 0}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </div>
+
+        <div className="space-y-4">
+          <Panel
+            title="A-Leads filters"
+            subtitle="Saved locally in this browser."
+            action={
+              <button
+                type="button"
+                disabled={isSearching || selectedSearchBrands.length === 0}
+                onClick={() => void runAleadsSearch()}
+                className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSearching ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4" />
+                )}
+                Find contacts
+              </button>
+            }
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <DashboardSelectField
+                label="Search set"
+                value={filters.searchType}
+                options={[...searchTypeOptions]}
+                onChange={(value) =>
+                  setFilters((current) => ({ ...current, searchType: value as SearchType }))
+                }
+                className="sm:col-span-1"
+              />
+              <label className="text-xs font-semibold text-muted-foreground">
+                Max per brand
+                <input
+                  type="number"
+                  min={1}
+                  max={25}
+                  value={filters.maxContactsPerBrand}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      maxContactsPerBrand: Math.max(
+                        1,
+                        Math.min(25, Number(event.target.value) || 1),
+                      ),
+                    }))
+                  }
+                  className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm font-semibold text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </label>
             </div>
 
-            <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.6fr)]">
-              <DashboardSelectField
-                label="Creator"
-                value={selectedCreatorId}
-                options={creatorOptions.map((creator) => ({
-                  value: creator.id,
-                  label: creator.label,
-                }))}
-                onChange={setSelectedCreatorId}
+            <FilterTextarea
+              label="Job titles"
+              value={filters.jobTitlesText}
+              onChange={(value) => setFilters((current) => ({ ...current, jobTitlesText: value }))}
+            />
+            <FilterTextarea
+              label="Departments"
+              value={filters.departmentsText}
+              onChange={(value) =>
+                setFilters((current) => ({ ...current, departmentsText: value }))
+              }
+            />
+            <FilterTextarea
+              label="Seniority"
+              value={filters.seniorityText}
+              onChange={(value) => setFilters((current) => ({ ...current, seniorityText: value }))}
+            />
+
+            <div className="mt-4 grid gap-2">
+              <ToggleRow
+                label="Only return contacts with emails"
+                checked={filters.requireEmail}
+                onCheckedChange={(checked) =>
+                  setFilters((current) => ({ ...current, requireEmail: checked }))
+                }
               />
+              <ToggleRow
+                label="Find missing emails after search"
+                checked={filters.enrichMissingEmails}
+                onCheckedChange={(checked) =>
+                  setFilters((current) => ({ ...current, enrichMissingEmails: checked }))
+                }
+              />
+            </div>
+
+            {(searchError || searchMessage) && (
+              <div
+                className={cn(
+                  "mt-4 rounded-2xl border p-3 text-xs font-semibold",
+                  searchError
+                    ? "border-destructive/30 bg-destructive/10 text-destructive"
+                    : "border-fun-lime/50 bg-fun-lime/20 text-foreground",
+                )}
+              >
+                {searchError || searchMessage}
+              </div>
+            )}
+          </Panel>
+
+          <Panel title="Email template" subtitle="Field buttons insert into subject or body.">
+            <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-sm font-semibold">
                 Sender
                 <input
@@ -1202,308 +1661,111 @@ function BrandFinderPage() {
                   className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </label>
+              <div className="flex items-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTemplateTarget("subject")}
+                  className={cn(
+                    "tb-action h-10 flex-1 rounded-2xl px-3 text-xs font-bold",
+                    templateTarget === "subject"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  Subject
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTemplateTarget("body")}
+                  className={cn(
+                    "tb-action h-10 flex-1 rounded-2xl px-3 text-xs font-bold",
+                    templateTarget === "body"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  Body
+                </button>
+              </div>
             </div>
 
-            {selectedCreatorId === MANUAL_CREATOR_ID && (
-              <label className="mt-3 block text-sm font-semibold">
-                Creator name
-                <input
-                  value={manualCreatorName}
-                  onChange={(event) => setManualCreatorName(event.target.value)}
-                  placeholder="Creator name or handle"
-                  className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              </label>
-            )}
-
-            {selectedCreator && selectedCreator.id !== MANUAL_CREATOR_ID && (
-              <div className="mt-3 grid gap-2 rounded-2xl bg-muted/60 p-3 text-xs font-semibold text-muted-foreground sm:grid-cols-4">
-                <span>Owner: {selectedCreator.owner || "-"}</span>
-                <span>Niche: {selectedCreator.niche || "-"}</span>
-                <span>Platform: {selectedCreator.platform || "-"}</span>
-                <span>Rate: {selectedCreator.rate || "-"}</span>
-              </div>
-            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {TEMPLATE_FIELDS.map((field) => (
+                <button
+                  key={field}
+                  type="button"
+                  onClick={() => insertTemplateField(field)}
+                  className="tb-action rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  {`{{${field}}}`}
+                </button>
+              ))}
+            </div>
 
             <label className="mt-4 block text-sm font-semibold">
-              Dream brands
-              <Textarea
-                value={dreamBrandInput}
-                onChange={(event) => setDreamBrandInput(event.target.value)}
-                placeholder="Rhode | rhodeskin.com&#10;Gym shark&#10;Popi | drinkpoppi.com"
-                className="mt-1 min-h-36 rounded-2xl bg-background text-sm"
+              Subject
+              <input
+                ref={subjectRef}
+                value={subjectTemplate}
+                onChange={(event) => setSubjectTemplate(event.target.value)}
+                className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
               />
             </label>
-          </div>
 
-          <div className="rounded-3xl bg-card p-6 ring-1 ring-border">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-bold">A-Leads results</h2>
-                <p className="mt-1 text-xs font-medium text-muted-foreground">
-                  Import the contacts after A-Leads runs.
-                </p>
-              </div>
-              <label className="tb-action inline-flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90">
-                <FileSpreadsheet className="h-4 w-4" />
-                Import CSV
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="sr-only"
-                  onChange={(event) => {
-                    void handleFileImport(event.target.files?.[0]);
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </label>
-            </div>
-
-            <Textarea
-              value={csvInput}
-              onChange={(event) => setCsvInput(event.target.value)}
-              placeholder="Paste A-Leads CSV export here..."
-              className="mt-4 min-h-28 rounded-2xl bg-background text-sm"
-            />
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <div className="text-xs font-medium text-muted-foreground">
-                Contacts are matched back to the creator and dream brand.
-              </div>
-              <button
-                type="button"
-                disabled={!csvInput.trim()}
-                onClick={() => importCsvText(csvInput)}
-                className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Upload className="h-4 w-4" />
-                Import pasted CSV
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-3xl bg-card p-6 ring-1 ring-border">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-base font-bold">Email template</h2>
-              <p className="mt-1 text-xs font-medium text-muted-foreground">
-                Edit once, then prepare drafts from approved contacts.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={resetWorkspace}
-              className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <RotateCcw className="h-4 w-4" />
-              Reset
-            </button>
-          </div>
-
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setTemplateTarget("subject")}
-              className={cn(
-                "tb-action h-9 rounded-2xl px-3 text-xs font-bold",
-                templateTarget === "subject"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              Subject fields
-            </button>
-            <button
-              type="button"
-              onClick={() => setTemplateTarget("body")}
-              className={cn(
-                "tb-action h-9 rounded-2xl px-3 text-xs font-bold",
-                templateTarget === "body"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              Body fields
-            </button>
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {TEMPLATE_FIELDS.map((field) => (
-              <button
-                key={field}
-                type="button"
-                onClick={() => insertTemplateField(field)}
-                className="tb-action rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                {`{{${field}}}`}
-              </button>
-            ))}
-          </div>
-
-          <label className="mt-4 block text-sm font-semibold">
-            Subject
-            <input
-              ref={subjectRef}
-              value={subjectTemplate}
-              onChange={(event) => setSubjectTemplate(event.target.value)}
-              className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </label>
-
-          <label className="mt-4 block text-sm font-semibold">
-            Body
-            <Textarea
-              ref={bodyRef}
-              value={bodyTemplate}
-              onChange={(event) => setBodyTemplate(event.target.value)}
-              className="mt-1 min-h-64 rounded-2xl bg-background text-sm"
-            />
-          </label>
-
-          <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-xs font-medium text-muted-foreground">
-            Gmail draft creation can be wired after the A-Leads test search is stable.
-          </div>
+            <label className="mt-4 block text-sm font-semibold">
+              Body
+              <Textarea
+                ref={bodyRef}
+                value={bodyTemplate}
+                onChange={(event) => setBodyTemplate(event.target.value)}
+                className="mt-1 min-h-56 rounded-2xl bg-background text-sm"
+              />
+            </label>
+          </Panel>
         </div>
       </section>
 
-      <section className="rounded-3xl bg-card p-6 ring-1 ring-border">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-bold">Dream brand review</h2>
-            <p className="mt-1 text-xs font-medium text-muted-foreground">
-              Parser cleanup and search warnings.
-            </p>
-          </div>
-          <button
-            type="button"
-            disabled={brandsToSearch.length === 0}
-            onClick={() =>
-              downloadCsv("creator-dream-brands-a-leads-search.csv", [
-                ["Creator", "Brand", "Website", "Status", "Note"],
-                ...brandsToSearch.map((brand) => [
-                  brand.creatorName,
-                  brand.name,
-                  brand.domain,
-                  brand.status,
-                  brand.parserNote || brand.statusMessage,
-                ]),
-              ])
-            }
-            className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Download className="h-4 w-4" />
-            Export search list
-          </button>
-        </div>
-
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2.5 text-left font-medium">Brand</th>
-                <th className="px-3 py-2.5 text-left font-medium">Website</th>
-                <th className="px-3 py-2.5 text-left font-medium">Status</th>
-                <th className="px-3 py-2.5 text-left font-medium">Parser</th>
-                <th className="px-3 py-2.5 text-left font-medium">Contacts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {brands.length === 0 && (
-                <tr className="border-t border-border/60">
-                  <td colSpan={5} className="px-3 py-8 text-center text-sm text-muted-foreground">
-                    No dream brands loaded yet.
-                  </td>
-                </tr>
-              )}
-              {brands.map((brand) => (
-                <tr key={brand.id} className="tb-row-hover border-t border-border/60">
-                  <td className="min-w-[180px] px-3 py-3">
-                    <div className="font-semibold">{brand.name}</div>
-                    {brand.rawName !== brand.name && (
-                      <div className="text-xs text-muted-foreground">From: {brand.rawName}</div>
-                    )}
-                  </td>
-                  <td className="px-3 py-3 text-muted-foreground">{brand.domain || "-"}</td>
-                  <td className="min-w-[280px] px-3 py-3">
-                    <span
-                      className={cn(
-                        "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold",
-                        brandStatusTone(brand.status),
-                      )}
-                    >
-                      {brand.status === "already-found"
-                        ? "Already found"
-                        : brand.status === "existing-relationship"
-                          ? "Seen before"
-                          : brand.status === "needs-domain"
-                            ? "Needs website"
-                            : "Ready"}
-                    </span>
-                    <div className="mt-1 text-xs text-muted-foreground">{brand.statusMessage}</div>
-                  </td>
-                  <td className="min-w-[220px] px-3 py-3 text-xs text-muted-foreground">
-                    {brand.parserNote || "No cleanup needed"}
-                  </td>
-                  <td className="px-3 py-3">
-                    <span
-                      className={cn(
-                        "rounded-full px-2.5 py-1 text-xs font-bold",
-                        contactsByBrand.has(brand.name)
-                          ? "bg-fun-lime/25 text-foreground"
-                          : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {contactsByBrand.get(brand.name) ?? 0}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="rounded-3xl bg-card p-6 ring-1 ring-border">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-bold">Contact review</h2>
-            <p className="mt-1 text-xs font-medium text-muted-foreground">
-              Tick the people you want to reach.
-            </p>
-          </div>
+      <Panel
+        title="Contact approval"
+        subtitle={`${approvedContacts.length} approved, ${contacts.length} total contacts.`}
+        action={
           <div className="flex flex-wrap gap-2">
+            <label className="tb-action inline-flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground">
+              <FileSpreadsheet className="h-4 w-4" />
+              Import CSV
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="sr-only"
+                onChange={(event) => {
+                  void handleContactCsvImport(event.target.files?.[0]);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
             <button
               type="button"
               disabled={contacts.length === 0}
-              onClick={selectRecommended}
+              onClick={approveRecommended}
               className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Check className="h-4 w-4" />
-              Select recommended
+              Approve recommended
             </button>
             <button
               type="button"
-              disabled={selectedIds.size === 0}
-              onClick={clearSelections}
+              disabled={Object.keys(contactDecisions).length === 0}
+              onClick={clearDecisions}
               className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RotateCcw className="h-4 w-4" />
-              Clear selected
-            </button>
-            <button
-              type="button"
-              disabled={readySelectedCount === 0}
-              onClick={prepareDrafts}
-              className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Send className="h-4 w-4" />
-              Prepare drafts
+              Clear
             </button>
           </div>
-        </div>
-
-        <div className="mt-5 space-y-4">
-          <div className="relative min-w-[200px] flex-1">
+        }
+      >
+        <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_repeat(4,minmax(150px,0.2fr))]">
+          <div className="relative min-w-[220px]">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               value={q}
@@ -1512,34 +1774,37 @@ function BrandFinderPage() {
               className="tb-search h-10 w-full rounded-2xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
-
-          <div className="flex flex-wrap items-end gap-3">
-            <DashboardSelectField
-              label="Brand"
-              value={brandFilter}
-              options={brandOptions}
-              onChange={setBrandFilter}
-            />
-            <DashboardSelectField
-              label="Confidence"
-              value={confidenceFilter}
-              options={[...confidenceOptions]}
-              onChange={(value) => setConfidenceFilter(value as ConfidenceFilter)}
-            />
-            <div className="text-xs font-medium text-muted-foreground">
-              Showing <span className="text-foreground">{filteredContacts.length}</span> of{" "}
-              <span className="text-foreground">{contacts.length}</span> contacts ·{" "}
-              <span className="text-foreground">{selectedIds.size}</span> selected ·{" "}
-              <span className="text-foreground">{highConfidenceCount}</span> high confidence
-            </div>
-          </div>
+          <DashboardSelectField
+            label="Creator"
+            value={creatorFilter}
+            options={creatorOptions}
+            onChange={setCreatorFilter}
+          />
+          <DashboardSelectField
+            label="Brand"
+            value={brandFilter}
+            options={brandOptions}
+            onChange={setBrandFilter}
+          />
+          <DashboardSelectField
+            label="Confidence"
+            value={confidenceFilter}
+            options={[...confidenceOptions]}
+            onChange={(value) => setConfidenceFilter(value as ConfidenceFilter)}
+          />
+          <DashboardSelectField
+            label="Decision"
+            value={decisionFilter}
+            options={[...decisionOptions]}
+            onChange={(value) => setDecisionFilter(value as DecisionFilter)}
+          />
         </div>
 
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
           <table className="w-full text-sm">
             <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="w-12 px-3 py-2.5 text-left font-medium">Use</th>
+                <th className="px-3 py-2.5 text-left font-medium">Decision</th>
                 <th className="px-3 py-2.5 text-left font-medium">Creator</th>
                 <th className="px-3 py-2.5 text-left font-medium">Brand</th>
                 <th className="px-3 py-2.5 text-left font-medium">Contact</th>
@@ -1558,164 +1823,318 @@ function BrandFinderPage() {
                   </td>
                 </tr>
               )}
-              {filteredContacts.map((contact) => (
-                <tr
-                  key={contact.id}
-                  className="tb-row-hover border-t border-border/60 hover:bg-muted/40"
-                >
-                  <td className="px-3 py-3">
-                    <Checkbox
-                      checked={selectedIds.has(contact.id)}
-                      onCheckedChange={(checked) => toggleContact(contact.id, checked === true)}
-                      aria-label={`Use ${contact.name}`}
-                    />
-                  </td>
-                  <td className="min-w-[150px] px-3 py-3 text-muted-foreground">
-                    {contact.creatorName}
-                  </td>
-                  <td className="min-w-[150px] px-3 py-3">
-                    <div className="font-semibold">{contact.brandName}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {contact.domain || contact.company}
-                    </div>
-                  </td>
-                  <td className="min-w-[160px] px-3 py-3 font-medium">{contact.name}</td>
-                  <td className="min-w-[220px] px-3 py-3 text-muted-foreground">{contact.title}</td>
-                  <td className="min-w-[220px] px-3 py-3">
-                    {contact.email ? (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await copyToClipboard(contact.email);
-                          flashCopied(`email-${contact.id}`);
-                        }}
-                        className="tb-action inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-foreground hover:bg-accent"
-                      >
-                        {copiedKey === `email-${contact.id}` ? (
-                          <Check className="h-3.5 w-3.5" />
-                        ) : (
-                          <Copy className="h-3.5 w-3.5" />
+              {filteredContacts.map((contact) => {
+                const decision = contactDecisions[contact.id] ?? "pending";
+                const gmailResult = gmailResults[contact.id];
+                return (
+                  <tr key={contact.id} className="tb-row-hover border-t border-border/60">
+                    <td className="min-w-[140px] px-3 py-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          title="Approve"
+                          onClick={() => setDecision(contact.id, "approved")}
+                          className={cn(
+                            "tb-action flex h-9 w-9 items-center justify-center rounded-full border",
+                            decision === "approved"
+                              ? "border-fun-lime bg-fun-lime/35 text-foreground"
+                              : "border-border bg-background text-muted-foreground hover:bg-accent",
+                          )}
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Reject"
+                          onClick={() => setDecision(contact.id, "rejected")}
+                          className={cn(
+                            "tb-action flex h-9 w-9 items-center justify-center rounded-full border",
+                            decision === "rejected"
+                              ? "border-destructive/40 bg-destructive/15 text-destructive"
+                              : "border-border bg-background text-muted-foreground hover:bg-accent",
+                          )}
+                        >
+                          <XIcon className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <span
+                        className={cn(
+                          "mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-bold",
+                          decisionTone(decision),
                         )}
-                        {contact.email}
-                      </button>
-                    ) : (
-                      <span className="text-muted-foreground">Missing email</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-3">
-                    <span
-                      className={cn(
-                        "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold",
-                        statusTone(contact.confidence),
+                      >
+                        {decisionLabel(decision)}
+                      </span>
+                    </td>
+                    <td className="min-w-[160px] px-3 py-3 text-muted-foreground">
+                      {contact.creatorName}
+                    </td>
+                    <td className="min-w-[160px] px-3 py-3">
+                      <div className="font-semibold">{contact.brandName}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {contact.domain || contact.company}
+                      </div>
+                    </td>
+                    <td className="min-w-[170px] px-3 py-3 font-medium">{contact.name}</td>
+                    <td className="min-w-[220px] px-3 py-3 text-muted-foreground">
+                      {contact.title}
+                    </td>
+                    <td className="min-w-[220px] px-3 py-3">
+                      {contact.email ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await copyToClipboard(contact.email);
+                            flashCopied(`email-${contact.id}`);
+                          }}
+                          className="tb-action inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-foreground hover:bg-accent"
+                        >
+                          {copiedKey === `email-${contact.id}` ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                          {contact.email}
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground">Missing email</span>
                       )}
-                    >
-                      {contact.confidence}
-                    </span>
-                  </td>
-                  <td className="min-w-[260px] px-3 py-3 text-xs text-muted-foreground">
-                    {contact.reason}
-                  </td>
-                  <td className="px-3 py-3">
-                    <span
-                      className={cn(
-                        "rounded-full px-2.5 py-1 text-xs font-bold",
-                        preparedDraftIds.has(contact.id)
-                          ? "bg-fun-lime/25 text-foreground"
-                          : selectedIds.has(contact.id)
-                            ? "bg-fun-yellow/20 text-foreground"
-                            : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {preparedDraftIds.has(contact.id)
-                        ? "Ready"
-                        : selectedIds.has(contact.id)
-                          ? "Selected"
-                          : "Not selected"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span
+                        className={cn(
+                          "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold",
+                          statusTone(contact.confidence),
+                        )}
+                      >
+                        {contact.confidence}
+                      </span>
+                    </td>
+                    <td className="min-w-[260px] px-3 py-3 text-xs text-muted-foreground">
+                      {contact.reason}
+                    </td>
+                    <td className="min-w-[150px] px-3 py-3">
+                      <span
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-xs font-bold",
+                          gmailResult?.ok
+                            ? "bg-fun-lime/25 text-foreground"
+                            : gmailResult && !gmailResult.ok
+                              ? "bg-destructive/10 text-destructive"
+                              : decision === "approved"
+                                ? "bg-fun-yellow/20 text-foreground"
+                                : "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {gmailResult?.ok
+                          ? "Created"
+                          : gmailResult
+                            ? "Failed"
+                            : decision === "approved"
+                              ? "Queued"
+                              : "Not queued"}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-      </section>
 
-      <section className="rounded-3xl bg-card p-6 ring-1 ring-border">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-bold">Draft queue</h2>
-            <p className="mt-1 text-xs font-medium text-muted-foreground">
-              Review before Gmail creation.
-            </p>
+        {csvInput && (
+          <div className="mt-4 rounded-2xl border border-border bg-background p-4">
+            <Textarea
+              value={csvInput}
+              onChange={(event) => setCsvInput(event.target.value)}
+              className="min-h-28 rounded-2xl bg-background text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => importCsvText(csvInput)}
+              className="tb-action mt-3 inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"
+            >
+              <Upload className="h-4 w-4" />
+              Import pasted CSV
+            </button>
           </div>
-          <button
-            type="button"
-            disabled={draftPreviews.length === 0}
-            onClick={() =>
-              downloadCsv("creator-brand-draft-queue.csv", [
-                ["Creator", "Email", "Subject", "Body", "Brand", "Contact", "Title"],
-                ...draftPreviews.map((draft) => [
-                  draft.contact.creatorName,
-                  draft.email,
-                  draft.subject,
-                  draft.body,
-                  draft.contact.brandName,
-                  draft.contact.name,
-                  draft.contact.title,
-                ]),
-              ])
-            }
-            className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Download className="h-4 w-4" />
-            Export drafts
-          </button>
-        </div>
+        )}
+      </Panel>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <Panel
+        title="Draft queue"
+        subtitle={`${draftPreviews.length} approved contacts ready for Gmail.`}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={draftPreviews.length === 0}
+              onClick={() =>
+                downloadCsv("team-billion-gmail-draft-queue.csv", [
+                  ["Email", "Subject", "Body", "Creator", "Brand", "Contact", "Title"],
+                  ...draftPreviews.map((draft) => [
+                    draft.email,
+                    draft.subject,
+                    draft.body,
+                    draft.contact.creatorName,
+                    draft.contact.brandName,
+                    draft.contact.name,
+                    draft.contact.title,
+                  ]),
+                ])
+              }
+              className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              Export
+            </button>
+            <button
+              type="button"
+              disabled={isCreatingDrafts || draftPreviews.length === 0}
+              onClick={() => void createDrafts()}
+              className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isCreatingDrafts ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              Create Gmail drafts
+            </button>
+          </div>
+        }
+      >
+        {draftError && (
+          <div className="mb-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive">
+            {draftError}
+          </div>
+        )}
+
+        <div className="grid gap-4 lg:grid-cols-2">
           {draftPreviews.length === 0 && (
             <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm font-medium text-muted-foreground lg:col-span-2">
-              Prepared drafts will appear here.
+              Approved contacts will appear here.
             </div>
           )}
-          {draftPreviews.map((draft) => (
-            <article key={draft.id} className="rounded-2xl border border-border bg-background p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-bold">{draft.contact.brandName}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {draft.contact.creatorName} · {draft.contact.name} · {draft.email}
+          {draftPreviews.map((draft) => {
+            const gmailResult = gmailResults[draft.id];
+            return (
+              <article
+                key={draft.id}
+                className="rounded-2xl border border-border bg-background p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-bold">{draft.contact.brandName}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {draft.contact.creatorName} · {draft.contact.name} · {draft.email}
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await copyToClipboard(
+                        `To: ${draft.email}\nSubject: ${draft.subject}\n\n${draft.body}`,
+                      );
+                      flashCopied(`draft-${draft.id}`);
+                    }}
+                    className="tb-action inline-flex h-9 items-center gap-2 rounded-2xl bg-primary px-3 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                  >
+                    {copiedKey === `draft-${draft.id}` ? (
+                      <Check className="h-3.5 w-3.5" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                    Copy
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await copyToClipboard(
-                      `To: ${draft.email}\nSubject: ${draft.subject}\n\n${draft.body}`,
-                    );
-                    flashCopied(`draft-${draft.id}`);
-                  }}
-                  className="tb-action inline-flex h-9 items-center gap-2 rounded-2xl bg-primary px-3 text-xs font-semibold text-primary-foreground hover:opacity-90"
-                >
-                  {copiedKey === `draft-${draft.id}` ? (
-                    <Check className="h-3.5 w-3.5" />
-                  ) : (
-                    <Copy className="h-3.5 w-3.5" />
-                  )}
-                  Copy
-                </button>
-              </div>
-              <div className="mt-4 rounded-xl bg-card p-3 text-sm font-semibold">
-                {draft.subject}
-              </div>
-              <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-card p-3 text-sm leading-relaxed text-muted-foreground">
-                {draft.body}
-              </pre>
-            </article>
-          ))}
+                {gmailResult && (
+                  <div
+                    className={cn(
+                      "mt-3 rounded-xl p-2 text-xs font-semibold",
+                      gmailResult.ok
+                        ? "bg-fun-lime/20 text-foreground"
+                        : "bg-destructive/10 text-destructive",
+                    )}
+                  >
+                    {gmailResult.message}
+                  </div>
+                )}
+                <div className="mt-4 rounded-xl bg-card p-3 text-sm font-semibold">
+                  {draft.subject}
+                </div>
+                <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-card p-3 text-sm leading-relaxed text-muted-foreground">
+                  {draft.body}
+                </pre>
+              </article>
+            );
+          })}
         </div>
-      </section>
+      </Panel>
     </div>
+  );
+}
+
+function Panel({
+  title,
+  subtitle,
+  action,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-3xl bg-card p-6 ring-1 ring-border">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-bold">{title}</h2>
+          {subtitle && <p className="mt-1 text-xs font-medium text-muted-foreground">{subtitle}</p>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function FilterTextarea({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="mt-4 block text-sm font-semibold">
+      {label}
+      <Textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 min-h-24 rounded-2xl bg-background text-sm"
+      />
+    </label>
+  );
+}
+
+function ToggleRow({
+  label,
+  checked,
+  onCheckedChange,
+}: {
+  label: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-background px-3 py-2 text-sm font-semibold">
+      <span>{label}</span>
+      <Checkbox checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} />
+    </label>
   );
 }
 
