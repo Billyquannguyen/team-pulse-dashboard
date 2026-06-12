@@ -20,7 +20,6 @@ import { Route as ActiveBrandsRouteImport } from './routes/active-brands'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
 import { Route as ApiSlackDebugRouteImport } from './routes/api/slack-debug'
-import { Route as ApiCalendlyDiscordReminderRouteImport } from './routes/api/calendly-discord-reminder'
 
 const LeaderboardRoute = LeaderboardRouteImport.update({
   id: '/leaderboard',
@@ -77,12 +76,6 @@ const ApiSlackDebugRoute = ApiSlackDebugRouteImport.update({
   path: '/api/slack-debug',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiCalendlyDiscordReminderRoute =
-  ApiCalendlyDiscordReminderRouteImport.update({
-    id: '/api/calendly-discord-reminder',
-    path: '/api/calendly-discord-reminder',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -94,7 +87,6 @@ export interface FileRoutesByFullPath {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
-  '/api/calendly-discord-reminder': typeof ApiCalendlyDiscordReminderRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
 }
@@ -108,7 +100,6 @@ export interface FileRoutesByTo {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
-  '/api/calendly-discord-reminder': typeof ApiCalendlyDiscordReminderRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
 }
@@ -123,7 +114,6 @@ export interface FileRoutesById {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
-  '/api/calendly-discord-reminder': typeof ApiCalendlyDiscordReminderRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
 }
@@ -139,7 +129,6 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
-    | '/api/calendly-discord-reminder'
     | '/api/slack-debug'
     | '/api/slack-followups'
   fileRoutesByTo: FileRoutesByTo
@@ -153,7 +142,6 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
-    | '/api/calendly-discord-reminder'
     | '/api/slack-debug'
     | '/api/slack-followups'
   id:
@@ -167,7 +155,6 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
-    | '/api/calendly-discord-reminder'
     | '/api/slack-debug'
     | '/api/slack-followups'
   fileRoutesById: FileRoutesById
@@ -182,7 +169,6 @@ export interface RootRouteChildren {
   DiagnosticsRoute: typeof DiagnosticsRoute
   GoalsRoute: typeof GoalsRoute
   LeaderboardRoute: typeof LeaderboardRoute
-  ApiCalendlyDiscordReminderRoute: typeof ApiCalendlyDiscordReminderRoute
   ApiSlackDebugRoute: typeof ApiSlackDebugRoute
   ApiSlackFollowupsRoute: typeof ApiSlackFollowupsRoute
 }
@@ -266,13 +252,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSlackDebugRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/calendly-discord-reminder': {
-      id: '/api/calendly-discord-reminder'
-      path: '/api/calendly-discord-reminder'
-      fullPath: '/api/calendly-discord-reminder'
-      preLoaderRoute: typeof ApiCalendlyDiscordReminderRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -286,7 +265,6 @@ const rootRouteChildren: RootRouteChildren = {
   DiagnosticsRoute: DiagnosticsRoute,
   GoalsRoute: GoalsRoute,
   LeaderboardRoute: LeaderboardRoute,
-  ApiCalendlyDiscordReminderRoute: ApiCalendlyDiscordReminderRoute,
   ApiSlackDebugRoute: ApiSlackDebugRoute,
   ApiSlackFollowupsRoute: ApiSlackFollowupsRoute,
 }

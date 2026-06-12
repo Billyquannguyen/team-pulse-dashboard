@@ -1,0 +1,76 @@
+name: Calendly Discord Booking Reminders
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      send_test_notification:
+        description: "Send a test Discord notification only."
+        required: false
+        default: false
+        type: boolean
+      notify_existing_recent:
+        description: "Only for first setup: notify recent bookings instead of silently bootstrapping state."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calendly-discord-booking-reminders
+  cancel-in-progress: true
+
+jobs:
+  remind:
+    name: Check Calendly bookings and notify Discord
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CALENDLY_API_TOKEN: ${{ secrets.CALENDLY_API_TOKEN }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      CALENDLY_REMINDER_STATE_FILE: .calendly-reminder-state/processed.json
+      CALENDLY_REMINDER_SUMMARY_FILE: .calendly-reminder-state/last-run-summary.json
+      SEND_TEST_NOTIFICATION: ${{ github.event_name == 'workflow_dispatch' && inputs.send_test_notification }}
+      NOTIFY_EXISTING_RECENT: ${{ github.event_name == 'workflow_dispatch' && inputs.notify_existing_recent }}
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Restore processed booking state
+        if: ${{ env.SEND_TEST_NOTIFICATION != 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: .calendly-reminder-state
+          key: calendly-discord-reminder-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            calendly-discord-reminder-state-
+
+      - name: Check Calendly and send Discord reminders
+        id: check_calendly
+        run: node scripts/calendly-discord-reminders.mjs
+
+      - name: Save processed booking state
+        if: ${{ success() && env.SEND_TEST_NOTIFICATION != 'true' && steps.check_calendly.outputs.state_changed == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .calendly-reminder-state
+          key: calendly-discord-reminder-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload reminder summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: calendly-discord-reminder-summary
+          path: .calendly-reminder-state/last-run-summary.json
+          if-no-files-found: ignore
+          retention-days: 30
