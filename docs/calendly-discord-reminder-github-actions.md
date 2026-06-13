@@ -56,7 +56,7 @@ Required:
 
 ```text
 CALENDLY_API_TOKEN
-DISCORD_WEBHOOK_URL
+CALENDLY_DISCORD_WEBHOOK_URL
 ```
 
 ## Where To Get CALENDLY_API_TOKEN
@@ -77,7 +77,7 @@ CALENDLY_API_TOKEN
 
 Treat it like a password.
 
-## Where To Get DISCORD_WEBHOOK_URL
+## Where To Get CALENDLY_DISCORD_WEBHOOK_URL
 
 In Discord:
 
@@ -85,15 +85,17 @@ In Discord:
 Server Settings -> Integrations -> Webhooks -> New Webhook
 ```
 
-Choose the channel where reminders should appear.
+Choose the channel where Calendly reminders should appear.
 
 Copy the webhook URL.
 
 Store it in GitHub as:
 
 ```text
-DISCORD_WEBHOOK_URL
+CALENDLY_DISCORD_WEBHOOK_URL
 ```
+
+This is separate from the Gmail report Discord webhook, so Calendly reminders can go to a different channel.
 
 ## Workflow File
 

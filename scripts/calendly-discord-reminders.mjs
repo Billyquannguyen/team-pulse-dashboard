@@ -239,7 +239,7 @@ async function sendTestNotification(webhookUrl) {
 }
 
 async function main() {
-  const discordWebhookUrl = requiredEnv("DISCORD_WEBHOOK_URL");
+  const discordWebhookUrl = requiredEnv("CALENDLY_DISCORD_WEBHOOK_URL");
   const filePath = stateFilePath();
   const summaryPath =
     process.env.CALENDLY_REMINDER_SUMMARY_FILE?.trim() ||
