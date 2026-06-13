@@ -28,7 +28,9 @@ The message includes:
 - creator email
 - meeting name
 - meeting time
-- booked-at time
+- booking created time
+- workflow execution time
+- notification delay in minutes
 
 Example:
 
@@ -39,7 +41,9 @@ Creator: Example Creator
 Email: creator@example.com
 Meeting: Creator intro call
 Meeting time: 12 Jun 2026, 14:00
-Booked at: 12 Jun 2026, 09:32
+Booking created: 12 Jun 2026, 09:32 (2026-06-12T08:32:00.000Z)
+Workflow ran: 12 Jun 2026, 09:47 (2026-06-12T08:47:00.000Z)
+Notification delay: 15 minutes
 
 Please revisit Gmail, find the latest email thread for this creator, and compose a short recap for Billy.
 ```
@@ -112,6 +116,25 @@ It runs every 15 minutes:
 ```
 
 That is intentionally not every 5 minutes. Five minutes creates too many runs and can become noisy or unreliable. Fifteen minutes is a better balance for this reminder.
+
+## Timing And Duplicate Logic
+
+The workflow asks GitHub to run every 15 minutes.
+
+GitHub scheduled workflows are not real-time webhooks, so a run can start later than the exact scheduled minute.
+
+The Calendly scan uses a rolling time window:
+
+```text
+Default lookback: 48 hours
+Default lookahead: 90 days
+```
+
+The script scans active scheduled events in that window, then checks their invitees.
+
+Duplicate protection comes from the saved processed-booking state. If a booking was already processed, it should not post again.
+
+Manual reruns can post an older booking only if that booking is still inside the recent window and has not already been saved in processed state. The setup-only option for notifying existing recent bookings should normally stay unticked.
 
 ## First Run Behavior
 

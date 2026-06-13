@@ -43,6 +43,22 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function minutesBetween(startValue, endValue) {
+  if (!startValue || !endValue) return null;
+
+  const start = new Date(startValue).getTime();
+  const end = new Date(endValue).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end)) return null;
+
+  return Math.max(0, Math.round((end - start) / 60000));
+}
+
+function formatNotificationDelay(createdAt, workflowExecutedAt) {
+  const minutes = minutesBetween(createdAt, workflowExecutedAt);
+  if (minutes === null) return "Unknown";
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
 function stateFilePath() {
   return (
     process.env.CALENDLY_REMINDER_STATE_FILE?.trim() ||
@@ -190,7 +206,7 @@ function isRecentInvitee(invitee) {
   return createdAt >= Date.now() - lookbackHours * 60 * 60 * 1000;
 }
 
-function buildDiscordMessage({ event, invitee }) {
+function buildDiscordMessage({ event, invitee, workflowExecutedAt }) {
   return [
     "**New Calendly meeting booked**",
     "",
@@ -198,7 +214,9 @@ function buildDiscordMessage({ event, invitee }) {
     `Email: ${invitee.email || "Unknown"}`,
     `Meeting: ${event.name || "Calendly meeting"}`,
     `Meeting time: ${formatDateTime(event.start_time)}`,
-    `Booked at: ${formatDateTime(invitee.created_at)}`,
+    `Booking created: ${formatDateTime(invitee.created_at)} (${invitee.created_at || "unknown"})`,
+    `Workflow ran: ${formatDateTime(workflowExecutedAt)} (${workflowExecutedAt})`,
+    `Notification delay: ${formatNotificationDelay(invitee.created_at, workflowExecutedAt)}`,
     "",
     "Please revisit Gmail, find the latest email thread for this creator, and compose a short recap for Billy.",
   ].join("\n");
@@ -222,6 +240,9 @@ async function sendDiscordMessage(webhookUrl, content) {
 }
 
 async function sendTestNotification(webhookUrl) {
+  const workflowExecutedAt = nowIso();
+  const createdAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
   await sendDiscordMessage(
     webhookUrl,
     [
@@ -231,7 +252,9 @@ async function sendTestNotification(webhookUrl) {
       "Email: creator@example.com",
       "Meeting: Creator intro call",
       `Meeting time: ${formatDateTime(new Date(Date.now() + 60 * 60 * 1000).toISOString())}`,
-      `Booked at: ${formatDateTime(nowIso())}`,
+      `Booking created: ${formatDateTime(createdAt)} (${createdAt})`,
+      `Workflow ran: ${formatDateTime(workflowExecutedAt)} (${workflowExecutedAt})`,
+      `Notification delay: ${formatNotificationDelay(createdAt, workflowExecutedAt)}`,
       "",
       "Please revisit Gmail, find the latest email thread for this creator, and compose a short recap for Billy.",
     ].join("\n"),
@@ -263,6 +286,7 @@ async function main() {
     return;
   }
 
+  const workflowExecutedAt = nowIso();
   const token = requiredEnv("CALENDLY_API_TOKEN");
   const { exists: stateExists, state } = await readState(filePath);
   const user = await getCurrentCalendlyUser(token);
@@ -292,10 +316,13 @@ async function main() {
   }
 
   for (const booking of newBookings) {
-    await sendDiscordMessage(discordWebhookUrl, buildDiscordMessage(booking));
+    await sendDiscordMessage(
+      discordWebhookUrl,
+      buildDiscordMessage({ ...booking, workflowExecutedAt }),
+    );
   }
 
-  state.lastCheckedAt = nowIso();
+  state.lastCheckedAt = workflowExecutedAt;
   const stateChanged = !stateExists || processedAdded > 0;
   if (stateChanged) {
     await writeState(filePath, state);
@@ -321,6 +348,8 @@ async function main() {
       meetingName: event.name || null,
       meetingTime: event.start_time || null,
       bookedAt: invitee.created_at || null,
+      workflowExecutedAt,
+      notificationDelayMinutes: minutesBetween(invitee.created_at, workflowExecutedAt),
     })),
   };
 
