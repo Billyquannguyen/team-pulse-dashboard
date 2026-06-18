@@ -79,9 +79,37 @@ The Active Brands page reads a worksheet tab named:
 
 The page displays the columns exactly as they appear in the Sheet. It does not feed dashboard totals.
 
-## Current Workbook Assumption
+## Team Members Source
 
-Each closer/team member has their own worksheet tab.
+Team members come from a dedicated worksheet tab named:
+
+- `TeamMembers`
+
+This tab is the only source of truth for active dashboard members. Worksheet tabs are not treated as members by themselves.
+
+Required columns:
+
+- `id`
+- `displayName`
+- `shortCode`
+- `worksheetName`
+- `status`
+- `role`
+- `color`
+- `sortOrder`
+- `joinedMonth`
+- `createdAt`
+- `updatedAt`
+
+`status` can be `active` or `offboarded`. Current dashboard views use active members by default. Offboarded members can stay in the sheet for historical reporting later.
+
+`worksheetName` points to the member's deal/outreach worksheet tab. If that worksheet is missing, the dashboard shows a warning instead of replacing them with another tab.
+
+System tabs are never treated as members, including `Comm Tracking`, `Goals`, `Analytics`, `Contact Database`, `Active Brands`, `Brand Finder`, `Team Assets`, `Calendly Reminders`, and `Settings`.
+
+## Member Deal Worksheets
+
+Each active closer/team member can still have their own worksheet tab.
 
 Current member tabs:
 
@@ -90,7 +118,7 @@ Current member tabs:
 - `BNgan`
 - `LNgoc`
 
-The app auto-discovers worksheet tabs from the workbook, cleans hidden whitespace in tab names, and only treats tabs with the deal-sheet headers as member tabs.
+The app reads these tabs only when they are listed in `TeamMembers.worksheetName`.
 
 The header row is row `1` on each member tab.
 
@@ -145,7 +173,7 @@ This creates a short-lived Google access token using the service account and cal
 
 `src/lib/sheets-public.ts`
 
-This auto-discovers member tabs through the server-side API, combines the real deal rows, skips cancelled deals, and pulls member summary values from `S2`, `S4`, and `S6`.
+This reads active members from `TeamMembers`, combines the configured deal rows, skips cancelled deals, and pulls member summary values from `S2`, `S4`, and `S6`.
 
 ## Admin Goals
 

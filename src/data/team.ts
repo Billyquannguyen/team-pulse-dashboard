@@ -3,6 +3,11 @@ export type Teammate = {
   name: string;
   initials: string;
   role: string;
+  worksheetName?: string;
+  status?: "active" | "offboarded";
+  color?: string;
+  sortOrder?: number;
+  joinedMonth?: string;
   // Parsed from the member summary label/value cells in the deal worksheet.
   commission: number;
   // Parsed from the member summary label/value cells in the deal worksheet.
@@ -23,6 +28,11 @@ export const team: Teammate[] = [
     name: "KTrang",
     initials: "KT",
     role: "Closer",
+    worksheetName: "KTrang",
+    status: "active",
+    color: "#A3E635",
+    sortOrder: 10,
+    joinedMonth: "",
     commission: 84200,
     monthCommission: 31200,
     pendingOwed: 12450,
@@ -38,6 +48,11 @@ export const team: Teammate[] = [
     name: "HYen",
     initials: "HY",
     role: "Closer",
+    worksheetName: "HYen",
+    status: "active",
+    color: "#FACC15",
+    sortOrder: 20,
+    joinedMonth: "",
     commission: 69750,
     monthCommission: 24500,
     pendingOwed: 10480,
@@ -53,6 +68,11 @@ export const team: Teammate[] = [
     name: "BNgan",
     initials: "BN",
     role: "Closer",
+    worksheetName: "BNgan",
+    status: "active",
+    color: "#F9A8D4",
+    sortOrder: 30,
+    joinedMonth: "",
     commission: 61980,
     monthCommission: 22100,
     pendingOwed: 8950,
@@ -68,6 +88,11 @@ export const team: Teammate[] = [
     name: "LNgoc",
     initials: "LN",
     role: "Closer",
+    worksheetName: "LNgoc",
+    status: "active",
+    color: "#C4B5FD",
+    sortOrder: 40,
+    joinedMonth: "",
     commission: 44250,
     monthCommission: 16800,
     pendingOwed: 7200,

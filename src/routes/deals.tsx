@@ -12,6 +12,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { DashboardSelectField } from "@/components/ui/dashboard-select";
+import { team as fallbackTeam } from "@/data/team";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
 
@@ -74,18 +75,23 @@ function DealsPage() {
   const [links, setLinks] = useState<LinkFilter>("All links");
   const [page, setPage] = useState(1);
   const { data } = useQuery(dashboardSheetQuery);
-  const deals = data?.deals ?? [];
+  const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+  const deals = useMemo(() => data?.deals ?? [], [data?.deals]);
+  const team = useMemo(
+    () => data?.team ?? (canUseLocalFallback ? fallbackTeam : []),
+    [canUseLocalFallback, data?.team],
+  );
   const sourceLabel =
     data?.source === "google-sheet"
       ? "Live Google Sheet"
       : data?.source === "error"
         ? "Google Sheets connection error"
-      : data?.source === "fallback"
-        ? "Demo fallback data"
-        : "Loading Sheet";
+        : data?.source === "fallback"
+          ? "Demo fallback data"
+          : "Loading Sheet";
   const members = useMemo(
-    () => ["All members", ...uniqueSorted(deals.map((d) => d.manager))],
-    [deals],
+    () => ["All members", ...uniqueSorted(team.map((member) => member.name))],
+    [team],
   );
   const statuses = useMemo(
     () => ["All statuses", ...uniqueSorted(deals.map((d) => d.status))],
@@ -241,8 +247,18 @@ function DealsPage() {
               <Filter className="h-3.5 w-3.5" />
               Smart filters
             </div>
-            <DashboardSelectField label="Member" value={member} options={members} onChange={setMember} />
-            <DashboardSelectField label="Status" value={status} options={statuses} onChange={setStatus} />
+            <DashboardSelectField
+              label="Member"
+              value={member}
+              options={members}
+              onChange={setMember}
+            />
+            <DashboardSelectField
+              label="Status"
+              value={status}
+              options={statuses}
+              onChange={setStatus}
+            />
             <DashboardSelectField
               label="Platform"
               value={platform}
@@ -278,9 +294,8 @@ function DealsPage() {
             <span className="text-foreground">
               {showingStart}-{showingEnd}
             </span>{" "}
-            of <span className="text-foreground">{filtered.length.toLocaleString()}</span>{" "}
-            matching deals ·{" "}
-            <span className="text-foreground">{deals.length.toLocaleString()}</span> total
+            of <span className="text-foreground">{filtered.length.toLocaleString()}</span> matching
+            deals · <span className="text-foreground">{deals.length.toLocaleString()}</span> total
           </div>
         </div>
 

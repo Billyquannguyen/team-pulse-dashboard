@@ -1,9 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { getRouteApi, useRouter } from "@tanstack/react-router";
 import { LogOut, ShieldCheck, UserRound } from "lucide-react";
-import { team } from "@/data/team";
+import { team as fallbackTeam } from "@/data/team";
 import { logoutFromDashboard } from "@/lib/auth";
 import { NotificationBell } from "@/components/layout/NotificationBell";
+import { dashboardSheetQuery } from "@/lib/sheets-public";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -11,6 +13,9 @@ export function AppHeader({ title, subtitle }: { title: string; subtitle?: strin
   const router = useRouter();
   const queryClient = useQueryClient();
   const auth = rootRoute.useLoaderData();
+  const { data } = useQuery(dashboardSheetQuery);
+  const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+  const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
 
   const handleLogout = async () => {
     await logoutFromDashboard();
@@ -48,12 +53,11 @@ export function AppHeader({ title, subtitle }: { title: string; subtitle?: strin
               key={t.id}
               className="tb-hover-icon flex h-10 w-10 items-center justify-center rounded-full text-xs font-semibold ring-2 ring-background hover:z-10"
               style={{
-                background: [
-                  "var(--fun-lime)",
-                  "var(--fun-yellow)",
-                  "var(--fun-pink)",
-                  "var(--fun-purple)",
-                ][i],
+                background:
+                  t.color ??
+                  ["var(--fun-lime)", "var(--fun-yellow)", "var(--fun-pink)", "var(--fun-purple)"][
+                    i
+                  ],
               }}
             >
               {t.initials}

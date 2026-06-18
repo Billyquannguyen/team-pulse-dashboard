@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TeamMembersRouteImport } from './routes/team-members'
 import { Route as LeaderboardRouteImport } from './routes/leaderboard'
 import { Route as GoalsRouteImport } from './routes/goals'
 import { Route as DiagnosticsRouteImport } from './routes/diagnostics'
@@ -23,6 +24,11 @@ import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-follow
 import { Route as ApiSlackDebugRouteImport } from './routes/api/slack-debug'
 import { Route as ApiCalendlyRemindersWebhookRouteImport } from './routes/api/calendly-reminders/webhook'
 
+const TeamMembersRoute = TeamMembersRouteImport.update({
+  id: '/team-members',
+  path: '/team-members',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LeaderboardRoute = LeaderboardRouteImport.update({
   id: '/leaderboard',
   path: '/leaderboard',
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/team-members': typeof TeamMembersRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
@@ -116,6 +123,7 @@ export interface FileRoutesByTo {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/team-members': typeof TeamMembersRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
@@ -132,6 +140,7 @@ export interface FileRoutesById {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/team-members': typeof TeamMembersRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
@@ -149,6 +158,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/team-members'
     | '/api/slack-debug'
     | '/api/slack-followups'
     | '/api/calendly-reminders/webhook'
@@ -164,6 +174,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/team-members'
     | '/api/slack-debug'
     | '/api/slack-followups'
     | '/api/calendly-reminders/webhook'
@@ -179,6 +190,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/team-members'
     | '/api/slack-debug'
     | '/api/slack-followups'
     | '/api/calendly-reminders/webhook'
@@ -195,6 +207,7 @@ export interface RootRouteChildren {
   DiagnosticsRoute: typeof DiagnosticsRoute
   GoalsRoute: typeof GoalsRoute
   LeaderboardRoute: typeof LeaderboardRoute
+  TeamMembersRoute: typeof TeamMembersRoute
   ApiSlackDebugRoute: typeof ApiSlackDebugRoute
   ApiSlackFollowupsRoute: typeof ApiSlackFollowupsRoute
   ApiCalendlyRemindersWebhookRoute: typeof ApiCalendlyRemindersWebhookRoute
@@ -202,6 +215,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/team-members': {
+      id: '/team-members'
+      path: '/team-members'
+      fullPath: '/team-members'
+      preLoaderRoute: typeof TeamMembersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/leaderboard': {
       id: '/leaderboard'
       path: '/leaderboard'
@@ -307,6 +327,7 @@ const rootRouteChildren: RootRouteChildren = {
   DiagnosticsRoute: DiagnosticsRoute,
   GoalsRoute: GoalsRoute,
   LeaderboardRoute: LeaderboardRoute,
+  TeamMembersRoute: TeamMembersRoute,
   ApiSlackDebugRoute: ApiSlackDebugRoute,
   ApiSlackFollowupsRoute: ApiSlackFollowupsRoute,
   ApiCalendlyRemindersWebhookRoute: ApiCalendlyRemindersWebhookRoute,

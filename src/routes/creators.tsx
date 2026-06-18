@@ -6,6 +6,7 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { OutreachSummaryCard } from "@/components/dashboard/OutreachSummaryCard";
 import { DashboardSelectField } from "@/components/ui/dashboard-select";
 import { creators, type CreatorRelationship } from "@/data/creators";
+import { team as fallbackTeam } from "@/data/team";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
 
@@ -36,7 +37,14 @@ function CreatorsPage() {
   const [niche, setNiche] = useState("All niches");
   const { data } = useQuery(dashboardSheetQuery);
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
-  const liveCreators = data ? data.creators : canUseLocalFallback ? creators : [];
+  const liveCreators = useMemo(
+    () => (data ? data.creators : canUseLocalFallback ? creators : []),
+    [canUseLocalFallback, data],
+  );
+  const team = useMemo(
+    () => data?.team ?? (canUseLocalFallback ? fallbackTeam : []),
+    [canUseLocalFallback, data?.team],
+  );
   const sourceLabel =
     data?.source === "error"
       ? "Google Sheets connection error"
@@ -46,8 +54,8 @@ function CreatorsPage() {
           ? "Demo fallback data"
           : "Loading Sheet";
   const owners = useMemo(
-    () => ["All owners", ...uniqueSorted(liveCreators.map((creator) => creator.owner))],
-    [liveCreators],
+    () => ["All owners", ...uniqueSorted(team.map((member) => member.name))],
+    [team],
   );
   const platforms = useMemo(
     () => ["All platforms", ...uniqueSorted(liveCreators.map((creator) => creator.platform))],
@@ -157,14 +165,24 @@ function CreatorsPage() {
               options={["All", "Exclusive", "Non-exclusive"]}
               onChange={(value) => setRelationship(value as CreatorRelationship | "All")}
             />
-            <DashboardSelectField label="Owner" value={owner} options={owners} onChange={setOwner} />
+            <DashboardSelectField
+              label="Owner"
+              value={owner}
+              options={owners}
+              onChange={setOwner}
+            />
             <DashboardSelectField
               label="Platform"
               value={platform}
               options={platforms}
               onChange={setPlatform}
             />
-            <DashboardSelectField label="Niche" value={niche} options={niches} onChange={setNiche} />
+            <DashboardSelectField
+              label="Niche"
+              value={niche}
+              options={niches}
+              onChange={setNiche}
+            />
             {hasActiveFilters && (
               <button
                 type="button"
@@ -179,8 +197,7 @@ function CreatorsPage() {
 
           <div className="text-xs font-medium text-muted-foreground">
             Showing <span className="text-foreground">{filtered.length.toLocaleString()}</span> of{" "}
-            <span className="text-foreground">{liveCreators.length.toLocaleString()}</span>{" "}
-            creators
+            <span className="text-foreground">{liveCreators.length.toLocaleString()}</span> creators
           </div>
         </div>
 

@@ -1,8 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import {
-  IGNORED_OUTREACH_TAB_NAMES,
-  SIGNED_CREATORS_TAB_NAME,
-} from "@/data/sheetConfig";
+import { IGNORED_OUTREACH_TAB_NAMES, SIGNED_CREATORS_TAB_NAME } from "@/data/sheetConfig";
 import { team as fallbackTeam, type Teammate } from "@/data/team";
 import { deals as fallbackDeals, type Deal } from "@/data/deals";
 import { creators as fallbackCreators, type Creator } from "@/data/creators";
@@ -20,6 +17,13 @@ import {
   type OutreachRow,
 } from "@/lib/sheet-normalizer";
 import { normalizeSheetHeader } from "@/lib/sheet-headers";
+import {
+  getSystemMemberTabSkipReason,
+  getTeamMembersDataForServer,
+  isSystemMemberTabName,
+  teamMemberConfigToTeammate,
+  type TeamMemberConfig,
+} from "@/lib/team-members";
 
 type GoogleSheetsConfig = {
   serviceAccountEmail: string;
@@ -74,6 +78,14 @@ type DashboardReadDebug = {
   dealTabs?: TabMatchDiagnostic;
   outreachTabs?: TabMatchDiagnostic;
   signedCreatorsTab?: SignedCreatorsTabDiagnostic;
+  teamMembers?: {
+    configured: number;
+    active: number;
+    offboarded: number;
+    setupNeeded: boolean;
+    suggestions: string[];
+    warnings: string[];
+  };
   warnings: string[];
 };
 
@@ -166,6 +178,7 @@ export type DashboardDataFlowDiagnostics = {
     outreachCreators: number;
   };
   tabs: {
+    teamMembers: DashboardReadDebug["teamMembers"] | null;
     deals: TabMatchDiagnostic | null;
     outreach: TabMatchDiagnostic | null;
     signedCreators: SignedCreatorsTabDiagnostic | null;
@@ -196,25 +209,11 @@ const QUERY_STALE_TIME_MS = SERVER_DATA_CACHE_TTL_MS;
 const QUERY_REFETCH_INTERVAL_MS = SERVER_DATA_CACHE_TTL_MS;
 let dashboardCache: DashboardCacheEntry | null = null;
 let dashboardRefreshPromise: Promise<DashboardCacheEntry> | null = null;
-const SYSTEM_TAB_NAME_WORDS = [
-  "archive",
-  "active contacts",
-  "asset",
-  "company database",
-  "config",
-  "contacts",
-  "dashboard",
-  "database",
-  "diagnostic",
-  "ex-manager",
-  "ex managers",
-  "instruction",
-  "links",
-  "setting",
-  "summary",
-  "template",
-  "team assets",
-];
+
+export function invalidateDashboardSheetCache() {
+  dashboardCache = null;
+  dashboardRefreshPromise = null;
+}
 
 function parseMoney(value: string) {
   const number = Number(value.replace(/[$£,%A-Z\s,]/gi, ""));
@@ -226,7 +225,9 @@ function logDashboardDataFlow(message: string, details?: Record<string, unknown>
 }
 
 function isRateLimitError(error: unknown) {
-  return error instanceof Error && /Google Sheets API failed \(429\)|Quota exceeded/i.test(error.message);
+  return (
+    error instanceof Error && /Google Sheets API failed \(429\)|Quota exceeded/i.test(error.message)
+  );
 }
 
 function cacheExpiresAtLabel(entry: DashboardCacheEntry | null) {
@@ -284,14 +285,7 @@ function getSystemTabSkipReason(sheetName: string) {
     return "Ignored creator sourcing system tab.";
   }
 
-  const normalized = normalizeSheetLabel(sheetName);
-  const matchedWord = SYSTEM_TAB_NAME_WORDS.find((word) => normalized.includes(word));
-
-  if (matchedWord) {
-    return `Ignored system tab matching "${matchedWord}".`;
-  }
-
-  return null;
+  return getSystemMemberTabSkipReason(sheetName);
 }
 
 function memberMatchKey(value: string) {
@@ -446,93 +440,141 @@ async function fetchMemberSheetsRowsBatchSafely(
   }
 }
 
-async function readAutoDetectedDealMemberSheets(
+function findConfiguredSheetRef(discovered: SheetRef[], member: TeamMemberConfig): SheetRef | null {
+  const worksheetName = cleanMemberName(member.worksheetName);
+  if (!worksheetName) return null;
+
+  return (
+    discovered.find(
+      (sheet) => normalizeSheetLabel(sheet.sheetName) === normalizeSheetLabel(worksheetName),
+    ) ?? null
+  );
+}
+
+async function readConfiguredDealMemberSheets(
   config: GoogleSheetsConfig,
   spreadsheetId: string,
+  members: TeamMemberConfig[],
   debug?: DashboardReadDebug,
 ): Promise<ReadableMemberSheet[]> {
   const discovered = await discoverAllSheetRefs(config, spreadsheetId);
   const availableTabs = discovered.map((sheet) => sheet.sheetName);
   const skippedTabs: TabMatchDiagnostic["skippedTabs"] = [];
-  const candidateRefs = discovered.filter((sheet) => {
-    const skipReason = getSystemTabSkipReason(sheet.sheetName);
+  const expectedMembers = members.map((member) => member.displayName);
+  const missingExpectedMembers: string[] = [];
+  const configuredRefs: SheetRef[] = [];
 
+  for (const sheet of discovered) {
+    const skipReason = getSystemTabSkipReason(sheet.sheetName);
     if (skipReason) {
       skippedTabs.push({ sheetName: sheet.sheetName, reason: skipReason });
-      return false;
+    }
+  }
+
+  for (const member of members) {
+    const worksheetName = cleanMemberName(member.worksheetName);
+
+    if (!worksheetName) {
+      missingExpectedMembers.push(member.displayName);
+      skippedTabs.push({
+        sheetName: member.displayName,
+        reason: "Configured member has no worksheetName.",
+      });
+      continue;
     }
 
-    return true;
-  });
+    if (isSystemMemberTabName(worksheetName)) {
+      missingExpectedMembers.push(member.displayName);
+      skippedTabs.push({
+        sheetName: worksheetName,
+        reason: "Configured worksheetName points to a protected system tab.",
+      });
+      continue;
+    }
+
+    const matchedRef = findConfiguredSheetRef(discovered, member);
+
+    if (!matchedRef) {
+      missingExpectedMembers.push(member.displayName);
+      skippedTabs.push({
+        sheetName: worksheetName,
+        reason: `Configured worksheet for ${member.displayName} was not found.`,
+      });
+      continue;
+    }
+
+    configuredRefs.push({
+      ...matchedRef,
+      memberName: member.displayName,
+    });
+  }
+
   const candidateSheets = await fetchMemberSheetsRowsBatchSafely(
     config,
     spreadsheetId,
-    candidateRefs,
+    configuredRefs,
     debug,
   );
-  const byMember = new Map<string, ReadableMemberSheet>();
+  const readableSheets: ReadableMemberSheet[] = [];
 
   for (const sheet of candidateSheets) {
-    const rawSheetName = sheet.memberName;
-    const memberName = canonicalMemberName(rawSheetName);
+    const memberName = cleanMemberName(sheet.memberName);
     const missingHeaders = getMissingDealHeaders(sheet.headers);
 
     if (sheet.headers.length === 0) {
-      skippedTabs.push({ sheetName: rawSheetName, reason: "No header row found." });
+      skippedTabs.push({ sheetName: sheet.sheetName, reason: "No header row found." });
+      readableSheets.push(sheet);
       continue;
     }
 
     if (!isDealWorksheetHeader(sheet.headers)) {
       skippedTabs.push({
-        sheetName: rawSheetName,
+        sheetName: sheet.sheetName,
         reason: `Missing required deal headers: ${missingHeaders.join(", ")}.`,
       });
+      readableSheets.push(sheet);
       continue;
     }
 
-    const key = memberMatchKey(memberName);
-    if (byMember.has(key)) {
-      skippedTabs.push({
-        sheetName: rawSheetName,
-        reason: `Duplicate member tab for ${memberName}; using ${byMember.get(key)?.memberName}.`,
-      });
-      continue;
-    }
-
-    byMember.set(key, {
+    readableSheets.push({
       ...sheet,
       memberName,
     });
   }
 
-  const sheets = dedupeSheetsByContent([...byMember.values()]);
   const diagnostics: TabMatchDiagnostic = {
     spreadsheet: "deals",
     availableTabs,
-    expectedMembers: [],
-    matchedMembers: sheets.map((sheet) => ({
+    expectedMembers,
+    matchedMembers: readableSheets.map((sheet) => ({
       memberName: sheet.memberName,
       sheetName: sheet.sheetName,
     })),
-    missingExpectedMembers: [],
+    missingExpectedMembers,
     skippedTabs,
     warnings: [],
   };
 
-  if (sheets.length === 0) {
-    diagnostics.warnings.push("No member deal tabs were detected from worksheet headers.");
+  if (members.length === 0) {
+    diagnostics.warnings.push("No active TeamMembers rows are configured.");
+  } else if (readableSheets.length === 0) {
+    diagnostics.warnings.push("No configured member deal worksheets could be read.");
   }
 
-  debug && (debug.dealTabs = diagnostics);
+  if (debug) {
+    debug.dealTabs = diagnostics;
+  }
   debug?.warnings.push(...diagnostics.warnings);
 
-  logDashboardDataFlow("deal member tabs auto-detected from headers", {
+  logDashboardDataFlow("deal member tabs read from TeamMembers config", {
     availableTabs,
+    expectedMembers,
     matchedMembers: diagnostics.matchedMembers,
+    missingExpectedMembers,
     skippedTabs,
   });
 
-  return sheets;
+  return readableSheets;
 }
 
 function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fallback: Teammate) {
@@ -739,6 +781,7 @@ async function readCreatorSourcingData(
   config: GoogleSheetsConfig,
   creatorSourcingSpreadsheetId: string,
   team: Teammate[],
+  activeMembers: TeamMemberConfig[],
   debug?: DashboardReadDebug,
 ) {
   logDashboardDataFlow("loading creator sourcing data", {
@@ -751,15 +794,55 @@ async function readCreatorSourcingData(
   const signedCreatorsFound = discoveredCreatorTabs.find((sheet) =>
     isSignedCreatorsSheet(sheet.sheetName ?? sheet.memberName),
   );
-  const outreachCandidateRefs = discoveredCreatorTabs.filter((sheet) => {
+  const expectedMembers = activeMembers.map((member) => member.displayName);
+  const missingExpectedMembers: string[] = [];
+
+  discoveredCreatorTabs.forEach((sheet) => {
     const skipReason = getSystemTabSkipReason(sheet.sheetName);
 
     if (skipReason) {
       skippedOutreachTabs.push({ sheetName: sheet.sheetName, reason: skipReason });
-      return false;
+    }
+  });
+
+  const outreachCandidateRefs = activeMembers.flatMap((member) => {
+    const worksheetName = cleanMemberName(member.worksheetName);
+
+    if (!worksheetName) {
+      missingExpectedMembers.push(member.displayName);
+      skippedOutreachTabs.push({
+        sheetName: member.displayName,
+        reason: "Configured member has no worksheetName.",
+      });
+      return [];
     }
 
-    return true;
+    if (isSystemMemberTabName(worksheetName)) {
+      missingExpectedMembers.push(member.displayName);
+      skippedOutreachTabs.push({
+        sheetName: worksheetName,
+        reason: "Configured worksheetName points to a protected system tab.",
+      });
+      return [];
+    }
+
+    const matchedRef = findConfiguredSheetRef(discoveredCreatorTabs, member);
+
+    if (!matchedRef) {
+      missingExpectedMembers.push(member.displayName);
+      skippedOutreachTabs.push({
+        sheetName: worksheetName,
+        reason: `Configured outreach worksheet for ${member.displayName} was not found.`,
+      });
+      return [];
+    }
+
+    return [
+      {
+        ...matchedRef,
+        memberName: member.displayName,
+      },
+    ];
   });
   const signedCreatorsDiscovery: SignedCreatorsDiscoveryResult = {
     ref: signedCreatorsFound
@@ -810,16 +893,16 @@ async function readCreatorSourcingData(
   const outreachDiagnostics: TabMatchDiagnostic = {
     spreadsheet: "creator-sourcing",
     availableTabs,
-    expectedMembers: [],
+    expectedMembers,
     matchedMembers: [],
-    missingExpectedMembers: [],
+    missingExpectedMembers,
     skippedTabs: skippedOutreachTabs,
     warnings: [],
   };
   const readableOutreachSheets: ReadableMemberSheet[] = [];
 
   outreachCandidateRefs.forEach((sheet, index) => {
-    const memberName = canonicalMemberName(sheet.sheetName || sheet.memberName);
+    const memberName = cleanMemberName(sheet.memberName);
     const headers = creatorSheetRows[index]?.headers ?? [];
     const rows = creatorSheetRows[index]?.rows ?? [];
     const missingHeaders = getMissingOutreachHeaders(headers);
@@ -864,7 +947,9 @@ async function readCreatorSourcingData(
 
   if (readableOutreachSheets.length === 0) {
     outreachDiagnostics.warnings.push(
-      "No member outreach tabs were detected from worksheet headers.",
+      activeMembers.length === 0
+        ? "No active TeamMembers rows are configured for outreach."
+        : "No configured member outreach worksheets could be read.",
     );
   }
 
@@ -889,8 +974,10 @@ async function readCreatorSourcingData(
       signedCreatorsDiscovery.diagnostics.warning ?? warning;
   }
 
-  logDashboardDataFlow("creator sourcing tabs auto-detected from headers", {
+  logDashboardDataFlow("creator sourcing tabs read from TeamMembers config", {
+    expectedMembers,
     matchedMembers: outreachDiagnostics.matchedMembers,
+    missingExpectedMembers,
     skippedTabs: outreachDiagnostics.skippedTabs,
     warnings: outreachDiagnostics.warnings,
   });
@@ -898,7 +985,11 @@ async function readCreatorSourcingData(
   const outreachRows = readableOutreachSheets.flatMap(({ memberName, headers, rows }) =>
     normalizeMemberOutreachRows(memberName, [headers, ...rows]),
   );
-  const creators = normalizeCreatorRows([signedCreatorsRows.headers, ...signedCreatorsRows.rows]);
+  const activeMemberNames = new Set(team.map((member) => canonicalMemberName(member.name)));
+  const creators = normalizeCreatorRows([
+    signedCreatorsRows.headers,
+    ...signedCreatorsRows.rows,
+  ]).filter((creator) => activeMemberNames.has(canonicalMemberName(creator.owner)));
 
   logDashboardDataFlow("creator sourcing rows normalized", {
     outreachSheets: readableOutreachSheets.map((sheet) => ({
@@ -1003,7 +1094,28 @@ async function readDashboardSheetData(
     dealsSheetUrl: makeSheetUrl(config.teamSpreadsheetId),
     creatorSourcingSheetUrl: makeSheetUrl(config.creatorSourcingSpreadsheetId),
   };
-  const sheets = await readAutoDetectedDealMemberSheets(config, config.teamSpreadsheetId, debug);
+  const teamMembersData = await getTeamMembersDataForServer();
+  const activeMembers = teamMembersData.activeMembers;
+
+  if (debug) {
+    debug.teamMembers = {
+      configured: teamMembersData.members.length,
+      active: activeMembers.length,
+      offboarded: teamMembersData.offboardedMembers.length,
+      setupNeeded: teamMembersData.setupNeeded,
+      suggestions: teamMembersData.suggestions.map((suggestion) => suggestion.worksheetName),
+      warnings: teamMembersData.warnings,
+    };
+    debug.warnings.push(...teamMembersData.warnings);
+    if (teamMembersData.warning) debug.warnings.push(teamMembersData.warning);
+  }
+
+  const sheets = await readConfiguredDealMemberSheets(
+    config,
+    config.teamSpreadsheetId,
+    activeMembers,
+    debug,
+  );
   logDashboardDataFlow("deal sheet rows returned", {
     sheets: sheets.map((sheet) => ({
       memberName: sheet.memberName,
@@ -1021,20 +1133,28 @@ async function readDashboardSheetData(
     })),
   });
 
-  if (!sheets.some((sheet) => sheet.headers.length > 0)) {
-    throw new Error("No Google Sheet tabs with the expected deal headers could be read");
-  }
+  const validDealSheets = sheets.filter((sheet) => isDealWorksheetHeader(sheet.headers));
 
-  const deals = sheets.flatMap(({ memberName, headers, rows }) =>
+  const deals = validDealSheets.flatMap(({ memberName, headers, rows }) =>
     normalizeMemberDealRows(memberName, [headers, ...rows]),
   );
-  const baseTeam = sheets.map(({ memberName, rows }, index) =>
-    buildMemberSummary(memberName, rows, deals, getKnownFallback(memberName, index)),
+  const sheetsByMember = new Map(
+    sheets.map((sheet) => [normalizeSheetLabel(sheet.memberName), sheet]),
   );
+  const baseTeam = activeMembers.map((member, index) => {
+    const sheet = sheetsByMember.get(normalizeSheetLabel(member.displayName));
+    return buildMemberSummary(
+      member.displayName,
+      sheet?.rows ?? [],
+      deals,
+      teamMemberConfigToTeammate(member, index),
+    );
+  });
   const creatorData = await readCreatorSourcingData(
     config,
     config.creatorSourcingSpreadsheetId,
     baseTeam,
+    activeMembers,
     debug,
   );
   const team = enrichTeamWithCreatorCounts(baseTeam, creatorData.creators);
@@ -1171,8 +1291,7 @@ export async function getDashboardDataFlowDiagnostics(): Promise<DashboardDataFl
     serverCacheExpiresAt: cacheExpiresAt,
     googleFetchCache: "no-store" as const,
     staticRenderingLikely: false,
-    note:
-      "Dashboard data is loaded by a TanStack server function after login. The parsed Google Sheets result is cached server-side for 5 minutes, Google API fetches use no-store, and the client query also stays fresh for 5 minutes.",
+    note: "Dashboard data is loaded by a TanStack server function after login. The parsed Google Sheets result is cached server-side for 5 minutes, Google API fetches use no-store, and the client query also stays fresh for 5 minutes.",
   });
 
   try {
@@ -1191,7 +1310,7 @@ export async function getDashboardDataFlowDiagnostics(): Promise<DashboardDataFl
       },
       source: data.source,
       fallbackActive: data.source === "fallback",
-      fallbackReason: data.source === "fallback" ? data.error ?? "Unknown fallback reason" : null,
+      fallbackReason: data.source === "fallback" ? (data.error ?? "Unknown fallback reason") : null,
       counts: {
         teamMembers: data.team.length,
         deals: data.deals.length,
@@ -1200,6 +1319,7 @@ export async function getDashboardDataFlowDiagnostics(): Promise<DashboardDataFl
         outreachCreators: data.outreach.totals.totalCreators,
       },
       tabs: {
+        teamMembers: debug.teamMembers ?? null,
         deals: debug.dealTabs ?? null,
         outreach: debug.outreachTabs ?? null,
         signedCreators: debug.signedCreatorsTab ?? null,
@@ -1229,55 +1349,57 @@ export async function getDashboardDataFlowDiagnostics(): Promise<DashboardDataFl
         outreachCreators: 0,
       },
       tabs: {
+        teamMembers: debug.teamMembers ?? null,
         deals: debug.dealTabs ?? null,
         outreach: debug.outreachTabs ?? null,
         signedCreators: debug.signedCreatorsTab ?? null,
         warnings: debug.warnings,
       },
-      cache: makeCacheDiagnostics(dashboardCache ? "stale" : "miss", cacheExpiresAtLabel(dashboardCache)),
+      cache: makeCacheDiagnostics(
+        dashboardCache ? "stale" : "miss",
+        cacheExpiresAtLabel(dashboardCache),
+      ),
     };
   }
 }
 
-export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    logDashboardDataFlow("dashboard server function called");
-    await requireDashboardAuth();
-    const googleSheets = await getGoogleSheetsServer();
-    const links = googleSheets.getOptionalSheetLinks();
-    const productionRuntime = googleSheets.isProductionRuntime();
+export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireDashboardAuth } = await import("@/lib/auth.server");
+  logDashboardDataFlow("dashboard server function called");
+  await requireDashboardAuth();
+  const googleSheets = await getGoogleSheetsServer();
+  const links = googleSheets.getOptionalSheetLinks();
+  const productionRuntime = googleSheets.isProductionRuntime();
 
-    logDashboardDataFlow("dashboard auth passed", {
+  logDashboardDataFlow("dashboard auth passed", {
+    productionRuntime,
+  });
+
+  try {
+    const result = await getDashboardDataWithServerCache(googleSheets.getGoogleSheetsConfig());
+    return result.data;
+  } catch (error) {
+    const message = getGoogleSheetsErrorMessage(error);
+    console.error("Google Sheets dashboard access failed:", error);
+    logDashboardDataFlow("dashboard google sheets load failed", {
       productionRuntime,
+      fallbackActive: !productionRuntime,
+      reason: message,
     });
 
-    try {
-      const result = await getDashboardDataWithServerCache(googleSheets.getGoogleSheetsConfig());
-      return result.data;
-    } catch (error) {
-      const message = getGoogleSheetsErrorMessage(error);
-      console.error("Google Sheets dashboard access failed:", error);
-      logDashboardDataFlow("dashboard google sheets load failed", {
-        productionRuntime,
-        fallbackActive: !productionRuntime,
+    if (!productionRuntime) {
+      logDashboardDataFlow("using local fallback data", {
         reason: message,
       });
-
-      if (!productionRuntime) {
-        logDashboardDataFlow("using local fallback data", {
-          reason: message,
-        });
-        return fallbackDashboardData(message, links);
-      }
-
-      logDashboardDataFlow("production fallback disabled; returning visible error", {
-        reason: message,
-      });
-      return emptyDashboardData(message, links);
+      return fallbackDashboardData(message, links);
     }
-  },
-);
+
+    logDashboardDataFlow("production fallback disabled; returning visible error", {
+      reason: message,
+    });
+    return emptyDashboardData(message, links);
+  }
+});
 
 export const dashboardSheetQuery = {
   queryKey: ["team-billion-dashboard-sheet", "universal-header-parser-v1"],

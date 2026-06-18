@@ -5,6 +5,7 @@ import {
   Database,
   LinkIcon,
   SearchCheck,
+  Settings2,
   Sparkles,
   Store,
   Table2,
@@ -27,6 +28,7 @@ const items = [
   { to: "/active-brands", label: "Active Brands", icon: Store },
   { to: "/goals", label: "Goals & Analytics", icon: Target },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
+  { to: "/team-members", label: "Team Members", icon: Settings2 },
   { to: "/assets", label: "Team Assets", icon: LinkIcon },
   { to: "/contact-database", label: "Contact Database", icon: Database },
 ] as const;

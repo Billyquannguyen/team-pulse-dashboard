@@ -65,7 +65,7 @@ function TabMatchCard({
         <div>
           <h4 className="text-sm font-semibold">{title}</h4>
           <p className="text-xs text-muted-foreground">
-            Member tabs are auto-detected from worksheet headers. System tabs are ignored.
+            Member worksheets are read from TeamMembers. System tabs are never treated as members.
           </p>
         </div>
         <StatusPill ok={diagnostic.matchedMembers.length > 0} />
@@ -73,7 +73,8 @@ function TabMatchCard({
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <MetricBox label="Available tabs" value={diagnostic.availableTabs.length} />
-        <MetricBox label="Detected members" value={diagnostic.matchedMembers.length} />
+        <MetricBox label="Configured members" value={diagnostic.expectedMembers.length} />
+        <MetricBox label="Matched worksheets" value={diagnostic.matchedMembers.length} />
         <MetricBox label="Ignored tabs" value={diagnostic.skippedTabs.length} />
       </div>
 
@@ -99,6 +100,12 @@ function TabMatchCard({
         </div>
       </div>
 
+      {diagnostic.missingExpectedMembers.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-xs font-semibold">
+          Missing configured worksheet for: {diagnostic.missingExpectedMembers.join(", ")}
+        </div>
+      )}
+
       {diagnostic.skippedTabs.length > 0 && (
         <div className="mt-4 overflow-hidden rounded-2xl border border-border">
           <table className="w-full text-xs">
@@ -117,6 +124,39 @@ function TabMatchCard({
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TeamMembersDiagnosticsCard({
+  diagnostic,
+}: {
+  diagnostic: NonNullable<GoogleSheetsDiagnostics["dataFlow"]>["tabs"]["teamMembers"];
+}) {
+  if (!diagnostic) return null;
+
+  return (
+    <div className="rounded-2xl border border-border p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold">TeamMembers source</h4>
+          <p className="text-xs text-muted-foreground">
+            This is the active team source of truth. Worksheet tabs are only data references.
+          </p>
+        </div>
+        <StatusPill ok={!diagnostic.setupNeeded && diagnostic.active > 0} />
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <MetricBox label="Configured rows" value={diagnostic.configured} />
+        <MetricBox label="Active members" value={diagnostic.active} />
+        <MetricBox label="Offboarded" value={diagnostic.offboarded} />
+        <MetricBox label="Suggestions" value={diagnostic.suggestions.length} />
+      </div>
+      {diagnostic.warnings.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-xs font-semibold">
+          {diagnostic.warnings.join(" ")}
         </div>
       )}
     </div>
@@ -846,6 +886,7 @@ function DiagnosticsContent({ diagnostics }: { diagnostics: GoogleSheetsDiagnost
             )}
 
             <div className="mt-4 space-y-4">
+              <TeamMembersDiagnosticsCard diagnostic={diagnostics.dataFlow.tabs.teamMembers} />
               <TabMatchCard
                 title="Deal tab matching"
                 diagnostic={diagnostics.dataFlow.tabs.deals}
