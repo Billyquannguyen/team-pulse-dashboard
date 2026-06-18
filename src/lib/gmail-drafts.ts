@@ -18,6 +18,7 @@ export type GmailDraftResult = {
   id: string;
   ok: boolean;
   gmailDraftId: string;
+  gmailThreadId: string;
   message: string;
 };
 
@@ -101,6 +102,10 @@ async function createOneDraft(
 
   const payload = (await response.json().catch(() => null)) as {
     id?: string;
+    message?: {
+      id?: string;
+      threadId?: string;
+    };
     error?: { message?: string };
   } | null;
 
@@ -109,6 +114,7 @@ async function createOneDraft(
       id: draft.id,
       ok: false,
       gmailDraftId: "",
+      gmailThreadId: "",
       message: payload?.error?.message || `Gmail returned ${response.status}.`,
     };
   }
@@ -117,6 +123,7 @@ async function createOneDraft(
     id: draft.id,
     ok: true,
     gmailDraftId: payload.id,
+    gmailThreadId: payload.message?.threadId ?? "",
     message: "Draft created in Gmail.",
   };
 }

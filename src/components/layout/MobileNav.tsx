@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
+  Database,
   LinkIcon,
   SearchCheck,
   Store,
@@ -20,6 +21,7 @@ const items = [
   { to: "/goals", label: "Analytics", icon: Target },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
   { to: "/assets", label: "Links", icon: LinkIcon },
+  { to: "/contact-database", label: "Contacts", icon: Database },
 ] as const;
 
 export function MobileNav() {

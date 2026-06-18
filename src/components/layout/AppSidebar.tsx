@@ -2,6 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
+  Database,
   LinkIcon,
   SearchCheck,
   Sparkles,
@@ -27,6 +28,7 @@ const items = [
   { to: "/goals", label: "Goals & Analytics", icon: Target },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
   { to: "/assets", label: "Team Assets", icon: LinkIcon },
+  { to: "/contact-database", label: "Contact Database", icon: Database },
 ] as const;
 
 export function AppSidebar() {

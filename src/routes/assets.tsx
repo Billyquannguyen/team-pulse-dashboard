@@ -1,7 +1,16 @@
-import { createFileRoute, getRouteApi, useRouter } from "@tanstack/react-router";
+import { Link, createFileRoute, getRouteApi, useRouter } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useMemo, useState } from "react";
-import { AlertTriangle, ExternalLink, LinkIcon, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Database,
+  ExternalLink,
+  LinkIcon,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { AssetCard } from "@/components/assets/AssetCard";
 import type { AssetLink } from "@/data/assets";
@@ -66,7 +75,7 @@ function AssetsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data } = useQuery(teamAssetsQuery);
-  const assets = data?.assets ?? [];
+  const assets = useMemo(() => data?.assets ?? [], [data?.assets]);
   const [adminUnlocked, setAdminUnlocked] = useState(auth.isAdmin);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [password, setPassword] = useState("");
@@ -255,6 +264,13 @@ function AssetsPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/contact-database"
+              className="tb-action inline-flex items-center gap-1.5 rounded-2xl bg-muted px-4 py-2 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Database className="h-3.5 w-3.5" />
+              Contact Database
+            </Link>
             <button
               type="button"
               onClick={() => requireAdminThen("add")}
