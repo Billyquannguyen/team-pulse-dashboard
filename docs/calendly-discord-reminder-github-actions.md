@@ -1,54 +1,111 @@
-# Calendly Discord Reminder With GitHub Actions
+# Calendly Discord Reminder With Stored Rows
 
-This sends a Discord reminder when someone books a Calendly meeting.
+This sends a Discord reminder 15 minutes after a Calendly booking is created.
 
-It does not use Vercel.
-
-It does not require dashboard environment variables.
-
-It runs from GitHub Actions using GitHub Secrets.
+It is row-based, not scan-based.
 
 ## How It Works
 
 ```text
-GitHub Actions runs every 15 minutes
--> checks Calendly for active scheduled meetings
--> compares bookings against saved processed state
--> sends Discord message for new bookings only
--> saves processed state for the next run
+Calendly invitee.created webhook
+-> dashboard webhook creates or updates one reminder row
+-> reminderSendAt = bookedAt + 15 minutes
+-> GitHub Actions cron runs every 5 minutes
+-> cron reads pending reminder rows only
+-> cron sends due rows to Discord one by one
+-> each successful row is immediately marked sent
 ```
 
-The workflow also has a manual run button.
+The cron does not query Calendly.
 
-## Discord Message
+The cron does not scan historical Calendly events.
 
-The message includes:
+The webhook does not send Discord messages.
 
-- creator name
-- creator email
-- meeting name
-- meeting time
-- booking created time
-- workflow execution time
-- notification delay in minutes
+## Webhook URL
 
-Example:
+Add this URL in Calendly as an `invitee.created` webhook:
 
 ```text
-New Calendly meeting booked
-
-Creator: Example Creator
-Email: creator@example.com
-Meeting: Creator intro call
-Meeting time: 12 Jun 2026, 14:00
-Booking created: 12 Jun 2026, 09:32 (2026-06-12T08:32:00.000Z)
-Workflow ran: 12 Jun 2026, 09:47 (2026-06-12T08:47:00.000Z)
-Notification delay: 15 minutes
-
-Please revisit Gmail, find the latest email thread for this creator, and compose a short recap for Billy.
+https://YOUR-DASHBOARD-DOMAIN.com/api/calendly-reminders/webhook
 ```
 
-## Required GitHub Secrets
+Replace `YOUR-DASHBOARD-DOMAIN.com` with the live dashboard domain.
+
+## Reminder Sheet
+
+The workflow stores reminders in a Google Sheet tab called:
+
+```text
+Calendly Reminders
+```
+
+The tab is created automatically if it does not exist.
+
+Columns:
+
+```text
+id
+calendlyInviteeUri
+creatorName
+creatorEmail
+meetingName
+meetingStartTime
+bookedAt
+reminderSendAt
+status
+sentAt
+retryCount
+lastError
+```
+
+## Duplicate Protection
+
+The unique key is:
+
+```text
+calendlyInviteeUri
+```
+
+If Calendly sends the same webhook twice, the existing row is updated instead of duplicated.
+
+If a row already has:
+
+```text
+status = sent
+```
+
+it is ignored and never sent again.
+
+## Cron Selector
+
+The cron selects only rows where:
+
+```text
+status = pending
+reminderSendAt <= now
+reminderSendAt >= now - 24 hours
+```
+
+Rows older than the 24-hour due window are logged as skipped expired reminders.
+
+## GitHub Workflow
+
+The workflow is:
+
+```text
+.github/workflows/calendly-discord-reminders.yml
+```
+
+It runs every 5 minutes:
+
+```text
+*/5 * * * *
+```
+
+This is safe because it only checks stored reminder rows. It no longer calls Calendly every 5 minutes.
+
+## Required GitHub Actions Secrets
 
 Create these in:
 
@@ -59,168 +116,100 @@ GitHub -> Settings -> Secrets and variables -> Actions -> New repository secret
 Required:
 
 ```text
-CALENDLY_API_TOKEN
 CALENDLY_DISCORD_WEBHOOK_URL
+GOOGLE_SERVICE_ACCOUNT_EMAIL
+GOOGLE_PRIVATE_KEY
+CALENDLY_REMINDERS_SPREADSHEET_ID
 ```
 
-## Where To Get CALENDLY_API_TOKEN
+`CALENDLY_API_TOKEN` is not used by this reminder workflow anymore.
 
-In Calendly:
+## Required Dashboard Environment Variables
+
+The dashboard webhook also needs access to the same Google Sheet.
+
+Set these in the dashboard hosting environment:
 
 ```text
-Integrations and apps -> API and webhooks -> Personal access tokens
+GOOGLE_SERVICE_ACCOUNT_EMAIL
+GOOGLE_PRIVATE_KEY
+CALENDLY_REMINDERS_SPREADSHEET_ID
 ```
 
-Create a personal access token and copy it once.
-
-Store it in GitHub as:
+Optional:
 
 ```text
-CALENDLY_API_TOKEN
+CALENDLY_REMINDERS_SHEET_NAME
+CALENDLY_WEBHOOK_SECRET
 ```
 
-Treat it like a password.
-
-## Where To Get CALENDLY_DISCORD_WEBHOOK_URL
-
-In Discord:
+If `CALENDLY_WEBHOOK_SECRET` is set, the webhook requires the same value in one of these places:
 
 ```text
-Server Settings -> Integrations -> Webhooks -> New Webhook
+x-calendly-webhook-secret header
+x-webhook-secret header
+?secret=YOUR_SECRET query parameter
 ```
 
-Choose the channel where Calendly reminders should appear.
+## Discord Message
 
-Copy the webhook URL.
-
-Store it in GitHub as:
+The Discord message includes:
 
 ```text
-CALENDLY_DISCORD_WEBHOOK_URL
+Creator
+Email
+Meeting
+Meeting time
+Booking created
+Reminder due
+Workflow ran
+Notification delay
 ```
 
-This is separate from the Gmail report Discord webhook, so Calendly reminders can go to a different channel.
+## Cron Logging
 
-## Workflow File
-
-The workflow is:
+Each run logs:
 
 ```text
-.github/workflows/calendly-discord-reminders.yml
+now
+totalPendingReminders
+dueRemindersSelected
+skippedExpiredReminders
+skippedExpiredReminderIds
+sentReminderIds
+failedReminderIds
 ```
 
-It runs every 15 minutes:
+The same summary is uploaded as the GitHub Actions artifact:
 
 ```text
-*/15 * * * *
+calendly-discord-reminder-summary
 ```
 
-That is intentionally not every 5 minutes. Five minutes creates too many runs and can become noisy or unreliable. Fifteen minutes is a better balance for this reminder.
+## Validation Logic
 
-## Timing And Duplicate Logic
-
-The workflow asks GitHub to run every 15 minutes.
-
-GitHub scheduled workflows are not real-time webhooks, so a run can start later than the exact scheduled minute.
-
-The Calendly scan uses a rolling time window:
+Local validation is available:
 
 ```text
-Default lookback: 48 hours
-Default lookahead: 90 days
+node scripts/calendly-discord-reminders.mjs --self-test
 ```
 
-The script scans active scheduled events in that window, then checks their invitees.
-
-Duplicate protection comes from the saved processed-booking state. If a booking was already processed, it should not post again.
-
-Manual reruns can post an older booking only if that booking is still inside the recent window and has not already been saved in processed state. The setup-only option for notifying existing recent bookings should normally stay unticked.
-
-## First Run Behavior
-
-The first real run silently records existing active bookings so the team does not get spammed with old meetings.
-
-After that, only new bookings are sent to Discord.
-
-If you want to test Discord, use the test option instead.
-
-## Test The Discord Notification
-
-Go to:
+Expected behavior:
 
 ```text
-GitHub -> Actions -> Calendly Discord Booking Reminders -> Run workflow
+Fake booking A booked at 10:00 -> reminderSendAt 10:15
+Fake booking B booked at 10:30 -> reminderSendAt 10:45
+Cron at 10:16 -> only A sends
+Cron at 10:46 -> only B sends
+Cron at 10:47 -> nothing sends
 ```
 
-Tick:
+## What This Fixes
 
-```text
-Send a test Discord notification only.
-```
+The old workflow scanned Calendly for bookings and could send several discovered bookings together.
 
-Then click:
+The new workflow cannot blast historical Calendly bookings because it never queries Calendly.
 
-```text
-Run workflow
-```
+Calendly creates rows.
 
-Expected result:
-
-- GitHub run succeeds
-- Discord receives a test Calendly reminder
-- No Calendly data is processed
-
-## Manually Check For New Bookings
-
-Go to:
-
-```text
-GitHub -> Actions -> Calendly Discord Booking Reminders -> Run workflow
-```
-
-Leave both checkboxes unticked.
-
-Click:
-
-```text
-Run workflow
-```
-
-This checks Calendly immediately.
-
-## If You Want To Notify Existing Recent Bookings
-
-Only use this during first setup if you want Discord to receive reminders for bookings that already exist.
-
-Go to manual run and tick:
-
-```text
-Only for first setup: notify recent bookings instead of silently bootstrapping state.
-```
-
-Usually, leave this unticked.
-
-## State And Duplicate Protection
-
-The workflow stores processed bookings in GitHub Actions cache.
-
-That means:
-
-- old bookings are not posted twice
-- the dashboard does not need to stay online
-- Vercel is not involved
-- Codex is not involved after the workflow is committed
-
-## Files Added
-
-```text
-.github/workflows/calendly-discord-reminders.yml
-scripts/calendly-discord-reminders.mjs
-docs/calendly-discord-reminder-github-actions.md
-```
-
-## Files Removed
-
-The previous Vercel API route was removed.
-
-No Vercel environment variables are required for this feature.
+GitHub Actions sends due rows.

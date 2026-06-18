@@ -1,14 +1,30 @@
 #!/usr/bin/env node
 
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import assert from "node:assert/strict";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
-const CALENDLY_API_BASE = "https://api.calendly.com";
-const DEFAULT_LOOKBACK_HOURS = 48;
-const DEFAULT_LOOKAHEAD_DAYS = 90;
-const MAX_STATE_ITEMS = 5000;
+const SCOPES = {
+  sheets: "https://www.googleapis.com/auth/spreadsheets",
+};
+
+const DEFAULT_SHEET_NAME = "Calendly Reminders";
+const DUE_WINDOW_HOURS = 24;
+const REMINDER_HEADERS = [
+  "id",
+  "calendlyInviteeUri",
+  "creatorName",
+  "creatorEmail",
+  "meetingName",
+  "meetingStartTime",
+  "bookedAt",
+  "reminderSendAt",
+  "status",
+  "sentAt",
+  "retryCount",
+  "lastError",
+];
 
 function nowIso() {
   return new Date().toISOString();
@@ -20,15 +36,20 @@ function requiredEnv(name) {
   return value;
 }
 
-function optionalIntegerEnv(name, fallback) {
-  const value = process.env[name]?.trim();
-  if (!value) return fallback;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+function normalizePrivateKey(value) {
+  return value.replace(/^"|"$/g, "").replace(/\\n/g, "\n").trim();
 }
 
-function boolEnv(name) {
-  return ["1", "true", "yes"].includes((process.env[name] ?? "").trim().toLowerCase());
+function getSpreadsheetId() {
+  return (
+    process.env.CALENDLY_REMINDERS_SPREADSHEET_ID?.trim() ||
+    process.env.TEAM_BILLION_SPREADSHEET_ID?.trim() ||
+    requiredEnv("CALENDLY_REMINDERS_SPREADSHEET_ID")
+  );
+}
+
+function getSheetName() {
+  return process.env.CALENDLY_REMINDERS_SHEET_NAME?.trim() || DEFAULT_SHEET_NAME;
 }
 
 function formatDateTime(value) {
@@ -53,170 +74,260 @@ function minutesBetween(startValue, endValue) {
   return Math.max(0, Math.round((end - start) / 60000));
 }
 
-function formatNotificationDelay(createdAt, workflowExecutedAt) {
-  const minutes = minutesBetween(createdAt, workflowExecutedAt);
+function delayLabel(createdAt, sentAt) {
+  const minutes = minutesBetween(createdAt, sentAt);
   if (minutes === null) return "Unknown";
   return `${minutes} minute${minutes === 1 ? "" : "s"}`;
 }
 
-function stateFilePath() {
-  return (
-    process.env.CALENDLY_REMINDER_STATE_FILE?.trim() ||
-    path.join(".calendly-reminder-state", "processed.json")
+function base64Url(input) {
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function pemToBuffer(pem) {
+  return Buffer.from(
+    pem
+      .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+      .replace(/-----END PRIVATE KEY-----/g, "")
+      .replace(/\s/g, ""),
+    "base64",
   );
 }
 
-async function readState(filePath) {
-  if (!existsSync(filePath)) {
-    return {
-      exists: false,
-      state: {
-        version: 1,
-        createdAt: nowIso(),
-        lastCheckedAt: null,
-        processedInvitees: {},
-      },
-    };
+async function signJwt(config) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "RS256", typ: "JWT" };
+  const payload = {
+    iss: config.serviceAccountEmail,
+    scope: SCOPES.sheets,
+    aud: "https://oauth2.googleapis.com/token",
+    exp: now + 3600,
+    iat: now,
+  };
+  const encodedHeader = base64Url(JSON.stringify(header));
+  const encodedPayload = base64Url(JSON.stringify(payload));
+  const unsignedToken = `${encodedHeader}.${encodedPayload}`;
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pemToBuffer(config.privateKey),
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    new TextEncoder().encode(unsignedToken),
+  );
+
+  return `${unsignedToken}.${base64Url(new Uint8Array(signature))}`;
+}
+
+async function getAccessToken(config) {
+  const assertion = await signJwt(config);
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok || !result.access_token) {
+    throw new Error(
+      `Google service account auth failed (${response.status}): ${
+        result.error_description || result.error || "No access token returned"
+      }`,
+    );
   }
 
-  const raw = await readFile(filePath, "utf8");
-  const parsed = JSON.parse(raw);
-
-  return {
-    exists: true,
-    state: {
-      version: 1,
-      createdAt: parsed.createdAt || nowIso(),
-      lastCheckedAt: parsed.lastCheckedAt || null,
-      processedInvitees: parsed.processedInvitees || {},
-    },
-  };
+  return result.access_token;
 }
 
-async function writeState(filePath, state) {
-  const entries = Object.entries(state.processedInvitees)
-    .sort((a, b) => String(b[1]).localeCompare(String(a[1])))
-    .slice(0, MAX_STATE_ITEMS);
-
-  const compactState = {
-    ...state,
-    processedInvitees: Object.fromEntries(entries),
-  };
-
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(compactState, null, 2)}\n`);
+function quoteSheet(sheetName) {
+  return `'${sheetName.replace(/'/g, "''")}'`;
 }
 
-async function writeSummary(filePath, summary) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(summary, null, 2)}\n`);
+function columnName(index) {
+  let column = "";
+  let current = index + 1;
+
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    column = String.fromCharCode(65 + remainder) + column;
+    current = Math.floor((current - 1) / 26);
+  }
+
+  return column;
 }
 
-async function writeGithubOutputs(outputs) {
-  if (!process.env.GITHUB_OUTPUT) return;
-
-  const lines = Object.entries(outputs).map(([key, value]) => `${key}=${value}`);
-  await appendFile(process.env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
-}
-
-async function calendlyFetch(url, token) {
-  const response = await fetch(url, {
+async function googleFetch(config, url, init = {}) {
+  const response = await fetch(url.toString(), {
+    ...init,
     headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
+      ...init.headers,
+      authorization: `Bearer ${await getAccessToken(config)}`,
     },
   });
-
-  const text = await response.text();
-  const json = text ? JSON.parse(text) : {};
+  const body = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(`Calendly API failed (${response.status}) ${url}: ${text}`);
+    throw new Error(
+      `Google Sheets API failed (${response.status}) ${url.pathname}: ${body.error?.message || response.statusText}`,
+    );
   }
 
-  return json;
+  return body;
 }
 
-async function fetchAllPages(firstUrl, token) {
-  const items = [];
-  let nextUrl = firstUrl;
+async function getSpreadsheetMetadata(config) {
+  const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}`);
+  url.searchParams.set("includeGridData", "false");
+  url.searchParams.set("fields", "sheets.properties(sheetId,title,hidden)");
+  return googleFetch(config, url);
+}
 
-  while (nextUrl) {
-    const json = await calendlyFetch(nextUrl, token);
-    if (Array.isArray(json.collection)) items.push(...json.collection);
-    nextUrl = json.pagination?.next_page || "";
+async function createSheet(config, sheetName) {
+  const url = new URL(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}:batchUpdate`,
+  );
+  await googleFetch(config, url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      requests: [{ addSheet: { properties: { title: sheetName } } }],
+    }),
+  });
+}
+
+async function getSheetRows(config, sheetName) {
+  const url = new URL(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values/${encodeURIComponent(
+      quoteSheet(sheetName),
+    )}`,
+  );
+  url.searchParams.set("majorDimension", "ROWS");
+  url.searchParams.set("valueRenderOption", "FORMATTED_VALUE");
+  const result = await googleFetch(config, url);
+  return result.values || [];
+}
+
+async function updateRow(config, sheetName, rowNumber, values) {
+  const endColumn = columnName(Math.max(values.length - 1, 0));
+  const range = `${quoteSheet(sheetName)}!A${rowNumber}:${endColumn}${rowNumber}`;
+  const url = new URL(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values/${encodeURIComponent(range)}`,
+  );
+  url.searchParams.set("valueInputOption", "USER_ENTERED");
+  await googleFetch(config, url, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      majorDimension: "ROWS",
+      values: [values],
+    }),
+  });
+}
+
+async function ensureReminderSheet(config) {
+  const sheetName = getSheetName();
+  let metadata = await getSpreadsheetMetadata(config);
+  let sheet = metadata.sheets?.find((candidate) => candidate.properties?.title === sheetName);
+
+  if (!sheet) {
+    await createSheet(config, sheetName);
+    metadata = await getSpreadsheetMetadata(config);
+    sheet = metadata.sheets?.find((candidate) => candidate.properties?.title === sheetName);
   }
 
-  return items;
+  if (!sheet) throw new Error(`Could not create or open sheet "${sheetName}".`);
+
+  const rows = await getSheetRows(config, sheetName);
+  const existingHeaders = rows[0] || [];
+  const headersMatch = REMINDER_HEADERS.every((header, index) => existingHeaders[index] === header);
+
+  if (!headersMatch) {
+    await updateRow(config, sheetName, 1, REMINDER_HEADERS);
+  }
+
+  return sheetName;
 }
 
-async function getCurrentCalendlyUser(token) {
-  const json = await calendlyFetch(`${CALENDLY_API_BASE}/users/me`, token);
-  if (!json.resource?.uri) throw new Error("Calendly /users/me did not return a user URI.");
+function cell(row, headers, name) {
+  const index = headers.indexOf(name);
+  return index >= 0 ? String(row[index] || "") : "";
+}
 
+function rowToReminder(row, headers, rowNumber) {
   return {
-    userUri: json.resource.uri,
-    organizationUri: json.resource.current_organization || "",
-    name: json.resource.name || "",
-    email: json.resource.email || "",
+    rowNumber,
+    id: cell(row, headers, "id"),
+    calendlyInviteeUri: cell(row, headers, "calendlyInviteeUri"),
+    creatorName: cell(row, headers, "creatorName"),
+    creatorEmail: cell(row, headers, "creatorEmail"),
+    meetingName: cell(row, headers, "meetingName"),
+    meetingStartTime: cell(row, headers, "meetingStartTime"),
+    bookedAt: cell(row, headers, "bookedAt"),
+    reminderSendAt: cell(row, headers, "reminderSendAt"),
+    status: cell(row, headers, "status") || "pending",
+    sentAt: cell(row, headers, "sentAt"),
+    retryCount: cell(row, headers, "retryCount") || "0",
+    lastError: cell(row, headers, "lastError"),
   };
 }
 
-async function getScheduledEvents(token, userUri) {
-  const lookbackHours = optionalIntegerEnv(
-    "CALENDLY_REMINDER_LOOKBACK_HOURS",
-    DEFAULT_LOOKBACK_HOURS,
-  );
-  const lookaheadDays = optionalIntegerEnv(
-    "CALENDLY_REMINDER_LOOKAHEAD_DAYS",
-    DEFAULT_LOOKAHEAD_DAYS,
-  );
-  const minStartTime = new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString();
-  const maxStartTime = new Date(Date.now() + lookaheadDays * 24 * 60 * 60 * 1000).toISOString();
-  const url = new URL(`${CALENDLY_API_BASE}/scheduled_events`);
-
-  url.searchParams.set("user", userUri);
-  url.searchParams.set("min_start_time", minStartTime);
-  url.searchParams.set("max_start_time", maxStartTime);
-  url.searchParams.set("status", "active");
-  url.searchParams.set("sort", "start_time:asc");
-  url.searchParams.set("count", "100");
-
-  return fetchAllPages(url.toString(), token);
+function reminderToRow(record) {
+  return REMINDER_HEADERS.map((header) => String(record[header] || ""));
 }
 
-async function getEventInvitees(token, eventUri) {
-  const url = new URL(`${eventUri}/invitees`);
-  url.searchParams.set("status", "active");
-  url.searchParams.set("count", "100");
-  return fetchAllPages(url.toString(), token);
+async function loadReminders(config, sheetName) {
+  const rows = await getSheetRows(config, sheetName);
+  const headers = rows[0] || REMINDER_HEADERS;
+
+  return rows
+    .slice(1)
+    .map((row, index) => rowToReminder(row, headers, index + 2))
+    .filter((record) => record.id && record.calendlyInviteeUri);
 }
 
-function inviteeKey(invitee) {
-  return invitee.uri || `${invitee.email || "unknown"}::${invitee.created_at || ""}`;
+function selectDueReminders(records, nowValue) {
+  const now = new Date(nowValue).getTime();
+  const windowStart = now - DUE_WINDOW_HOURS * 60 * 60 * 1000;
+  const pending = records.filter((record) => record.status === "pending");
+  const skippedExpired = [];
+  const due = [];
+
+  for (const record of pending) {
+    const sendAt = new Date(record.reminderSendAt).getTime();
+    if (Number.isNaN(sendAt)) continue;
+    if (sendAt < windowStart) {
+      skippedExpired.push(record);
+      continue;
+    }
+    if (sendAt <= now) due.push(record);
+  }
+
+  return { pending, due, skippedExpired };
 }
 
-function isRecentInvitee(invitee) {
-  const lookbackHours = optionalIntegerEnv(
-    "CALENDLY_REMINDER_LOOKBACK_HOURS",
-    DEFAULT_LOOKBACK_HOURS,
-  );
-  const createdAt = invitee.created_at ? new Date(invitee.created_at).getTime() : Date.now();
-  if (Number.isNaN(createdAt)) return true;
-  return createdAt >= Date.now() - lookbackHours * 60 * 60 * 1000;
-}
-
-function buildDiscordMessage({ event, invitee, workflowExecutedAt }) {
+function buildDiscordMessage(record, sentAt) {
   return [
-    "**New Calendly meeting booked**",
+    "**Calendly meeting recap needed**",
     "",
-    `Creator: ${invitee.name || "Unknown"}`,
-    `Email: ${invitee.email || "Unknown"}`,
-    `Meeting: ${event.name || "Calendly meeting"}`,
-    `Meeting time: ${formatDateTime(event.start_time)}`,
-    `Booking created: ${formatDateTime(invitee.created_at)} (${invitee.created_at || "unknown"})`,
-    `Workflow ran: ${formatDateTime(workflowExecutedAt)} (${workflowExecutedAt})`,
-    `Notification delay: ${formatNotificationDelay(invitee.created_at, workflowExecutedAt)}`,
+    `Creator: ${record.creatorName || "Unknown"}`,
+    `Email: ${record.creatorEmail || "Unknown"}`,
+    `Meeting: ${record.meetingName || "Calendly meeting"}`,
+    `Meeting time: ${formatDateTime(record.meetingStartTime)}`,
+    `Booking created: ${formatDateTime(record.bookedAt)} (${record.bookedAt || "unknown"})`,
+    `Reminder due: ${formatDateTime(record.reminderSendAt)} (${record.reminderSendAt || "unknown"})`,
+    `Workflow ran: ${formatDateTime(sentAt)} (${sentAt})`,
+    `Notification delay: ${delayLabel(record.bookedAt, sentAt)}`,
     "",
     "Please revisit Gmail, find the latest email thread for this creator, and compose a short recap for Billy.",
   ].join("\n");
@@ -239,125 +350,144 @@ async function sendDiscordMessage(webhookUrl, content) {
   }
 }
 
-async function sendTestNotification(webhookUrl) {
-  const workflowExecutedAt = nowIso();
-  const createdAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-
-  await sendDiscordMessage(
-    webhookUrl,
-    [
-      "**Test Calendly reminder**",
-      "",
-      "Creator: Test Creator",
-      "Email: creator@example.com",
-      "Meeting: Creator intro call",
-      `Meeting time: ${formatDateTime(new Date(Date.now() + 60 * 60 * 1000).toISOString())}`,
-      `Booking created: ${formatDateTime(createdAt)} (${createdAt})`,
-      `Workflow ran: ${formatDateTime(workflowExecutedAt)} (${workflowExecutedAt})`,
-      `Notification delay: ${formatNotificationDelay(createdAt, workflowExecutedAt)}`,
-      "",
-      "Please revisit Gmail, find the latest email thread for this creator, and compose a short recap for Billy.",
-    ].join("\n"),
-  );
-}
-
-async function main() {
-  const discordWebhookUrl = requiredEnv("CALENDLY_DISCORD_WEBHOOK_URL");
-  const filePath = stateFilePath();
+async function writeSummary(summary) {
   const summaryPath =
     process.env.CALENDLY_REMINDER_SUMMARY_FILE?.trim() ||
-    path.join(path.dirname(filePath), "last-run-summary.json");
-  const sendTest = boolEnv("SEND_TEST_NOTIFICATION") || process.argv.includes("--test");
-  const notifyExistingRecent = boolEnv("NOTIFY_EXISTING_RECENT");
+    path.join(".calendly-reminder-state", "last-run-summary.json");
+  await mkdir(path.dirname(summaryPath), { recursive: true });
+  await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
+}
 
-  if (sendTest) {
-    await sendTestNotification(discordWebhookUrl);
-    await writeSummary(summaryPath, {
-      ok: true,
-      checkedAt: nowIso(),
-      mode: "test",
-      notificationsSent: 1,
-    });
-    await writeGithubOutputs({
-      state_changed: "false",
-      notifications_sent: "1",
-    });
-    console.log("Sent test Discord notification.");
-    return;
-  }
+async function writeGithubOutputs(outputs) {
+  if (!process.env.GITHUB_OUTPUT) return;
 
-  const workflowExecutedAt = nowIso();
-  const token = requiredEnv("CALENDLY_API_TOKEN");
-  const { exists: stateExists, state } = await readState(filePath);
-  const user = await getCurrentCalendlyUser(token);
-  const events = await getScheduledEvents(token, user.userUri);
-  const newBookings = [];
-  let inviteesScanned = 0;
-  let processedAdded = 0;
+  const lines = Object.entries(outputs).map(([key, value]) => `${key}=${value}`);
+  await appendFile(process.env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
+}
 
-  for (const event of events) {
-    if (!event.uri) continue;
+async function processDueReminders({ config, webhookUrl, now }) {
+  const sheetName = await ensureReminderSheet(config);
+  const records = await loadReminders(config, sheetName);
+  const { pending, due, skippedExpired } = selectDueReminders(records, now);
+  const sentReminderIds = [];
+  const failedReminderIds = [];
 
-    const invitees = await getEventInvitees(token, event.uri);
-    inviteesScanned += invitees.length;
+  for (const record of due) {
+    const sentAt = nowIso();
 
-    for (const invitee of invitees) {
-      const key = inviteeKey(invitee);
-      if (state.processedInvitees[key]) continue;
-
-      state.processedInvitees[key] = nowIso();
-      processedAdded += 1;
-
-      if (!stateExists && !notifyExistingRecent) continue;
-      if (!isRecentInvitee(invitee)) continue;
-
-      newBookings.push({ event, invitee });
+    try {
+      await sendDiscordMessage(webhookUrl, buildDiscordMessage(record, sentAt));
+      await updateRow(
+        config,
+        sheetName,
+        record.rowNumber,
+        reminderToRow({ ...record, status: "sent", sentAt, lastError: "" }),
+      );
+      sentReminderIds.push(record.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const retryCount = String(Number(record.retryCount || "0") + 1);
+      await updateRow(
+        config,
+        sheetName,
+        record.rowNumber,
+        reminderToRow({
+          ...record,
+          status: "pending",
+          retryCount,
+          lastError: message.slice(0, 500),
+        }),
+      );
+      failedReminderIds.push(record.id);
     }
   }
 
-  for (const booking of newBookings) {
-    await sendDiscordMessage(
-      discordWebhookUrl,
-      buildDiscordMessage({ ...booking, workflowExecutedAt }),
-    );
-  }
-
-  state.lastCheckedAt = workflowExecutedAt;
-  const stateChanged = !stateExists || processedAdded > 0;
-  if (stateChanged) {
-    await writeState(filePath, state);
-  }
-
-  const summary = {
-    ok: true,
-    checkedAt: state.lastCheckedAt,
-    calendlyUser: {
-      name: user.name,
-      email: user.email,
-    },
-    stateExistedBeforeRun: stateExists,
-    bootstrapOnly: !stateExists && !notifyExistingRecent,
-    eventsScanned: events.length,
-    inviteesScanned,
-    processedAdded,
-    stateChanged,
-    notificationsSent: newBookings.length,
-    newBookings: newBookings.map(({ event, invitee }) => ({
-      creatorName: invitee.name || null,
-      creatorEmail: invitee.email || null,
-      meetingName: event.name || null,
-      meetingTime: event.start_time || null,
-      bookedAt: invitee.created_at || null,
-      workflowExecutedAt,
-      notificationDelayMinutes: minutesBetween(invitee.created_at, workflowExecutedAt),
-    })),
+  return {
+    now,
+    totalPendingReminders: pending.length,
+    dueRemindersSelected: due.length,
+    skippedExpiredReminders: skippedExpired.length,
+    skippedExpiredReminderIds: skippedExpired.map((record) => record.id),
+    sentReminderIds,
+    failedReminderIds,
   };
+}
 
-  await writeSummary(summaryPath, summary);
-  await writeGithubOutputs({
-    state_changed: String(stateChanged),
-    notifications_sent: String(newBookings.length),
+function getConfigFromEnv() {
+  return {
+    spreadsheetId: getSpreadsheetId(),
+    serviceAccountEmail: requiredEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
+    privateKey: normalizePrivateKey(requiredEnv("GOOGLE_PRIVATE_KEY")),
+  };
+}
+
+function fakeRecord(id, bookedAt) {
+  return {
+    rowNumber: Number(id.replace(/\D/g, "")) || 2,
+    id,
+    calendlyInviteeUri: `calendly://test-invitee/${id}`,
+    creatorName: `Creator ${id}`,
+    creatorEmail: `${id}@example.com`,
+    meetingName: "Creator intro call",
+    meetingStartTime: bookedAt,
+    bookedAt,
+    reminderSendAt: new Date(new Date(bookedAt).getTime() + 15 * 60_000).toISOString(),
+    status: "pending",
+    sentAt: "",
+    retryCount: "0",
+    lastError: "",
+  };
+}
+
+function runSelfTest() {
+  const bookingA = fakeRecord("A", "2026-06-18T10:00:00.000Z");
+  const bookingB = fakeRecord("B", "2026-06-18T10:30:00.000Z");
+
+  const first = selectDueReminders([bookingA, bookingB], "2026-06-18T10:16:00.000Z");
+  assert.deepEqual(
+    first.due.map((record) => record.id),
+    ["A"],
+    "10:16 should select only fake booking A.",
+  );
+
+  bookingA.status = "sent";
+  bookingA.sentAt = "2026-06-18T10:16:00.000Z";
+
+  const second = selectDueReminders([bookingA, bookingB], "2026-06-18T10:46:00.000Z");
+  assert.deepEqual(
+    second.due.map((record) => record.id),
+    ["B"],
+    "10:46 should select only fake booking B.",
+  );
+
+  bookingB.status = "sent";
+  bookingB.sentAt = "2026-06-18T10:46:00.000Z";
+
+  const third = selectDueReminders([bookingA, bookingB], "2026-06-18T10:47:00.000Z");
+  assert.deepEqual(third.due, [], "10:47 should select nothing after A and B are sent.");
+
+  console.log("Calendly reminder self-test passed.");
+}
+
+async function main() {
+  if (process.argv.includes("--self-test")) {
+    runSelfTest();
+    return;
+  }
+
+  const summary = await processDueReminders({
+    config: getConfigFromEnv(),
+    webhookUrl: requiredEnv("CALENDLY_DISCORD_WEBHOOK_URL"),
+    now: nowIso(),
   });
+
+  await writeSummary(summary);
+  await writeGithubOutputs({
+    sent_count: String(summary.sentReminderIds.length),
+    failed_count: String(summary.failedReminderIds.length),
+    due_count: String(summary.dueRemindersSelected),
+  });
+
   console.log(JSON.stringify(summary, null, 2));
 }
 

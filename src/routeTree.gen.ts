@@ -20,6 +20,7 @@ import { Route as ActiveBrandsRouteImport } from './routes/active-brands'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
 import { Route as ApiSlackDebugRouteImport } from './routes/api/slack-debug'
+import { Route as ApiCalendlyRemindersWebhookRouteImport } from './routes/api/calendly-reminders/webhook'
 
 const LeaderboardRoute = LeaderboardRouteImport.update({
   id: '/leaderboard',
@@ -76,6 +77,12 @@ const ApiSlackDebugRoute = ApiSlackDebugRouteImport.update({
   path: '/api/slack-debug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCalendlyRemindersWebhookRoute =
+  ApiCalendlyRemindersWebhookRouteImport.update({
+    id: '/api/calendly-reminders/webhook',
+    path: '/api/calendly-reminders/webhook',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -89,6 +96,7 @@ export interface FileRoutesByFullPath {
   '/leaderboard': typeof LeaderboardRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
+  '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -102,6 +110,7 @@ export interface FileRoutesByTo {
   '/leaderboard': typeof LeaderboardRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
+  '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -116,6 +125,7 @@ export interface FileRoutesById {
   '/leaderboard': typeof LeaderboardRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
+  '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -131,6 +141,7 @@ export interface FileRouteTypes {
     | '/leaderboard'
     | '/api/slack-debug'
     | '/api/slack-followups'
+    | '/api/calendly-reminders/webhook'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -144,6 +155,7 @@ export interface FileRouteTypes {
     | '/leaderboard'
     | '/api/slack-debug'
     | '/api/slack-followups'
+    | '/api/calendly-reminders/webhook'
   id:
     | '__root__'
     | '/'
@@ -157,6 +169,7 @@ export interface FileRouteTypes {
     | '/leaderboard'
     | '/api/slack-debug'
     | '/api/slack-followups'
+    | '/api/calendly-reminders/webhook'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -171,6 +184,7 @@ export interface RootRouteChildren {
   LeaderboardRoute: typeof LeaderboardRoute
   ApiSlackDebugRoute: typeof ApiSlackDebugRoute
   ApiSlackFollowupsRoute: typeof ApiSlackFollowupsRoute
+  ApiCalendlyRemindersWebhookRoute: typeof ApiCalendlyRemindersWebhookRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -252,6 +266,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSlackDebugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/calendly-reminders/webhook': {
+      id: '/api/calendly-reminders/webhook'
+      path: '/api/calendly-reminders/webhook'
+      fullPath: '/api/calendly-reminders/webhook'
+      preLoaderRoute: typeof ApiCalendlyRemindersWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -267,6 +288,7 @@ const rootRouteChildren: RootRouteChildren = {
   LeaderboardRoute: LeaderboardRoute,
   ApiSlackDebugRoute: ApiSlackDebugRoute,
   ApiSlackFollowupsRoute: ApiSlackFollowupsRoute,
+  ApiCalendlyRemindersWebhookRoute: ApiCalendlyRemindersWebhookRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

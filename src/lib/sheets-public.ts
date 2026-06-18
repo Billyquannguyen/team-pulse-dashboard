@@ -21,8 +21,12 @@ import {
 } from "@/lib/sheet-normalizer";
 import { normalizeSheetHeader } from "@/lib/sheet-headers";
 
-type GoogleSheetsServer = typeof import("@/lib/google-sheets.server");
-type GoogleSheetsConfig = ReturnType<GoogleSheetsServer["getGoogleSheetsConfig"]>;
+type GoogleSheetsConfig = {
+  serviceAccountEmail: string;
+  privateKey: string;
+  teamSpreadsheetId: string;
+  creatorSourcingSpreadsheetId: string;
+};
 
 type SheetRef = {
   memberName: string;

@@ -1,7 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 
-type GoogleSheetsServer = typeof import("@/lib/google-sheets.server");
-type GoogleSheetsConfig = ReturnType<GoogleSheetsServer["getGoogleSheetsConfig"]>;
+type GoogleSheetsConfig = {
+  serviceAccountEmail: string;
+  privateKey: string;
+  teamSpreadsheetId: string;
+  creatorSourcingSpreadsheetId: string;
+};
 
 type ActiveBrandsCacheStatus = "hit" | "miss" | "stale" | "refreshing";
 

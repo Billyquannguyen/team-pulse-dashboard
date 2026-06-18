@@ -72,6 +72,13 @@ type ValuesWriteResponse = {
   };
 };
 
+type BatchUpdateResponse = {
+  error?: {
+    code?: number;
+    message?: string;
+  };
+};
+
 let cachedToken: { token: string; expiresAt: number } | null = null;
 const GOOGLE_FETCH_MAX_ATTEMPTS = 3;
 
@@ -563,5 +570,35 @@ export async function updateSheetRow(
     sheetName: sheet.sheetName,
     rowNumber,
     valueCount: values.length,
+  });
+}
+
+export async function createSheetTab(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  sheetName: string,
+) {
+  const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`);
+
+  await googleSheetsFetch<BatchUpdateResponse>(config, url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      requests: [
+        {
+          addSheet: {
+            properties: {
+              title: sheetName,
+            },
+          },
+        },
+      ],
+    }),
+  });
+
+  logGoogleSheets("sheet tab created", {
+    sheetName,
   });
 }
