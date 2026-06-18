@@ -26,6 +26,8 @@
     "opportunity:gpt-export": "node scripts/opportunity-ingestion/gpt-export.mjs",
     "opportunity:export": "node scripts/opportunity-ingestion/gpt-export.mjs",
     "opportunity:monthly-refresh": "node scripts/opportunity-ingestion/monthly-refresh.mjs",
+    "calendly:webhook:check": "node scripts/calendly-webhook-subscription.mjs",
+    "calendly:webhook:create": "node scripts/calendly-webhook-subscription.mjs --create",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

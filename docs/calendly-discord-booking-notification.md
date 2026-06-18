@@ -62,6 +62,48 @@ CALENDLY_REMINDERS_SPREADSHEET_ID
 CALENDLY_API_TOKEN
 ```
 
+`CALENDLY_API_TOKEN` is only useful for one-time setup if you want the repo to check or create the Calendly webhook subscription for you.
+
+## One-Time Calendly Webhook Subscription Setup
+
+The dashboard does not register Calendly webhooks at runtime.
+
+Calendly must already have a webhook subscription that sends `invitee.created` events to:
+
+```text
+https://YOUR-DASHBOARD-DOMAIN.com/api/calendly-reminders/webhook
+```
+
+If you still have the old Personal Access Token from:
+
+```text
+https://calendly.com/integrations/api_webhooks
+```
+
+you can check whether the subscription exists:
+
+```text
+CALENDLY_API_TOKEN=your_token \
+CALENDLY_WEBHOOK_CALLBACK_URL=https://YOUR-DASHBOARD-DOMAIN.com/api/calendly-reminders/webhook \
+npm run calendly:webhook:check
+```
+
+If the subscription does not exist, create it once:
+
+```text
+CALENDLY_API_TOKEN=your_token \
+CALENDLY_WEBHOOK_CALLBACK_URL=https://YOUR-DASHBOARD-DOMAIN.com/api/calendly-reminders/webhook \
+npm run calendly:webhook:create
+```
+
+After that, the dashboard runtime only needs:
+
+```text
+CALENDLY_DISCORD_WEBHOOK_URL
+```
+
+If you use `CALENDLY_WEBHOOK_SECRET`, set the same value when running the setup command. The script will add it to the Calendly callback URL as a `secret` query parameter so the existing dashboard verification can read it.
+
 ## Discord Message
 
 The Discord message includes:
