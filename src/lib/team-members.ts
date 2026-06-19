@@ -66,6 +66,7 @@ export type TeamMemberSuggestion = {
 };
 
 export const TEAM_MEMBERS_TAB_NAME = "TeamMembers";
+export const TEAM_MEMBERS_SPREADSHEET_ENV = "TEAM_ASSETS_SPREADSHEET_ID";
 
 export const TEAM_MEMBERS_HEADERS = ["Name", "ID", "Joined Month", "Status"] as const;
 
@@ -259,6 +260,14 @@ function getTeamMembersSheetUrl(spreadsheetId: string) {
   };
 }
 
+function getTeamMembersSpreadsheetId() {
+  const spreadsheetId = process.env[TEAM_MEMBERS_SPREADSHEET_ENV]?.trim();
+  if (!spreadsheetId) {
+    throw new Error(`Missing required Google Sheets env var: ${TEAM_MEMBERS_SPREADSHEET_ENV}`);
+  }
+  return spreadsheetId;
+}
+
 function buildSuggestions(tabs: GoogleSheetRef[], existingMembers: TeamMemberConfig[]) {
   const existingIds = new Set(existingMembers.map((member) => normalizeSheetKey(member.id)));
   const visibleMemberTabs = tabs
@@ -353,7 +362,7 @@ export function teamMemberConfigToTeammate(member: TeamMemberConfig, index: numb
 
 async function getTeamMembersTabs(config: GoogleSheetsConfig) {
   const googleSheets = await getGoogleSheetsServer();
-  return googleSheets.fetchSpreadsheetTabs(config, config.teamSpreadsheetId);
+  return googleSheets.fetchSpreadsheetTabs(config, getTeamMembersSpreadsheetId());
 }
 
 async function loadTeamMembersWorksheet(
@@ -361,13 +370,14 @@ async function loadTeamMembersWorksheet(
   options: { createIfMissing?: boolean; ensureHeaders?: boolean } = {},
 ): Promise<TeamMembersWorksheet> {
   const googleSheets = await getGoogleSheetsServer();
-  let tabs = await googleSheets.fetchSpreadsheetTabs(config, config.teamSpreadsheetId);
+  const spreadsheetId = getTeamMembersSpreadsheetId();
+  let tabs = await googleSheets.fetchSpreadsheetTabs(config, spreadsheetId);
   const expectedKey = normalizeSheetKey(TEAM_MEMBERS_TAB_NAME);
   let matchedTab = tabs.find((tab) => normalizeSheetKey(tab.sheetName) === expectedKey);
 
   if (!matchedTab && options.createIfMissing) {
-    await googleSheets.createSheetTab(config, config.teamSpreadsheetId, TEAM_MEMBERS_TAB_NAME);
-    tabs = await googleSheets.fetchSpreadsheetTabs(config, config.teamSpreadsheetId);
+    await googleSheets.createSheetTab(config, spreadsheetId, TEAM_MEMBERS_TAB_NAME);
+    tabs = await googleSheets.fetchSpreadsheetTabs(config, spreadsheetId);
     matchedTab = tabs.find((tab) => normalizeSheetKey(tab.sheetName) === expectedKey);
   }
 
@@ -380,9 +390,7 @@ async function loadTeamMembersWorksheet(
     sheetName: matchedTab.sheetName,
     gid: matchedTab.gid,
   };
-  let [sheetRows] = await googleSheets.fetchSheetRowsBatch(config, config.teamSpreadsheetId, [
-    sheet,
-  ]);
+  let [sheetRows] = await googleSheets.fetchSheetRowsBatch(config, spreadsheetId, [sheet]);
 
   if (options.ensureHeaders) {
     const currentHeaders = sheetRows?.headers ?? [];
@@ -395,15 +403,13 @@ async function loadTeamMembersWorksheet(
       ? normalizeTeamMemberRows(currentHeaders, currentRows)
       : [];
 
-    await googleSheets.updateSheetRow(config, config.teamSpreadsheetId, sheet, 1, [
-      ...TEAM_MEMBERS_HEADERS,
-    ]);
+    await googleSheets.updateSheetRow(config, spreadsheetId, sheet, 1, [...TEAM_MEMBERS_HEADERS]);
 
     for (const member of migratedRows) {
       if (!member.rowNumber) continue;
       await googleSheets.updateSheetRow(
         config,
-        config.teamSpreadsheetId,
+        spreadsheetId,
         sheet,
         member.rowNumber,
         buildTeamMemberWriteRow(member),
@@ -425,8 +431,9 @@ async function loadTeamMembersWorksheet(
 }
 
 async function readTeamMembersSheetData(config: GoogleSheetsConfig): Promise<TeamMembersSheetData> {
+  const spreadsheetId = getTeamMembersSpreadsheetId();
   const tabs = await getTeamMembersTabs(config);
-  const links = getTeamMembersSheetUrl(config.teamSpreadsheetId);
+  const links = getTeamMembersSheetUrl(spreadsheetId);
   const warnings: string[] = [];
 
   try {
@@ -585,13 +592,14 @@ export const createTeamMembersSheet = createServerFn({ method: "POST" }).handler
     createIfMissing: true,
     ensureHeaders: true,
   });
+  const spreadsheetId = getTeamMembersSpreadsheetId();
 
   if (worksheet.rows.length === 0) {
     const seeds = chooseSeedMembers(worksheet.availableTabs);
     for (const seed of seeds) {
       await googleSheets.appendSheetRow(
         config,
-        config.teamSpreadsheetId,
+        spreadsheetId,
         worksheet.sheet,
         buildTeamMemberWriteRow({
           displayName: seed.displayName,
@@ -618,10 +626,11 @@ export const addTeamMember = createServerFn({ method: "POST" })
       createIfMissing: true,
       ensureHeaders: true,
     });
+    const spreadsheetId = getTeamMembersSpreadsheetId();
 
     await googleSheets.appendSheetRow(
       config,
-      config.teamSpreadsheetId,
+      spreadsheetId,
       worksheet.sheet,
       buildTeamMemberWriteRow(data),
     );
@@ -641,6 +650,7 @@ export const updateTeamMember = createServerFn({ method: "POST" })
       createIfMissing: true,
       ensureHeaders: true,
     });
+    const spreadsheetId = getTeamMembersSpreadsheetId();
     const existingRow = worksheet.rows[data.rowNumber - 2];
 
     if (!existingRow) {
@@ -649,7 +659,7 @@ export const updateTeamMember = createServerFn({ method: "POST" })
 
     await googleSheets.updateSheetRow(
       config,
-      config.teamSpreadsheetId,
+      spreadsheetId,
       worksheet.sheet,
       data.rowNumber,
       buildTeamMemberWriteRow(data),
@@ -670,6 +680,7 @@ export const offboardTeamMember = createServerFn({ method: "POST" })
       createIfMissing: true,
       ensureHeaders: true,
     });
+    const spreadsheetId = getTeamMembersSpreadsheetId();
     const existingRow = worksheet.rows[data.rowNumber - 2];
 
     if (!existingRow) {
@@ -686,7 +697,7 @@ export const offboardTeamMember = createServerFn({ method: "POST" })
 
     await googleSheets.updateSheetRow(
       config,
-      config.teamSpreadsheetId,
+      spreadsheetId,
       worksheet.sheet,
       data.rowNumber,
       TEAM_MEMBER_FIELDS.map((field) =>
@@ -699,7 +710,7 @@ export const offboardTeamMember = createServerFn({ method: "POST" })
   });
 
 export const teamMembersQuery = {
-  queryKey: ["team-billion-team-members", "google-sheet-v2"],
+  queryKey: ["team-billion-team-members", "team-assets-spreadsheet-v1"],
   queryFn: () => fetchTeamMembersData(),
   refetchInterval: QUERY_REFETCH_INTERVAL_MS,
   staleTime: QUERY_STALE_TIME_MS,

@@ -81,7 +81,9 @@ The page displays the columns exactly as they appear in the Sheet. It does not f
 
 ## Team Members Source
 
-Team members come from a dedicated worksheet tab named:
+Team members come from a dedicated worksheet tab inside the Team Assets spreadsheet configured by `TEAM_ASSETS_SPREADSHEET_ID`.
+
+The worksheet tab is named:
 
 - `TeamMembers`
 
