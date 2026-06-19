@@ -1,19 +1,40 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useMemo, useState } from "react";
-import { Edit3, ExternalLink, Loader2, Plus, UserCheck, UserRound, UserX, X } from "lucide-react";
+import { getRouteApi, useRouter } from "@tanstack/react-router";
+import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import {
+  Camera,
+  Check,
+  Edit3,
+  ExternalLink,
+  Instagram,
+  Loader2,
+  Lock,
+  Music2,
+  Plus,
+  UserCheck,
+  UserRound,
+  UserX,
+  X,
+  Youtube,
+} from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { DashboardSelect } from "@/components/ui/dashboard-select";
+import { TeamAvatar } from "@/components/ui/team-avatar";
+import { loginToDashboard } from "@/lib/auth";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import {
   addTeamMember,
   createTeamMembersSheet,
   teamMembersQuery,
   updateTeamMember,
+  updateTeamMemberProfile,
   type TeamMemberConfig,
   type TeamMemberStatus,
 } from "@/lib/team-members";
 import { cn } from "@/lib/utils";
+
+const rootRoute = getRouteApi("__root__");
 
 export const Route = createFileRoute("/team-members")({
   head: () => ({
@@ -27,6 +48,7 @@ export const Route = createFileRoute("/team-members")({
 
 type MemberDraft = {
   rowNumber?: number;
+  originalId?: string;
   displayName: string;
   id: string;
   joinedMonth: string;
@@ -37,6 +59,19 @@ type MemberModalState = {
   mode: "add" | "edit";
   draft: MemberDraft;
 } | null;
+
+type AdminAction =
+  | { type: "add" }
+  | { type: "edit"; member: TeamMemberConfig }
+  | { type: "status"; member: TeamMemberConfig }
+  | { type: "create-sheet" };
+
+type ProfileDraft = {
+  avatarUrl: string;
+  instagramUrl: string;
+  tiktokUrl: string;
+  youtubeUrl: string;
+};
 
 function emptyDraft(): MemberDraft {
   return {
@@ -50,6 +85,7 @@ function emptyDraft(): MemberDraft {
 function draftFromMember(member: TeamMemberConfig): MemberDraft {
   return {
     rowNumber: member.rowNumber,
+    originalId: member.id,
     displayName: member.displayName,
     id: member.id,
     joinedMonth: member.joinedMonth,
@@ -58,12 +94,19 @@ function draftFromMember(member: TeamMemberConfig): MemberDraft {
 }
 
 function TeamMembersPage() {
+  const router = useRouter();
+  const auth = rootRoute.useLoaderData();
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery(teamMembersQuery);
   const [modal, setModal] = useState<MemberModalState>(null);
   const [message, setMessage] = useState("");
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [adminAction, setAdminAction] = useState<AdminAction | null>(null);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminError, setAdminError] = useState("");
+  const [isUnlocking, setIsUnlocking] = useState(false);
   const members = useMemo(() => data?.members ?? [], [data?.members]);
+  const isAdmin = auth.role === "admin";
 
   const refresh = async () => {
     await Promise.all([
@@ -80,6 +123,68 @@ function TeamMembersPage() {
   const openEdit = (member: TeamMemberConfig) => {
     setMessage("");
     setModal({ mode: "edit", draft: draftFromMember(member) });
+  };
+
+  const runAdminAction = (action: AdminAction) => {
+    if (action.type === "add") {
+      openAdd();
+      return;
+    }
+
+    if (action.type === "edit") {
+      openEdit(action.member);
+      return;
+    }
+
+    if (action.type === "status") {
+      void toggleStatus(action.member);
+      return;
+    }
+
+    void createSheet();
+  };
+
+  const requestAdminAction = (action: AdminAction) => {
+    if (isAdmin) {
+      runAdminAction(action);
+      return;
+    }
+
+    setAdminPassword("");
+    setAdminError("");
+    setAdminAction(action);
+  };
+
+  const submitAdminPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!adminAction) return;
+
+    setAdminError("");
+    setIsUnlocking(true);
+
+    try {
+      const result = await loginToDashboard({ data: { password: adminPassword } });
+
+      if (!result.ok) {
+        setAdminError(result.message);
+        return;
+      }
+
+      if (result.role !== "admin") {
+        setAdminError("That unlocks team view only. Enter the admin password to edit members.");
+        return;
+      }
+
+      const action = adminAction;
+      setAdminAction(null);
+      setAdminPassword("");
+      await router.invalidate();
+      runAdminAction(action);
+    } catch {
+      setAdminError("Admin unlock failed. Try again in a moment.");
+    } finally {
+      setIsUnlocking(false);
+    }
   };
 
   const updateModalDraft = (patch: Partial<MemberDraft>) => {
@@ -102,7 +207,9 @@ function TeamMembersPage() {
         await addTeamMember({ data: draft });
         setMessage(`${draft.displayName} added.`);
       } else if (draft.rowNumber) {
-        await updateTeamMember({ data: { ...draft, rowNumber: draft.rowNumber } });
+        await updateTeamMember({
+          data: { ...draft, rowNumber: draft.rowNumber, originalId: draft.originalId },
+        });
         setMessage(`${draft.displayName} updated.`);
       }
 
@@ -130,6 +237,28 @@ function TeamMembersPage() {
     }
   };
 
+  const saveProfile = async (member: TeamMemberConfig, profile: ProfileDraft) => {
+    if (!member.rowNumber) return;
+    setSavingKey(`profile-${member.rowNumber}`);
+    setMessage("");
+
+    try {
+      await updateTeamMemberProfile({
+        data: {
+          rowNumber: member.rowNumber,
+          originalId: member.id,
+          ...profile,
+        },
+      });
+      setMessage(`${member.displayName}'s profile updated.`);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not update this profile.");
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
   const toggleStatus = async (member: TeamMemberConfig) => {
     if (!member.rowNumber) return;
     const nextStatus: TeamMemberStatus = member.status === "active" ? "offboarded" : "active";
@@ -140,6 +269,7 @@ function TeamMembersPage() {
       await updateTeamMember({
         data: {
           rowNumber: member.rowNumber,
+          originalId: member.id,
           displayName: member.displayName,
           id: member.id,
           joinedMonth: member.joinedMonth,
@@ -172,13 +302,17 @@ function TeamMembersPage() {
               <UserRound className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-base font-black">TeamMembers</h2>
+              <h2 className="text-base font-black">Admin member controls</h2>
               <p className="text-sm text-muted-foreground">
-                Active members appear in dashboard cards, filters, goals, and leaderboard.
+                Add or edit member details. Profile photos and socials are editable below.
               </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <div className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-muted px-3 text-xs font-bold text-muted-foreground">
+              <Lock className="h-3.5 w-3.5" />
+              {isAdmin ? "Admin unlocked" : "Locked"}
+            </div>
             {data?.links.teamMembersSheetUrl && (
               <a
                 href={data.links.teamMembersSheetUrl}
@@ -192,7 +326,7 @@ function TeamMembersPage() {
             {showMissingState && (
               <button
                 type="button"
-                onClick={createSheet}
+                onClick={() => requestAdminAction({ type: "create-sheet" })}
                 disabled={savingKey === "create-sheet"}
                 className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-4 text-sm font-bold text-foreground hover:bg-accent disabled:opacity-50"
               >
@@ -202,10 +336,10 @@ function TeamMembersPage() {
             )}
             <button
               type="button"
-              onClick={openAdd}
+              onClick={() => requestAdminAction({ type: "add" })}
               className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90"
             >
-              <Plus className="h-4 w-4" />
+              {isAdmin ? <Plus className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
               Add Member
             </button>
           </div>
@@ -227,7 +361,7 @@ function TeamMembersPage() {
           </p>
           <button
             type="button"
-            onClick={createSheet}
+            onClick={() => requestAdminAction({ type: "create-sheet" })}
             disabled={savingKey === "create-sheet"}
             className="tb-action mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
@@ -296,20 +430,26 @@ function TeamMembersPage() {
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
-                            onClick={() => openEdit(member)}
+                            onClick={() => requestAdminAction({ type: "edit", member })}
                             className="tb-action inline-flex h-9 items-center gap-2 rounded-xl bg-muted px-3 text-xs font-bold text-foreground hover:bg-accent"
                           >
-                            <Edit3 className="h-3.5 w-3.5" />
+                            {isAdmin ? (
+                              <Edit3 className="h-3.5 w-3.5" />
+                            ) : (
+                              <Lock className="h-3.5 w-3.5" />
+                            )}
                             Edit
                           </button>
                           <button
                             type="button"
                             disabled={savingKey === `status-${member.rowNumber}`}
-                            onClick={() => toggleStatus(member)}
+                            onClick={() => requestAdminAction({ type: "status", member })}
                             className="tb-action inline-flex h-9 items-center gap-2 rounded-xl bg-muted px-3 text-xs font-bold text-foreground hover:bg-accent disabled:opacity-50"
                           >
                             {savingKey === `status-${member.rowNumber}` ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : !isAdmin ? (
+                              <Lock className="h-3.5 w-3.5" />
                             ) : member.status === "active" ? (
                               <UserX className="h-3.5 w-3.5" />
                             ) : (
@@ -328,6 +468,27 @@ function TeamMembersPage() {
         </section>
       )}
 
+      {!showMissingState && (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-lg font-black">Member profiles</h2>
+            <p className="text-sm text-muted-foreground">
+              Team members can update avatars and social links without the admin password.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {members.map((member) => (
+              <MemberProfileCard
+                key={`${member.id}-${member.rowNumber ?? "profile"}`}
+                member={member}
+                saving={savingKey === `profile-${member.rowNumber}`}
+                onSave={(profile) => saveProfile(member, profile)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {modal && (
         <MemberModal
           mode={modal.mode}
@@ -336,6 +497,20 @@ function TeamMembersPage() {
           onChange={updateModalDraft}
           onClose={() => setModal(null)}
           onSubmit={saveModal}
+        />
+      )}
+
+      {adminAction && (
+        <AdminUnlockModal
+          password={adminPassword}
+          error={adminError}
+          unlocking={isUnlocking}
+          onPasswordChange={(value) => {
+            setAdminPassword(value);
+            setAdminError("");
+          }}
+          onClose={() => setAdminAction(null)}
+          onSubmit={submitAdminPassword}
         />
       )}
     </div>
@@ -434,6 +609,294 @@ function MemberModal({
       </form>
     </div>
   );
+}
+
+function AdminUnlockModal({
+  password,
+  error,
+  unlocking,
+  onPasswordChange,
+  onClose,
+  onSubmit,
+}: {
+  password: string;
+  error: string;
+  unlocking: boolean;
+  onPasswordChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+      <form
+        onSubmit={onSubmit}
+        className="w-full max-w-lg overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-border p-5">
+          <div>
+            <h2 className="text-base font-black">Unlock member editing</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Enter the admin password to add members or edit member details.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="tb-action rounded-full p-2 hover:bg-accent"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-5">
+          <label>
+            <span className="text-xs font-bold text-muted-foreground">Admin password</span>
+            <input
+              autoFocus
+              type="password"
+              value={password}
+              disabled={unlocking}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              className="tb-search mt-1 h-11 w-full rounded-2xl border border-border bg-background px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
+              placeholder="Enter admin password"
+            />
+          </label>
+          {error && <p className="mt-2 text-sm font-bold text-destructive">{error}</p>}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border p-5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="tb-action h-10 rounded-2xl bg-muted px-4 text-sm font-bold hover:bg-accent"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={unlocking || !password}
+            className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {unlocking ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Lock className="h-4 w-4" />
+            )}
+            Unlock
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function MemberProfileCard({
+  member,
+  saving,
+  onSave,
+}: {
+  member: TeamMemberConfig;
+  saving: boolean;
+  onSave: (profile: ProfileDraft) => void;
+}) {
+  const [draft, setDraft] = useState<ProfileDraft>({
+    avatarUrl: member.avatarUrl ?? "",
+    instagramUrl: member.instagramUrl ?? "",
+    tiktokUrl: member.tiktokUrl ?? "",
+    youtubeUrl: member.youtubeUrl ?? "",
+  });
+  const [imageMessage, setImageMessage] = useState("");
+  const uploadId = `avatar-upload-${member.rowNumber ?? member.id}`;
+
+  const setField = (field: keyof ProfileDraft, value: string) => {
+    setDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleAvatarUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setImageMessage("");
+
+    try {
+      const avatarUrl = await resizeAvatar(file);
+      setDraft((current) => ({ ...current, avatarUrl }));
+      setImageMessage("Avatar resized and ready to save.");
+    } catch (error) {
+      setImageMessage(error instanceof Error ? error.message : "Could not read this image.");
+    }
+  };
+
+  const socialLinks = [
+    { label: "Instagram", value: normalizeExternalUrl(draft.instagramUrl), Icon: Instagram },
+    { label: "TikTok", value: normalizeExternalUrl(draft.tiktokUrl), Icon: Music2 },
+    { label: "YouTube", value: normalizeExternalUrl(draft.youtubeUrl), Icon: Youtube },
+  ].filter((item) => item.value.trim());
+
+  return (
+    <article className="overflow-hidden rounded-3xl bg-card shadow-sm ring-1 ring-border">
+      <div className="h-20 bg-gradient-to-r from-fun-blue via-fun-pink to-fun-yellow" />
+      <div className="p-5 pt-0">
+        <div className="-mt-10 flex items-end justify-between gap-3">
+          <TeamAvatar
+            name={member.displayName}
+            initials={member.id.slice(0, 2).toUpperCase()}
+            avatarUrl={draft.avatarUrl}
+            className="h-20 w-20 rounded-3xl ring-4 ring-card"
+            fallbackClassName="bg-fun-blue text-base"
+          />
+          <span
+            className={cn(
+              "mb-2 inline-flex rounded-full px-3 py-1 text-xs font-black",
+              member.status === "active"
+                ? "bg-fun-lime text-emerald-950"
+                : "bg-muted text-muted-foreground",
+            )}
+          >
+            {member.status === "active" ? "Active" : "Offboarded"}
+          </span>
+        </div>
+
+        <div className="mt-4">
+          <h3 className="text-lg font-black">{member.displayName}</h3>
+          <p className="text-sm font-semibold text-muted-foreground">
+            {member.id} · Joined {member.joinedMonth || "not set"}
+          </p>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {socialLinks.length > 0 ? (
+            socialLinks.map(({ label, value, Icon }) => (
+              <a
+                key={label}
+                href={value}
+                target="_blank"
+                rel="noreferrer"
+                className="tb-action inline-flex h-9 items-center gap-2 rounded-xl bg-muted px-3 text-xs font-bold hover:bg-accent"
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </a>
+            ))
+          ) : (
+            <span className="text-xs font-semibold text-muted-foreground">
+              No socials linked yet.
+            </span>
+          )}
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          <input
+            id={uploadId}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleAvatarUpload}
+          />
+          <label
+            htmlFor={uploadId}
+            className="tb-action inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-muted px-4 text-sm font-bold hover:bg-accent"
+          >
+            <Camera className="h-4 w-4" />
+            Change avatar
+          </label>
+          {imageMessage && (
+            <p className="rounded-2xl bg-muted/45 px-3 py-2 text-xs font-bold text-muted-foreground">
+              {imageMessage}
+            </p>
+          )}
+
+          <MemberInput
+            label="Instagram"
+            value={draft.instagramUrl}
+            onChange={(value) => setField("instagramUrl", value)}
+          />
+          <MemberInput
+            label="TikTok"
+            value={draft.tiktokUrl}
+            onChange={(value) => setField("tiktokUrl", value)}
+          />
+          <MemberInput
+            label="YouTube"
+            value={draft.youtubeUrl}
+            onChange={(value) => setField("youtubeUrl", value)}
+          />
+
+          <button
+            type="button"
+            onClick={() =>
+              onSave({
+                avatarUrl: draft.avatarUrl,
+                instagramUrl: normalizeExternalUrl(draft.instagramUrl),
+                tiktokUrl: normalizeExternalUrl(draft.tiktokUrl),
+                youtubeUrl: normalizeExternalUrl(draft.youtubeUrl),
+              })
+            }
+            disabled={saving || !member.rowNumber}
+            className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            Save profile
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function normalizeExternalUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function resizeAvatar(file: File) {
+  if (!file.type.startsWith("image/")) {
+    return Promise.reject(new Error("Choose an image file."));
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const size = 192;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        reject(new Error("Could not resize this image."));
+        return;
+      }
+
+      const sourceSize = Math.min(image.width, image.height);
+      const sourceX = (image.width - sourceSize) / 2;
+      const sourceY = (image.height - sourceSize) / 2;
+
+      context.fillStyle = "#f7f3ec";
+      context.fillRect(0, 0, size, size);
+      context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size);
+
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
+      if (dataUrl.length > 50000) {
+        reject(new Error("This image is still too large. Try a simpler or smaller photo."));
+        return;
+      }
+
+      resolve(dataUrl);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not read this image."));
+    };
+
+    image.src = objectUrl;
+  });
 }
 
 function MemberInput({

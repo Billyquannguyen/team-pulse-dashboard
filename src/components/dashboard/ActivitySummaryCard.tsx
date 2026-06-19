@@ -5,6 +5,7 @@ import {
   totalMonthCommission,
 } from "@/data/team";
 import type { DashboardSheetData } from "@/lib/sheets-public";
+import { TeamAvatar } from "@/components/ui/team-avatar";
 import { Briefcase, CalendarDays, CircleDollarSign, Target } from "lucide-react";
 
 export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
@@ -91,9 +92,13 @@ export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
               <tr key={member.id} className="border-t border-border/60 hover:bg-muted/40">
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-fun-blue text-xs font-semibold">
-                      {member.initials}
-                    </div>
+                    <TeamAvatar
+                      name={member.name}
+                      initials={member.initials}
+                      avatarUrl={member.avatarUrl}
+                      className="h-8 w-8"
+                      fallbackClassName="bg-fun-blue text-xs"
+                    />
                     <div>
                       <div className="font-medium">{member.name}</div>
                       <div className="text-xs text-muted-foreground">{member.role}</div>

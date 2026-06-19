@@ -23,6 +23,10 @@ export type Deal = {
   notes?: string;
 };
 
+export function isActiveDashboardDeal(deal: Pick<Deal, "status">) {
+  return deal.status !== "Cancelled";
+}
+
 const managers = ["KTrang", "HYen", "BNgan", "LNgoc"];
 const brands = [
   "Gymshark",

@@ -2,9 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { team as fallbackTeam } from "@/data/team";
-import { deals as fallbackDeals } from "@/data/deals";
+import { deals as fallbackDeals, isActiveDashboardDeal } from "@/data/deals";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { BarChart3, Trophy } from "lucide-react";
+import { TeamAvatar } from "@/components/ui/team-avatar";
 import {
   Bar,
   BarChart,
@@ -91,7 +92,7 @@ function LeaderboardPage() {
     currentMonth: member.monthCommission,
   }));
   const deals = data?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
-  const activeDeals = deals.filter((deal) => deal.status !== "Cancelled");
+  const activeDeals = deals.filter(isActiveDashboardDeal);
   const topDeals = [...activeDeals]
     .sort((a, b) => b.totalPricingGbp - a.totalPricingGbp)
     .slice(0, 5);
@@ -117,9 +118,13 @@ function LeaderboardPage() {
               <Trophy className="h-3.5 w-3.5" /> #{i + 1}
             </div>
             <div className="mt-3 flex items-center gap-3">
-              <div className="tb-hover-icon flex h-14 w-14 items-center justify-center rounded-full bg-white/70 text-lg font-bold">
-                {t.initials}
-              </div>
+              <TeamAvatar
+                name={t.name}
+                initials={t.initials}
+                avatarUrl={t.avatarUrl}
+                className="h-14 w-14"
+                fallbackClassName="bg-white/70 text-lg font-bold"
+              />
               <div>
                 <div className="text-lg font-bold">{t.name}</div>
                 <div className="text-xs opacity-70">{t.role}</div>

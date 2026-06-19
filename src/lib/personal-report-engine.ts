@@ -1,4 +1,4 @@
-import type { Deal } from "@/data/deals";
+import { isActiveDashboardDeal, type Deal } from "@/data/deals";
 import type { Teammate } from "@/data/team";
 import {
   buildExclusiveCreatorPerformance,
@@ -141,7 +141,9 @@ function getMemberExclusiveCreators(data: DashboardSheetData | undefined, member
 }
 
 function getMemberDeals(data: DashboardSheetData | undefined, memberName: string) {
-  return data?.deals.filter((deal) => deal.manager === memberName) ?? [];
+  return (
+    data?.deals.filter((deal) => deal.manager === memberName && isActiveDashboardDeal(deal)) ?? []
+  );
 }
 
 function getTeamRank(
@@ -205,7 +207,10 @@ function getTeamBenchmarks(
       opportunityDensity:
         exclusiveCreators.length > 0 ? memberDeals.length / exclusiveCreators.length : 0,
       avgDealValue: memberDeals.length > 0 ? revenue / memberDeals.length : 0,
-      commissionProgress: progressPct(member.monthCommission, getMemberMonthlyGoal(settings, member)),
+      commissionProgress: progressPct(
+        member.monthCommission,
+        getMemberMonthlyGoal(settings, member),
+      ),
       creatorsSourced: outreach?.totalCreators ?? 0,
       contacted: outreach?.contacted ?? 0,
       emailsSent: outreach?.emailed ?? 0,
@@ -308,10 +313,7 @@ function combinePlatformMix(performance: CreatorPerformance[]) {
     .sort((a, b) => b.value - a.value || b.count - a.count);
 }
 
-function getOutreachMetricFallback(
-  outreach: OutreachMemberStats | null,
-  member: Teammate,
-) {
+function getOutreachMetricFallback(outreach: OutreachMemberStats | null, member: Teammate) {
   return {
     creatorsSourced: outreach?.totalCreators ?? 0,
     contacted: outreach?.contacted ?? 0,
@@ -356,10 +358,13 @@ export function buildPersonalReport(
   const benchmarks = getTeamBenchmarks(members, data, settings);
   const teamRank = getTeamRank(members, data, member.name);
   const outreachMetrics = getOutreachMetricFallback(outreach, member);
-  const activeCreatorCount = creatorPerformance.all.filter((creator) => creator.totalDeals > 0).length;
+  const activeCreatorCount = creatorPerformance.all.filter(
+    (creator) => creator.totalDeals > 0,
+  ).length;
   const inactiveCreators = creatorPerformance.all.filter((creator) => creator.totalDeals === 0);
   const lowContributionCreators = creatorPerformance.all.filter(
-    (creator) => creator.totalDeals > 0 && creator.totalDealValue < Math.max(500, avgDealValue * 0.35),
+    (creator) =>
+      creator.totalDeals > 0 && creator.totalDealValue < Math.max(500, avgDealValue * 0.35),
   );
   const hiddenOpportunity =
     [...creatorPerformance.all]
@@ -392,10 +397,9 @@ export function buildPersonalReport(
   });
   const { primary, supporting, opportunity, superpower } = chooseReportInsights(insights);
 
-  const positives = [
-    superpower.observation,
-    opportunity?.observation ?? null,
-  ].filter(Boolean).slice(0, 2) as string[];
+  const positives = [superpower.observation, opportunity?.observation ?? null]
+    .filter(Boolean)
+    .slice(0, 2) as string[];
 
   if (positives.length === 0) {
     positives.push(
@@ -405,17 +409,18 @@ export function buildPersonalReport(
     );
   }
 
-  const evidence = [
-    ...primary.evidence,
-    `Selected bottleneck category: ${primary.category}.`,
-  ].filter(Boolean).slice(0, 4) as string[];
+  const evidence = [...primary.evidence, `Selected bottleneck category: ${primary.category}.`]
+    .filter(Boolean)
+    .slice(0, 4) as string[];
 
   const extraInsights = [
     supporting ? `Supporting insight: ${supporting.title}: ${supporting.observation}` : null,
     supporting?.diagnosis ? `Supporting diagnosis: ${supporting.diagnosis}` : null,
     opportunity ? `Opportunity insight: ${opportunity.title}: ${opportunity.observation}` : null,
     `Superpower selected: ${superpower.title}.`,
-  ].filter(Boolean).slice(0, 4) as string[];
+  ]
+    .filter(Boolean)
+    .slice(0, 4) as string[];
   const expandedInsights = [
     ...extraInsights,
     creatorRisk.share > 50
@@ -446,7 +451,9 @@ export function buildPersonalReport(
 
   const warnings = [
     !data ? "Dashboard data is still loading or unavailable." : null,
-    memberCreators.length === 0 ? "No exclusive creators found for this member in Signed & Partnered." : null,
+    memberCreators.length === 0
+      ? "No exclusive creators found for this member in Signed & Partnered."
+      : null,
     memberDeals.length === 0 ? "No deal rows found for this member." : null,
     !outreach ? "No outreach pipeline row found for this member." : null,
     creatorPerformance.diagnostics.dealCreatorsWithoutExclusiveMatch.length > 0

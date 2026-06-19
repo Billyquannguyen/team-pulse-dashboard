@@ -10,11 +10,13 @@ import {
 } from "lucide-react";
 import { team as fallbackTeam } from "@/data/team";
 import type { DashboardSheetData, OutreachDashboardData } from "@/lib/sheets-public";
+import { TeamAvatar } from "@/components/ui/team-avatar";
 
 function fallbackOutreach(): OutreachDashboardData {
   const members = fallbackTeam.map((member) => ({
     memberName: member.name,
     initials: member.initials,
+    avatarUrl: member.avatarUrl,
     totalCreators: 0,
     contacted: 0,
     emailed: 0,
@@ -231,9 +233,13 @@ export function OutreachSummaryCard({
                 >
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-2">
-                      <div className="tb-hover-icon flex h-8 w-8 items-center justify-center rounded-full bg-fun-blue text-xs font-semibold">
-                        {member.initials}
-                      </div>
+                      <TeamAvatar
+                        name={member.memberName}
+                        initials={member.initials}
+                        avatarUrl={member.avatarUrl}
+                        className="h-8 w-8"
+                        fallbackClassName="bg-fun-blue text-xs"
+                      />
                       <div className="font-medium">{member.memberName}</div>
                     </div>
                   </td>
@@ -255,9 +261,7 @@ export function OutreachSummaryCard({
                   </td>
                   <td className="px-3 py-3 text-right">{formatPercent(member.replyRate)}</td>
                   <td className="px-3 py-3 text-right">{formatPercent(member.bookingRate)}</td>
-                  <td className="px-3 py-3 text-right">
-                    {formatPercent(member.callClosingRate)}
-                  </td>
+                  <td className="px-3 py-3 text-right">{formatPercent(member.callClosingRate)}</td>
                   <td className="px-3 py-3 text-right">
                     {formatPercent(member.overallClosingRate)}
                   </td>

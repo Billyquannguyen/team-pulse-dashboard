@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { recentDeals, type Deal, type DealStatus } from "@/data/deals";
+import { isActiveDashboardDeal, recentDeals, type Deal, type DealStatus } from "@/data/deals";
 import { cn } from "@/lib/utils";
 
 const statusStyles: Record<DealStatus, string> = {
@@ -11,7 +11,7 @@ const statusStyles: Record<DealStatus, string> = {
 };
 
 export function RecentDealsCard({ deals = recentDeals }: { deals?: Deal[] }) {
-  const rows = deals.slice(0, 8);
+  const rows = deals.filter(isActiveDashboardDeal).slice(0, 8);
 
   return (
     <div className="rounded-3xl bg-card p-6 ring-1 ring-border">

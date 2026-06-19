@@ -1,5 +1,5 @@
 import type { Creator } from "@/data/creators";
-import type { Deal, Platform } from "@/data/deals";
+import { isActiveDashboardDeal, type Deal, type Platform } from "@/data/deals";
 
 export type CreatorDealMatchMethod = "handle" | "email" | "name" | "fuzzy";
 
@@ -115,7 +115,13 @@ function extractSocialHandle(value?: string) {
 }
 
 function displayCreatorName(creator: Creator) {
-  return creator.handle || creator.email || creator.tiktokLink || creator.instagramLink || "Unknown creator";
+  return (
+    creator.handle ||
+    creator.email ||
+    creator.tiktokLink ||
+    creator.instagramLink ||
+    "Unknown creator"
+  );
 }
 
 function buildCreatorIndex(creators: Creator[]) {
@@ -254,7 +260,9 @@ function findBestMatch(deal: Deal, creatorIndex: CreatorIndexEntry[]) {
     .sort((a, b) => b.confidence - a.confidence);
 
   const best = fuzzyCandidates[0];
-  const second = fuzzyCandidates.find((candidate) => candidate.entry.creator.id !== best?.entry.creator.id);
+  const second = fuzzyCandidates.find(
+    (candidate) => candidate.entry.creator.id !== best?.entry.creator.id,
+  );
 
   if (best && (!second || best.confidence - second.confidence >= 0.04)) {
     return {
@@ -322,13 +330,14 @@ export function buildExclusiveCreatorPerformance(
   creators: Creator[],
   deals: Deal[],
 ): ExclusiveCreatorPerformanceResult {
+  const activeDeals = deals.filter(isActiveDashboardDeal);
   const creatorIndex = buildCreatorIndex(creators);
   const matchMap = new Map<string, CreatorDealMatch[]>();
   const dealCreatorsWithoutExclusiveMatch: CreatorMatchingDiagnostics["dealCreatorsWithoutExclusiveMatch"] =
     [];
   const fuzzyMatchedDeals: CreatorMatchingDiagnostics["fuzzyMatchedDeals"] = [];
 
-  for (const deal of deals) {
+  for (const deal of activeDeals) {
     if (!deal.creator) continue;
 
     const match = findBestMatch(deal, creatorIndex);

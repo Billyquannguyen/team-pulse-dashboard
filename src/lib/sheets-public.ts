@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { IGNORED_OUTREACH_TAB_NAMES, SIGNED_CREATORS_TAB_NAME } from "@/data/sheetConfig";
 import { team as fallbackTeam, type Teammate } from "@/data/team";
-import { deals as fallbackDeals, type Deal } from "@/data/deals";
+import { deals as fallbackDeals, isActiveDashboardDeal, type Deal } from "@/data/deals";
 import { creators as fallbackCreators, type Creator } from "@/data/creators";
 import {
   canonicalMemberName,
@@ -139,6 +139,7 @@ export type DashboardSheetData = {
 export type OutreachMemberStats = {
   memberName: string;
   initials: string;
+  avatarUrl?: string;
   totalCreators: number;
   contacted: number;
   emailed: number;
@@ -157,7 +158,7 @@ export type OutreachMemberStats = {
 
 export type OutreachDashboardData = {
   members: OutreachMemberStats[];
-  totals: Omit<OutreachMemberStats, "memberName" | "initials" | "topNiche"> & {
+  totals: Omit<OutreachMemberStats, "memberName" | "initials" | "avatarUrl" | "topNiche"> & {
     topNiche: string;
   };
   source: "google-sheet" | "fallback";
@@ -583,7 +584,9 @@ async function readConfiguredDealMemberSheets(
 function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fallback: Teammate) {
   const currentMonthKey = getCurrentDealMonthKey();
   const pendingOwed = getSummaryValue(rows, SUMMARY_LABELS.pendingOwed);
-  const memberDeals = deals.filter((deal) => deal.manager === tabName);
+  const memberDeals = deals.filter(
+    (deal) => deal.manager === tabName && isActiveDashboardDeal(deal),
+  );
   const allTimeCommission = memberDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
   const currentMonthCommission = memberDeals
     .filter((deal) => normalizeDealMonthKey(deal.month) === currentMonthKey)
@@ -678,6 +681,7 @@ function fallbackOutreachData(team: Teammate[] = fallbackTeam): OutreachDashboar
     members: team.map((member) => ({
       memberName: member.name,
       initials: member.initials,
+      avatarUrl: member.avatarUrl,
       totalCreators: 0,
       contacted: 0,
       emailed: 0,
@@ -731,6 +735,7 @@ function buildOutreachDashboardData(
     return {
       memberName: member.name,
       initials: member.initials,
+      avatarUrl: member.avatarUrl,
       totalCreators: rows.length,
       contacted,
       emailed,
@@ -1016,16 +1021,17 @@ async function readCreatorSourcingData(
 }
 
 function calculateTotals(team: Teammate[], deals: Deal[]) {
-  const totalPaid = team.reduce((sum, member) => sum + member.commission, 0);
-  const totalPaidCommission = deals
+  const activeDeals = deals.filter(isActiveDashboardDeal);
+  const totalPaid = activeDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
+  const totalPaidCommission = activeDeals
     .filter((deal) => deal.status === "Paid" || deal.managerTotalPaid)
     .reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
   const paidThisMonth = team.reduce((sum, member) => sum + member.monthCommission, 0);
   const pendingOwed = team.reduce((sum, member) => sum + member.pendingOwed, 0);
-  const dealsClosed = deals.length;
-  const totalPricing = deals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
-  const pricedDeals = deals.filter((deal) => deal.totalPricingGbp > 0);
-  const marginValues = deals
+  const dealsClosed = activeDeals.length;
+  const totalPricing = activeDeals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
+  const pricedDeals = activeDeals.filter((deal) => deal.totalPricingGbp > 0);
+  const marginValues = activeDeals
     .map((deal) => parsePercent(deal.profitMargin))
     .filter((margin) => margin > 0);
 
@@ -1073,7 +1079,7 @@ function emptyDashboardData(error: string, links: SpreadsheetLinks): DashboardSh
 }
 
 function fallbackDashboardData(error: string, links: SpreadsheetLinks): DashboardSheetData {
-  const activeFallbackDeals = fallbackDeals.filter((deal) => deal.status !== "Cancelled");
+  const activeFallbackDeals = fallbackDeals.filter(isActiveDashboardDeal);
 
   return {
     deals: activeFallbackDeals,

@@ -3,6 +3,7 @@ import { team as fallbackTeam, type Teammate } from "@/data/team";
 import { DEFAULT_GOAL_SETTINGS } from "@/lib/goal-settings";
 import { getMemberProgressionGoal } from "@/lib/goal-targets";
 import { Trophy } from "lucide-react";
+import { TeamAvatar } from "@/components/ui/team-avatar";
 
 const palette = [
   "var(--fun-lime)",
@@ -48,12 +49,14 @@ export function LeaderboardCard({
               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-card text-xs font-bold ring-1 ring-border">
                 {i + 1}
               </span>
-              <div
-                className="tb-hover-icon flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold"
+              <TeamAvatar
+                name={t.name}
+                initials={t.initials}
+                avatarUrl={t.avatarUrl}
+                className="h-10 w-10"
+                fallbackClassName="bg-transparent text-sm"
                 style={{ background: palette[i % palette.length] }}
-              >
-                {t.initials}
-              </div>
+              />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">{t.name}</div>
                 <div className="text-xs text-muted-foreground">

@@ -8,6 +8,10 @@ export type Teammate = {
   color?: string;
   sortOrder?: number;
   joinedMonth?: string;
+  avatarUrl?: string;
+  instagramUrl?: string;
+  tiktokUrl?: string;
+  youtubeUrl?: string;
   // Parsed from the member summary label/value cells in the deal worksheet.
   commission: number;
   // Parsed from the member summary label/value cells in the deal worksheet.

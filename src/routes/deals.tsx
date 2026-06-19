@@ -12,6 +12,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { DashboardSelectField } from "@/components/ui/dashboard-select";
+import { isActiveDashboardDeal } from "@/data/deals";
 import { team as fallbackTeam } from "@/data/team";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
@@ -61,7 +62,7 @@ function DealsPage() {
   const [page, setPage] = useState(1);
   const { data } = useQuery(dashboardSheetQuery);
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
-  const deals = useMemo(() => data?.deals ?? [], [data?.deals]);
+  const deals = useMemo(() => (data?.deals ?? []).filter(isActiveDashboardDeal), [data?.deals]);
   const team = useMemo(
     () => data?.team ?? (canUseLocalFallback ? fallbackTeam : []),
     [canUseLocalFallback, data?.team],
@@ -135,13 +136,7 @@ function DealsPage() {
           (links === "Has live link" && Boolean(d.liveLink)) ||
           (links === "Missing live link" && !d.liveLink);
 
-        return (
-          matchesQuery &&
-          matchesMember &&
-          matchesStatus &&
-          matchesPlatform &&
-          matchesLinks
-        );
+        return matchesQuery && matchesMember && matchesStatus && matchesPlatform && matchesLinks;
       }),
     [deals, links, member, platform, q, status],
   );

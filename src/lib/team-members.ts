@@ -24,10 +24,22 @@ export type TeamMemberConfig = {
   displayName: string;
   status: TeamMemberStatus;
   joinedMonth: string;
+  avatarUrl: string;
+  instagramUrl: string;
+  tiktokUrl: string;
+  youtubeUrl: string;
   rowNumber?: number;
 };
 
-type TeamMemberField = "displayName" | "id" | "joinedMonth" | "status";
+type TeamMemberField =
+  | "displayName"
+  | "id"
+  | "joinedMonth"
+  | "status"
+  | "avatarUrl"
+  | "instagramUrl"
+  | "tiktokUrl"
+  | "youtubeUrl";
 
 type TeamMembersCacheEntry = {
   data: TeamMembersSheetData;
@@ -68,9 +80,27 @@ export type TeamMemberSuggestion = {
 export const TEAM_MEMBERS_TAB_NAME = "TeamMembers";
 export const TEAM_MEMBERS_SPREADSHEET_ENV = "TEAM_ASSETS_SPREADSHEET_ID";
 
-export const TEAM_MEMBERS_HEADERS = ["Name", "ID", "Joined Month", "Status"] as const;
+export const TEAM_MEMBERS_HEADERS = [
+  "Name",
+  "ID",
+  "Joined Month",
+  "Status",
+  "Avatar",
+  "Instagram",
+  "TikTok",
+  "YouTube",
+] as const;
 
-const TEAM_MEMBER_FIELDS: TeamMemberField[] = ["displayName", "id", "joinedMonth", "status"];
+const TEAM_MEMBER_FIELDS: TeamMemberField[] = [
+  "displayName",
+  "id",
+  "joinedMonth",
+  "status",
+  "avatarUrl",
+  "instagramUrl",
+  "tiktokUrl",
+  "youtubeUrl",
+];
 
 export const SYSTEM_MEMBER_TAB_NAMES = [
   "Comm Tracking",
@@ -136,6 +166,10 @@ const TEAM_MEMBER_COLUMN_ALIASES: Record<TeamMemberField, string[]> = {
   id: ["id", "member id", "worksheet", "worksheet name", "tab", "tab name"],
   joinedMonth: ["joined month", "joinedmonth", "join month", "joined", "start month"],
   status: ["status", "active status"],
+  avatarUrl: ["avatar", "avatar url", "photo", "profile photo", "image"],
+  instagramUrl: ["instagram", "instagram url", "ig", "ig url"],
+  tiktokUrl: ["tiktok", "tiktok url", "tik tok", "tik tok url"],
+  youtubeUrl: ["youtube", "youtube url", "yt", "yt url"],
 };
 
 const teamMemberInput = z.object({
@@ -147,10 +181,20 @@ const teamMemberInput = z.object({
 
 const updateTeamMemberInput = teamMemberInput.extend({
   rowNumber: z.number().int().min(2),
+  originalId: z.string().trim().min(1).max(80).optional(),
 });
 
 const offboardTeamMemberInput = z.object({
   rowNumber: z.number().int().min(2),
+});
+
+const teamMemberProfileInput = z.object({
+  rowNumber: z.number().int().min(2),
+  originalId: z.string().trim().min(1).max(80),
+  avatarUrl: z.string().max(50000).optional().default(""),
+  instagramUrl: z.string().trim().max(500).optional().default(""),
+  tiktokUrl: z.string().trim().max(500).optional().default(""),
+  youtubeUrl: z.string().trim().max(500).optional().default(""),
 });
 
 let teamMembersCache: TeamMembersCacheEntry | null = null;
@@ -316,6 +360,10 @@ function normalizeTeamMemberRows(headers: string[], rows: string[][]) {
         displayName,
         status: parseStatus(getCell(row, lookup, "status")),
         joinedMonth: cleanValue(getCell(row, lookup, "joinedMonth")),
+        avatarUrl: getCell(row, lookup, "avatarUrl").trim(),
+        instagramUrl: getCell(row, lookup, "instagramUrl").trim(),
+        tiktokUrl: getCell(row, lookup, "tiktokUrl").trim(),
+        youtubeUrl: getCell(row, lookup, "youtubeUrl").trim(),
         rowNumber: index + 2,
       };
     })
@@ -353,6 +401,10 @@ function getKnownFallback(member: TeamMemberConfig, index: number): Teammate {
     worksheetName: member.id,
     status: member.status,
     joinedMonth: member.joinedMonth,
+    avatarUrl: member.avatarUrl,
+    instagramUrl: member.instagramUrl,
+    tiktokUrl: member.tiktokUrl,
+    youtubeUrl: member.youtubeUrl,
   };
 }
 
@@ -559,13 +611,47 @@ export async function getActiveTeammatesForServer() {
   return members.map(teamMemberConfigToTeammate);
 }
 
-function buildTeamMemberWriteRow(input: z.infer<typeof teamMemberInput>) {
+function buildTeamMemberWriteRow(
+  input: z.infer<typeof teamMemberInput> &
+    Partial<Pick<TeamMemberConfig, "avatarUrl" | "instagramUrl" | "tiktokUrl" | "youtubeUrl">>,
+  existingRow?: string[],
+  existingLookup?: HeaderLookup<TeamMemberField>,
+) {
+  const existing = (field: TeamMemberField) =>
+    existingRow && existingLookup ? getCell(existingRow, existingLookup, field).trim() : "";
+
   return [
     cleanValue(input.displayName),
     cleanValue(input.id),
     cleanValue(input.joinedMonth),
     formatStatus(input.status),
+    input.avatarUrl ?? existing("avatarUrl"),
+    input.instagramUrl ?? existing("instagramUrl"),
+    input.tiktokUrl ?? existing("tiktokUrl"),
+    input.youtubeUrl ?? existing("youtubeUrl"),
   ];
+}
+
+function findTeamMemberRowNumber(
+  worksheet: TeamMembersWorksheet,
+  input: { id: string; originalId?: string; rowNumber: number },
+) {
+  const lookup = buildColumnLookup(worksheet.headers);
+  const originalKey = normalizeSheetKey(input.originalId ?? "");
+  const currentKey = normalizeSheetKey(input.id);
+
+  const match = worksheet.rows
+    .map((row, index) => ({
+      row,
+      rowNumber: index + 2,
+    }))
+    .find(({ row }) => {
+      const rowKey = normalizeSheetKey(getCell(row, lookup, "id"));
+      if (!rowKey) return false;
+      return rowKey === originalKey || rowKey === currentKey;
+    });
+
+  return match?.rowNumber ?? input.rowNumber;
 }
 
 function chooseSeedMembers(availableTabs: string[]) {
@@ -651,18 +737,20 @@ export const updateTeamMember = createServerFn({ method: "POST" })
       ensureHeaders: true,
     });
     const spreadsheetId = getTeamMembersSpreadsheetId();
-    const existingRow = worksheet.rows[data.rowNumber - 2];
+    const rowNumber = findTeamMemberRowNumber(worksheet, data);
+    const existingRow = worksheet.rows[rowNumber - 2];
+    const lookup = buildColumnLookup(worksheet.headers);
 
     if (!existingRow) {
-      throw new Error(`Could not find TeamMembers row ${data.rowNumber}. Refresh and try again.`);
+      throw new Error(`Could not find TeamMembers row ${rowNumber}. Refresh and try again.`);
     }
 
     await googleSheets.updateSheetRow(
       config,
       spreadsheetId,
       worksheet.sheet,
-      data.rowNumber,
-      buildTeamMemberWriteRow(data),
+      rowNumber,
+      buildTeamMemberWriteRow(data, existingRow, lookup),
     );
     await invalidateRelatedCaches();
 
@@ -702,6 +790,61 @@ export const offboardTeamMember = createServerFn({ method: "POST" })
       data.rowNumber,
       TEAM_MEMBER_FIELDS.map((field) =>
         field === "status" ? "Offboarded" : getCell(row, lookup, field),
+      ),
+    );
+    await invalidateRelatedCaches();
+
+    return { ok: true as const };
+  });
+
+export const updateTeamMemberProfile = createServerFn({ method: "POST" })
+  .inputValidator(teamMemberProfileInput)
+  .handler(async ({ data }) => {
+    const { requireDashboardAuth } = await import("@/lib/auth.server");
+    await requireDashboardAuth();
+    const googleSheets = await getGoogleSheetsServer();
+    const config = googleSheets.getGoogleSheetsConfig();
+    const worksheet = await loadTeamMembersWorksheet(config, {
+      createIfMissing: true,
+      ensureHeaders: true,
+    });
+    const spreadsheetId = getTeamMembersSpreadsheetId();
+    const rowNumber = findTeamMemberRowNumber(worksheet, {
+      rowNumber: data.rowNumber,
+      id: data.originalId,
+      originalId: data.originalId,
+    });
+    const existingRow = worksheet.rows[rowNumber - 2];
+
+    if (!existingRow) {
+      throw new Error(`Could not find TeamMembers row ${rowNumber}. Refresh and try again.`);
+    }
+
+    const lookup = buildColumnLookup(worksheet.headers);
+    const existingMember = normalizeTeamMemberRows(worksheet.headers, [existingRow])[0];
+
+    if (!existingMember) {
+      throw new Error("Could not read this TeamMembers row. Refresh and try again.");
+    }
+
+    await googleSheets.updateSheetRow(
+      config,
+      spreadsheetId,
+      worksheet.sheet,
+      rowNumber,
+      buildTeamMemberWriteRow(
+        {
+          displayName: existingMember.displayName,
+          id: existingMember.id,
+          joinedMonth: existingMember.joinedMonth,
+          status: existingMember.status,
+          avatarUrl: data.avatarUrl,
+          instagramUrl: data.instagramUrl,
+          tiktokUrl: data.tiktokUrl,
+          youtubeUrl: data.youtubeUrl,
+        },
+        existingRow,
+        lookup,
       ),
     );
     await invalidateRelatedCaches();

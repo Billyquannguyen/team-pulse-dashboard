@@ -1,5 +1,6 @@
 import { team as fallbackTeam, type Teammate } from "@/data/team";
 import { Target } from "lucide-react";
+import { TeamAvatar } from "@/components/ui/team-avatar";
 
 export function GoalProgressCard({
   current,
@@ -67,9 +68,13 @@ export function GoalProgressCard({
       <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
         <div className="flex -space-x-2">
           {team.slice(0, 6).map((t, i) => (
-            <div
+            <TeamAvatar
               key={t.id}
-              className="tb-hover-icon flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold ring-2 ring-card hover:z-10"
+              name={t.name}
+              initials={t.initials}
+              avatarUrl={t.avatarUrl}
+              className="h-9 w-9 ring-2 ring-card hover:z-10"
+              fallbackClassName="bg-transparent text-xs"
               style={{
                 background: [
                   "var(--fun-lime)",
@@ -80,9 +85,7 @@ export function GoalProgressCard({
                   "var(--fun-orange)",
                 ][i],
               }}
-            >
-              {t.initials}
-            </div>
+            />
           ))}
         </div>
         <span className="text-xs text-muted-foreground">{team.length} teammates contributing</span>

@@ -6,6 +6,7 @@ import { team as fallbackTeam } from "@/data/team";
 import { logoutFromDashboard } from "@/lib/auth";
 import { NotificationBell } from "@/components/layout/NotificationBell";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
+import { TeamAvatar } from "@/components/ui/team-avatar";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -49,9 +50,13 @@ export function AppHeader({ title, subtitle }: { title: string; subtitle?: strin
         </button>
         <div className="flex -space-x-2">
           {team.slice(0, 4).map((t, i) => (
-            <div
+            <TeamAvatar
               key={t.id}
-              className="tb-hover-icon flex h-10 w-10 items-center justify-center rounded-full text-xs font-semibold ring-2 ring-background hover:z-10"
+              name={t.name}
+              initials={t.initials}
+              avatarUrl={t.avatarUrl}
+              className="h-10 w-10 ring-2 ring-background hover:z-10"
+              fallbackClassName="bg-transparent text-xs"
               style={{
                 background:
                   t.color ??
@@ -59,9 +64,7 @@ export function AppHeader({ title, subtitle }: { title: string; subtitle?: strin
                     i
                   ],
               }}
-            >
-              {t.initials}
-            </div>
+            />
           ))}
         </div>
       </div>
