@@ -19,7 +19,7 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { DashboardSelectField } from "@/components/ui/dashboard-select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { searchAleadsContacts, type AleadsContactResult } from "@/lib/a-leads";
+import { searchApolloContacts, type ApolloContactResult } from "@/lib/apollo";
 import { contactDatabaseQuery, upsertContactDatabaseContacts } from "@/lib/contact-database";
 import type { ContactDatabaseContact } from "@/lib/contact-database";
 import { createGmailDrafts } from "@/lib/gmail-drafts";
@@ -31,14 +31,14 @@ export const Route = createFileRoute("/brand-finder")({
       { title: "Brand Finder - Team Billion" },
       {
         name: "description",
-        content: "Upload dream brand sheets, run A-Leads, and create Gmail drafts.",
+        content: "Upload dream brand sheets, run Apollo, and create Gmail drafts.",
       },
     ],
   }),
   component: BrandFinderPage,
 });
 
-const STORAGE_KEY = "team-billion-brand-finder-simple-v1";
+const STORAGE_KEY = "team-billion-brand-finder-apollo-v1";
 const ALL_BRANDS = "All brands";
 
 const DEFAULT_SUBJECT_TEMPLATE = "Creator partnership for {{brand_name}}";
@@ -64,34 +64,29 @@ const DEFAULT_JOB_TITLES = [
   "Founder",
 ];
 
-const DEFAULT_DEPARTMENTS = [
-  "Marketing",
-  "Brand Marketing",
-  "Partnerships",
-  "Public Relations",
-  "Social Media",
+const DEFAULT_KEYWORDS = [
+  "influencer marketing",
+  "creator partnerships",
+  "brand partnerships",
+  "public relations",
+  "social media",
 ];
 
-const DEFAULT_SENIORITY = ["Manager", "Director", "Head", "Founder", "Owner"];
+const DEFAULT_SENIORITY = ["manager", "director", "head", "founder", "owner"];
+const DEFAULT_EMAIL_STATUSES = ["verified", "likely to engage"];
 
-const searchTypeOptions = [
-  { value: "total", label: "Total" },
-  { value: "new", label: "Net new" },
-  { value: "saved", label: "Saved" },
-] as const;
-
-type SearchType = "new" | "saved" | "total";
 type TemplateTarget = "subject" | "body";
 type BrandStatus = "none" | "database";
 
-type AleadsFilterState = {
+type ApolloFilterState = {
   jobTitlesText: string;
-  departmentsText: string;
+  keywordsText: string;
   seniorityText: string;
-  searchType: SearchType;
+  emailStatusesText: string;
+  includeSimilarTitles: boolean;
   maxContactsPerBrand: number;
   requireEmail: boolean;
-  enrichMissingEmails: boolean;
+  enrichEmails: boolean;
 };
 
 type BrandRow = {
@@ -122,7 +117,7 @@ type SavedBrandFinderState = {
   sheetFileName?: string;
   subjectTemplate?: string;
   bodyTemplate?: string;
-  filters?: AleadsFilterState;
+  filters?: ApolloFilterState;
   brandOverrides?: Record<string, BrandOverride>;
   brandSearchOverrides?: Record<string, boolean>;
   contacts?: ContactRow[];
@@ -130,14 +125,15 @@ type SavedBrandFinderState = {
   draftMessage?: string;
 };
 
-const DEFAULT_FILTER_STATE: AleadsFilterState = {
+const DEFAULT_FILTER_STATE: ApolloFilterState = {
   jobTitlesText: DEFAULT_JOB_TITLES.join("\n"),
-  departmentsText: DEFAULT_DEPARTMENTS.join("\n"),
+  keywordsText: DEFAULT_KEYWORDS.join("\n"),
   seniorityText: DEFAULT_SENIORITY.join("\n"),
-  searchType: "total",
+  emailStatusesText: DEFAULT_EMAIL_STATUSES.join("\n"),
+  includeSimilarTitles: true,
   maxContactsPerBrand: 3,
   requireEmail: true,
-  enrichMissingEmails: true,
+  enrichEmails: true,
 };
 
 function normalizeText(value: string) {
@@ -449,7 +445,7 @@ function contactId(contact: Pick<ContactRow, "brandName" | "contactName" | "emai
   return compactKey([contact.brandName, contact.email || contact.contactName].join("|"));
 }
 
-function apiContactToRow(contact: AleadsContactResult, brands: BrandRow[]): ContactRow {
+function apiContactToRow(contact: ApolloContactResult, brands: BrandRow[]): ContactRow {
   const brand =
     brands.find((item) => item.id === contact.brandId) ??
     brands.find((item) => compactKey(item.brandName) === compactKey(contact.brandName)) ??
@@ -526,7 +522,7 @@ function BrandFinderPage() {
   );
   const [bodyTemplate, setBodyTemplate] = useState(saved.bodyTemplate ?? DEFAULT_BODY_TEMPLATE);
   const [templateTarget, setTemplateTarget] = useState<TemplateTarget>("body");
-  const [filters, setFilters] = useState<AleadsFilterState>({
+  const [filters, setFilters] = useState<ApolloFilterState>({
     ...DEFAULT_FILTER_STATE,
     ...(saved.filters ?? {}),
   });
@@ -683,7 +679,7 @@ function BrandFinderPage() {
     });
   };
 
-  const runAleadsSearch = async () => {
+  const runApolloSearch = async () => {
     setSearchError("");
     setSearchMessage("");
     setDraftMessage("");
@@ -694,24 +690,31 @@ function BrandFinderPage() {
       return;
     }
 
+    if (filters.requireEmail && !filters.enrichEmails) {
+      setSearchError(
+        "Apollo search does not return emails by itself. Turn on email enrichment or turn off the email-only filter.",
+      );
+      return;
+    }
+
     setIsSearching(true);
     try {
-      const result = await searchAleadsContacts({
+      const result = await searchApolloContacts({
         data: {
           brands: selectedBrands.map((brand) => ({
             id: brand.id,
-            creatorName: "Brand Finder",
             name: brand.brandName,
             domain: brand.domain,
           })),
           filters: {
             jobTitles: splitList(filters.jobTitlesText),
-            departments: splitList(filters.departmentsText),
+            keywords: splitList(filters.keywordsText),
             seniority: splitList(filters.seniorityText),
-            searchType: filters.searchType,
+            emailStatuses: splitList(filters.emailStatusesText),
+            includeSimilarTitles: filters.includeSimilarTitles,
             maxContactsPerBrand: filters.maxContactsPerBrand,
             requireEmail: filters.requireEmail,
-            enrichMissingEmails: filters.enrichMissingEmails,
+            enrichEmails: filters.enrichEmails,
           },
         },
       });
@@ -720,9 +723,9 @@ function BrandFinderPage() {
         .filter((contact) => !filters.requireEmail || contact.email);
 
       setContacts((current) => mergeContacts(current, incoming));
-      setSearchMessage(`A-Leads returned ${incoming.length} contacts.`);
+      setSearchMessage(`Apollo returned ${incoming.length} contacts.`);
     } catch (error) {
-      setSearchError(error instanceof Error ? error.message : "A-Leads search failed.");
+      setSearchError(error instanceof Error ? error.message : "Apollo search failed.");
     } finally {
       setIsSearching(false);
     }
@@ -809,7 +812,7 @@ function BrandFinderPage() {
     <div className="space-y-6">
       <AppHeader
         title="Brand Finder"
-        subtitle="Upload dream brands, run A-Leads, select contacts, and create Gmail drafts."
+        subtitle="Upload dream brands, run Apollo, select contacts, and create Gmail drafts."
       />
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -882,7 +885,7 @@ function BrandFinderPage() {
             />
           </Panel>
 
-          <Panel title="Parsed brands" subtitle={`${selectedBrands.length} selected for A-Leads.`}>
+          <Panel title="Parsed brands" subtitle={`${selectedBrands.length} selected for Apollo.`}>
             <div className="overflow-x-auto rounded-2xl border border-border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
@@ -966,7 +969,7 @@ function BrandFinderPage() {
               <button
                 type="button"
                 disabled={isSearching || selectedBrands.length === 0}
-                onClick={() => void runAleadsSearch()}
+                onClick={() => void runApolloSearch()}
                 className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSearching ? (
@@ -974,7 +977,7 @@ function BrandFinderPage() {
                 ) : (
                   <Search className="h-4 w-4" />
                 )}
-                Run A-Leads
+                Run Apollo
               </button>
             }
           >
@@ -1027,7 +1030,7 @@ function BrandFinderPage() {
                         colSpan={5}
                         className="px-3 py-8 text-center text-sm text-muted-foreground"
                       >
-                        Run A-Leads to load contacts.
+                        Run Apollo to load contacts.
                       </td>
                     </tr>
                   )}
@@ -1106,16 +1109,8 @@ function BrandFinderPage() {
         </div>
 
         <div className="space-y-4">
-          <Panel title="A-Leads filters" subtitle="Pre-saved settings for this browser.">
+          <Panel title="Apollo filters" subtitle="Saved search settings for this browser.">
             <div className="grid gap-3 sm:grid-cols-2">
-              <DashboardSelectField
-                label="Search set"
-                value={filters.searchType}
-                options={[...searchTypeOptions]}
-                onChange={(value) =>
-                  setFilters((current) => ({ ...current, searchType: value as SearchType }))
-                }
-              />
               <label className="text-xs font-semibold text-muted-foreground">
                 Max per brand
                 <input
@@ -1143,10 +1138,10 @@ function BrandFinderPage() {
               onChange={(value) => setFilters((current) => ({ ...current, jobTitlesText: value }))}
             />
             <FilterTextarea
-              label="Departments"
-              value={filters.departmentsText}
+              label="Keywords"
+              value={filters.keywordsText}
               onChange={(value) =>
-                setFilters((current) => ({ ...current, departmentsText: value }))
+                setFilters((current) => ({ ...current, keywordsText: value }))
               }
             />
             <FilterTextarea
@@ -1154,8 +1149,22 @@ function BrandFinderPage() {
               value={filters.seniorityText}
               onChange={(value) => setFilters((current) => ({ ...current, seniorityText: value }))}
             />
+            <FilterTextarea
+              label="Email statuses"
+              value={filters.emailStatusesText}
+              onChange={(value) =>
+                setFilters((current) => ({ ...current, emailStatusesText: value }))
+              }
+            />
 
             <div className="mt-4 grid gap-2">
+              <ToggleRow
+                label="Include similar job titles"
+                checked={filters.includeSimilarTitles}
+                onCheckedChange={(checked) =>
+                  setFilters((current) => ({ ...current, includeSimilarTitles: checked }))
+                }
+              />
               <ToggleRow
                 label="Only return contacts with emails"
                 checked={filters.requireEmail}
@@ -1164,10 +1173,10 @@ function BrandFinderPage() {
                 }
               />
               <ToggleRow
-                label="Find missing emails after search"
-                checked={filters.enrichMissingEmails}
+                label="Enrich emails after search"
+                checked={filters.enrichEmails}
                 onCheckedChange={(checked) =>
-                  setFilters((current) => ({ ...current, enrichMissingEmails: checked }))
+                  setFilters((current) => ({ ...current, enrichEmails: checked }))
                 }
               />
             </div>
@@ -1232,7 +1241,7 @@ function BrandFinderPage() {
             </label>
           </Panel>
 
-          <Panel title="Contact Database" subtitle="Used for duplicate and previous-contact flags.">
+          <Panel title="Contact Database" subtitle="Used for duplicate flags.">
             <div className="flex items-center gap-3 rounded-2xl border border-border bg-background p-3">
               <Database className="h-5 w-5 text-primary" />
               <div>

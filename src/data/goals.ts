@@ -74,6 +74,7 @@ export function createGoalRows(
 
 export const defaultGoalRows: GoalRow[] = createGoalRows(team, {
   totalPaid: totalCommission,
+  totalPaidCommission: 0,
   paidThisMonth: totalMonthCommission,
   pendingOwed: totalPendingOwed,
   dealsClosed: totalDealsClosed,

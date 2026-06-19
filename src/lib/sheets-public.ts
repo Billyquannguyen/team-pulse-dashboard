@@ -119,6 +119,7 @@ export type DashboardSheetData = {
   outreach: OutreachDashboardData;
   totals: {
     totalPaid: number;
+    totalPaidCommission: number;
     paidThisMonth: number;
     pendingOwed: number;
     dealsClosed: number;
@@ -1016,6 +1017,9 @@ async function readCreatorSourcingData(
 
 function calculateTotals(team: Teammate[], deals: Deal[]) {
   const totalPaid = team.reduce((sum, member) => sum + member.commission, 0);
+  const totalPaidCommission = deals
+    .filter((deal) => deal.status === "Paid" || deal.managerTotalPaid)
+    .reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
   const paidThisMonth = team.reduce((sum, member) => sum + member.monthCommission, 0);
   const pendingOwed = team.reduce((sum, member) => sum + member.pendingOwed, 0);
   const dealsClosed = deals.length;
@@ -1027,6 +1031,7 @@ function calculateTotals(team: Teammate[], deals: Deal[]) {
 
   return {
     totalPaid,
+    totalPaidCommission,
     paidThisMonth,
     pendingOwed,
     dealsClosed,
@@ -1050,6 +1055,7 @@ function emptyDashboardData(error: string, links: SpreadsheetLinks): DashboardSh
     },
     totals: {
       totalPaid: 0,
+      totalPaidCommission: 0,
       paidThisMonth: 0,
       pendingOwed: 0,
       dealsClosed: 0,

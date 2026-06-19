@@ -7,6 +7,11 @@ export type SlackMessageRuleInput = {
   bot_id?: string;
   app_id?: string;
   files?: unknown[];
+  reactions?: Array<{
+    name?: string;
+    users?: string[];
+    count?: number;
+  }>;
 };
 
 export type SlackActionStateForRules = {
@@ -29,6 +34,7 @@ export type SlackFollowupEvaluation =
       reason:
         | "no_meaningful_message"
         | "latest_from_owner"
+        | "owner_reacted"
         | "below_threshold"
         | "suppressed_by_action";
     };
@@ -78,6 +84,14 @@ export function findLatestMeaningfulSlackMessage(messages: SlackMessageRuleInput
   return messages.find(isMeaningfulSlackMessage) ?? null;
 }
 
+export function hasOwnerSlackReaction(message: SlackMessageRuleInput, ownerUserId: string) {
+  if (!ownerUserId) return false;
+
+  return Boolean(
+    message.reactions?.some((reaction) => reaction.users?.some((userId) => userId === ownerUserId)),
+  );
+}
+
 export function shouldSuppressSlackNotification(
   state: SlackActionStateForRules | null,
   lastMessageTs: string,
@@ -115,6 +129,10 @@ export function evaluateSlackDmFollowup({
 
   if (latestMessage.user === ownerUserId) {
     return { status: "skip", reason: "latest_from_owner" };
+  }
+
+  if (hasOwnerSlackReaction(latestMessage, ownerUserId)) {
+    return { status: "skip", reason: "owner_reacted" };
   }
 
   const messageAgeMs = nowMs - slackTsToMs(latestMessage.ts);

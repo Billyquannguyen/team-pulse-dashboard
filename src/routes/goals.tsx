@@ -972,6 +972,7 @@ function GoalsPage() {
   const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
   const totals = data?.totals ?? {
     totalPaid: canUseLocalFallback ? totalCommission : 0,
+    totalPaidCommission: 0,
     paidThisMonth: canUseLocalFallback ? totalMonthCommission : 0,
     pendingOwed: 0,
     dealsClosed: canUseLocalFallback ? totalDealsClosed : 0,

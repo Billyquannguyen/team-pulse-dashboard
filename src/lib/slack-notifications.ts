@@ -61,6 +61,7 @@ type SlackMessage = {
   bot_id?: string;
   app_id?: string;
   files?: unknown[];
+  reactions?: SlackMessageRuleInput["reactions"];
 };
 
 type SlackHistoryResponse = {

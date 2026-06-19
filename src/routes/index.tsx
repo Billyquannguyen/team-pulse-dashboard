@@ -2,9 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
   Briefcase,
   CalendarDays,
+  CircleDollarSign,
   CirclePercent,
   DollarSign,
-  Target,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/AppHeader";
@@ -43,6 +43,7 @@ function Dashboard() {
   const teamMonthlyGoal = getTeamMonthlyGoal(settings);
   const totals = data?.totals ?? {
     totalPaid: canUseLocalFallback ? totalCommission : 0,
+    totalPaidCommission: 0,
     paidThisMonth: canUseLocalFallback ? totalMonthCommission : 0,
     pendingOwed: 0,
     dealsClosed: canUseLocalFallback ? totalDealsClosed : 0,
@@ -52,7 +53,6 @@ function Dashboard() {
     paidGoal: teamMonthlyGoal,
     dealsGoal: 0,
   };
-  const teamMonthlyRemaining = Math.max(0, teamMonthlyGoal - totals.paidThisMonth);
 
   return (
     <div className="space-y-6">
@@ -79,9 +79,9 @@ function Dashboard() {
           tone="orange"
         />
         <KpiCard
-          label="Monthly goal left"
-          value={`£${teamMonthlyRemaining.toLocaleString()}`}
-          icon={Target}
+          label="Total paid commission"
+          value={`£${totals.totalPaidCommission.toLocaleString()}`}
+          icon={CircleDollarSign}
           tone="yellow"
         />
         <KpiCard
