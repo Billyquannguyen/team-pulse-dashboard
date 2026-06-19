@@ -2,7 +2,6 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
-  Database,
   LinkIcon,
   SearchCheck,
   Settings2,
@@ -14,7 +13,7 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { totalPendingOwed } from "@/data/team";
+import { totalMonthCommission } from "@/data/team";
 import { useGoalSettings } from "@/lib/goal-settings";
 import { getTeamMonthlyGoal } from "@/lib/goal-targets";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
@@ -28,9 +27,8 @@ const items = [
   { to: "/active-brands", label: "Active Brands", icon: Store },
   { to: "/goals", label: "Goals & Analytics", icon: Target },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
-  { to: "/team-members", label: "Team Members", icon: Settings2 },
   { to: "/assets", label: "Team Assets", icon: LinkIcon },
-  { to: "/contact-database", label: "Contact Database", icon: Database },
+  { to: "/team-members", label: "Team Members", icon: Settings2 },
 ] as const;
 
 export function AppSidebar() {
@@ -38,7 +36,8 @@ export function AppSidebar() {
   const { data } = useQuery(dashboardSheetQuery);
   const [settings] = useGoalSettings();
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
-  const pendingOwed = data?.totals.pendingOwed ?? (canUseLocalFallback ? totalPendingOwed : 0);
+  const currentMonthCommission =
+    data?.totals.paidThisMonth ?? (canUseLocalFallback ? totalMonthCommission : 0);
   const showGoalCard = !path.startsWith("/goals");
 
   return (
@@ -87,7 +86,10 @@ export function AppSidebar() {
           to="/goals"
           className="mt-auto block outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <TeamMonthlyGoalCard current={pendingOwed} target={getTeamMonthlyGoal(settings)} />
+          <TeamMonthlyGoalCard
+            current={currentMonthCommission}
+            target={getTeamMonthlyGoal(settings)}
+          />
         </Link>
       )}
     </aside>

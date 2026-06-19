@@ -9,8 +9,10 @@ import {
   getMissingCreatorHeaders,
   getMissingDealHeaders,
   getMissingOutreachHeaders,
+  getCurrentDealMonthKey,
   isDealWorksheetHeader,
   isOutreachWorksheetHeader,
+  normalizeDealMonthKey,
   normalizeCreatorRows,
   normalizeMemberDealRows,
   normalizeMemberOutreachRows,
@@ -441,7 +443,7 @@ async function fetchMemberSheetsRowsBatchSafely(
 }
 
 function findConfiguredSheetRef(discovered: SheetRef[], member: TeamMemberConfig): SheetRef | null {
-  const worksheetName = cleanMemberName(member.worksheetName);
+  const worksheetName = cleanMemberName(member.id);
   if (!worksheetName) return null;
 
   return (
@@ -472,13 +474,13 @@ async function readConfiguredDealMemberSheets(
   }
 
   for (const member of members) {
-    const worksheetName = cleanMemberName(member.worksheetName);
+    const worksheetName = cleanMemberName(member.id);
 
     if (!worksheetName) {
       missingExpectedMembers.push(member.displayName);
       skippedTabs.push({
         sheetName: member.displayName,
-        reason: "Configured member has no worksheetName.",
+        reason: "Configured member has no ID.",
       });
       continue;
     }
@@ -487,7 +489,7 @@ async function readConfiguredDealMemberSheets(
       missingExpectedMembers.push(member.displayName);
       skippedTabs.push({
         sheetName: worksheetName,
-        reason: "Configured worksheetName points to a protected system tab.",
+        reason: "Configured member ID points to a protected system tab.",
       });
       continue;
     }
@@ -578,18 +580,21 @@ async function readConfiguredDealMemberSheets(
 }
 
 function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fallback: Teammate) {
-  const totalPaid = getSummaryValue(rows, SUMMARY_LABELS.totalPaid);
-  const paidThisMonth = getSummaryValue(rows, SUMMARY_LABELS.paidThisMonth);
+  const currentMonthKey = getCurrentDealMonthKey();
   const pendingOwed = getSummaryValue(rows, SUMMARY_LABELS.pendingOwed);
   const memberDeals = deals.filter((deal) => deal.manager === tabName);
+  const allTimeCommission = memberDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
+  const currentMonthCommission = memberDeals
+    .filter((deal) => normalizeDealMonthKey(deal.month) === currentMonthKey)
+    .reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
   const totalPricing = memberDeals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
 
   return {
     ...fallback,
     name: tabName,
     initials: getInitials(tabName),
-    commission: totalPaid,
-    monthCommission: paidThisMonth,
+    commission: allTimeCommission,
+    monthCommission: currentMonthCommission,
     pendingOwed,
     dealsClosed: memberDeals.length,
     revenue: totalPricing,
@@ -806,13 +811,13 @@ async function readCreatorSourcingData(
   });
 
   const outreachCandidateRefs = activeMembers.flatMap((member) => {
-    const worksheetName = cleanMemberName(member.worksheetName);
+    const worksheetName = cleanMemberName(member.id);
 
     if (!worksheetName) {
       missingExpectedMembers.push(member.displayName);
       skippedOutreachTabs.push({
         sheetName: member.displayName,
-        reason: "Configured member has no worksheetName.",
+        reason: "Configured member has no ID.",
       });
       return [];
     }
@@ -821,7 +826,7 @@ async function readCreatorSourcingData(
       missingExpectedMembers.push(member.displayName);
       skippedOutreachTabs.push({
         sheetName: worksheetName,
-        reason: "Configured worksheetName points to a protected system tab.",
+        reason: "Configured member ID points to a protected system tab.",
       });
       return [];
     }
@@ -1103,7 +1108,7 @@ async function readDashboardSheetData(
       active: activeMembers.length,
       offboarded: teamMembersData.offboardedMembers.length,
       setupNeeded: teamMembersData.setupNeeded,
-      suggestions: teamMembersData.suggestions.map((suggestion) => suggestion.worksheetName),
+      suggestions: teamMembersData.suggestions.map((suggestion) => suggestion.id),
       warnings: teamMembersData.warnings,
     };
     debug.warnings.push(...teamMembersData.warnings);
@@ -1166,8 +1171,8 @@ async function readDashboardSheetData(
     creators: creatorData.creators.length,
     outreachMembers: creatorData.outreach.members.length,
     outreachCreators: creatorData.outreach.totals.totalCreators,
-    totalPaid: totals.totalPaid,
-    pendingOwed: totals.pendingOwed,
+    allTimeCommission: totals.totalPaid,
+    currentMonthCommission: totals.paidThisMonth,
   });
 
   return {

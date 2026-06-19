@@ -5,7 +5,6 @@ import {
   CirclePercent,
   DollarSign,
   Target,
-  WalletCards,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/AppHeader";
@@ -22,7 +21,6 @@ import {
   totalCommission,
   totalDealsClosed,
   totalMonthCommission,
-  totalPendingOwed,
 } from "@/data/team";
 
 export const Route = createFileRoute("/")({
@@ -46,7 +44,7 @@ function Dashboard() {
   const totals = data?.totals ?? {
     totalPaid: canUseLocalFallback ? totalCommission : 0,
     paidThisMonth: canUseLocalFallback ? totalMonthCommission : 0,
-    pendingOwed: canUseLocalFallback ? totalPendingOwed : 0,
+    pendingOwed: 0,
     dealsClosed: canUseLocalFallback ? totalDealsClosed : 0,
     totalPricing: 0,
     averageDealSize: 0,
@@ -54,6 +52,7 @@ function Dashboard() {
     paidGoal: teamMonthlyGoal,
     dealsGoal: 0,
   };
+  const teamMonthlyRemaining = Math.max(0, teamMonthlyGoal - totals.paidThisMonth);
 
   return (
     <div className="space-y-6">
@@ -62,27 +61,27 @@ function Dashboard() {
         subtitle={
           isLoading
             ? "Loading live Google Sheets data..."
-            : "Paid commission, pending commission, and deal value in one view."
+            : "Current-month commission, all-time commission, and deal value in one view."
         }
       />
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <KpiCard
-          label="Total paid commission"
+          label="All-time commission"
           value={`£${totals.totalPaid.toLocaleString()}`}
           icon={DollarSign}
           tone="lime"
         />
         <KpiCard
-          label="Paid this month"
+          label="Current month"
           value={`£${totals.paidThisMonth.toLocaleString()}`}
           icon={CalendarDays}
           tone="orange"
         />
         <KpiCard
-          label="Pending commission"
-          value={`£${totals.pendingOwed.toLocaleString()}`}
-          icon={WalletCards}
+          label="Monthly goal left"
+          value={`£${teamMonthlyRemaining.toLocaleString()}`}
+          icon={Target}
           tone="yellow"
         />
         <KpiCard
@@ -94,7 +93,7 @@ function Dashboard() {
         <KpiCard
           label="Avg deal value"
           value={`£${totals.averageDealSize.toLocaleString()}`}
-          icon={Target}
+          icon={DollarSign}
           tone="purple"
         />
         <KpiCard
@@ -108,13 +107,12 @@ function Dashboard() {
       <section className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <GoalProgressCard
-            current={totals.pendingOwed}
+            current={totals.paidThisMonth}
             target={teamMonthlyGoal}
             title="Team monthly goal"
             badge="Monthly"
             progressLabel="to monthly goal"
             paidThisMonth={totals.paidThisMonth}
-            pendingOwed={totals.pendingOwed}
             team={team}
           />
         </div>

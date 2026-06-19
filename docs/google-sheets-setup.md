@@ -89,21 +89,14 @@ This tab is the only source of truth for active dashboard members. Worksheet tab
 
 Required columns:
 
-- `id`
-- `displayName`
-- `shortCode`
-- `worksheetName`
-- `status`
-- `role`
-- `color`
-- `sortOrder`
-- `joinedMonth`
-- `createdAt`
-- `updatedAt`
+- `Name`
+- `ID`
+- `Joined Month`
+- `Status`
 
-`status` can be `active` or `offboarded`. Current dashboard views use active members by default. Offboarded members can stay in the sheet for historical reporting later.
+`Status` can be `Active` or `Offboarded`. Current dashboard views use active members by default. Offboarded members can stay in the sheet for historical reporting later.
 
-`worksheetName` points to the member's deal/outreach worksheet tab. If that worksheet is missing, the dashboard shows a warning instead of replacing them with another tab.
+`ID` is the stable internal ID and the member worksheet/tab name. If that worksheet is missing, the dashboard shows a warning instead of replacing them with another tab.
 
 System tabs are never treated as members, including `Comm Tracking`, `Goals`, `Analytics`, `Contact Database`, `Active Brands`, `Brand Finder`, `Team Assets`, `Calendly Reminders`, and `Settings`.
 
@@ -118,7 +111,7 @@ Current member tabs:
 - `BNgan`
 - `LNgoc`
 
-The app reads these tabs only when they are listed in `TeamMembers.worksheetName`.
+The app reads these tabs only when they are listed in `TeamMembers.ID`.
 
 The header row is row `1` on each member tab.
 

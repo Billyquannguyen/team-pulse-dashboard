@@ -573,6 +573,50 @@ export async function updateSheetRow(
   });
 }
 
+export async function updateSheetColumnCount(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  sheet: GoogleSheetRef,
+  columnCount: number,
+) {
+  if (!sheet.sheetName || !sheet.gid) {
+    throw new Error(`No sheet ID was available for ${sheet.memberName}`);
+  }
+
+  if (!Number.isInteger(columnCount) || columnCount < 1) {
+    throw new Error("Invalid column count for Google Sheets update.");
+  }
+
+  const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`);
+
+  await googleSheetsFetch<BatchUpdateResponse>(config, url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      requests: [
+        {
+          updateSheetProperties: {
+            properties: {
+              sheetId: Number(sheet.gid),
+              gridProperties: {
+                columnCount,
+              },
+            },
+            fields: "gridProperties.columnCount",
+          },
+        },
+      ],
+    }),
+  });
+
+  logGoogleSheets("sheet column count updated", {
+    sheetName: sheet.sheetName,
+    columnCount,
+  });
+}
+
 export async function createSheetTab(
   config: GoogleSheetsConfig,
   spreadsheetId: string,

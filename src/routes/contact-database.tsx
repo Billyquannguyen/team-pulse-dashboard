@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { DashboardSelectField } from "@/components/ui/dashboard-select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   addContactDatabaseContact,
   contactDatabaseQuery,
@@ -49,11 +48,6 @@ type ContactForm = {
   contactFirstName: string;
   email: string;
   position: string;
-  source: string;
-  firstFoundAt: string;
-  lastContactedAt: string;
-  gmailThreadId: string;
-  notes: string;
 };
 
 function emptyForm(): ContactForm {
@@ -63,11 +57,6 @@ function emptyForm(): ContactForm {
     contactFirstName: "",
     email: "",
     position: "",
-    source: "Manual",
-    firstFoundAt: "",
-    lastContactedAt: "",
-    gmailThreadId: "",
-    notes: "",
   };
 }
 
@@ -78,11 +67,6 @@ function formFromContact(contact: ContactDatabaseContact): ContactForm {
     contactFirstName: contact.contactFirstName,
     email: contact.email,
     position: contact.position,
-    source: contact.source,
-    firstFoundAt: contact.firstFoundAt,
-    lastContactedAt: contact.lastContactedAt,
-    gmailThreadId: contact.gmailThreadId,
-    notes: contact.notes,
   };
 }
 
@@ -160,11 +144,6 @@ function contactsFromCsv(text: string) {
       ]),
       email: cell(headers, row, ["email", "email address", "work email", "business email"]),
       position: cell(headers, row, ["position", "title", "job title", "role"]),
-      source: cell(headers, row, ["source"]) || "CSV Import",
-      firstFoundAt: cell(headers, row, ["firstFoundAt", "first found at", "found at"]),
-      lastContactedAt: cell(headers, row, ["lastContactedAt", "last contacted at"]),
-      gmailThreadId: cell(headers, row, ["gmailThreadId", "gmail thread id", "thread id"]),
-      notes: cell(headers, row, ["notes", "note"]),
     }))
     .filter((contact) => contact.brandName || contact.email || contact.contactName);
 }
@@ -205,8 +184,6 @@ function ContactDatabasePage() {
         contact.contactFirstName,
         contact.email,
         contact.position,
-        contact.source,
-        contact.notes,
       ]
         .join(" ")
         .toLowerCase();
@@ -218,7 +195,7 @@ function ContactDatabasePage() {
       );
     });
   }, [brandFilter, contacts, emailFilter, q]);
-  const contactedCount = contacts.filter((contact) => contact.lastContactedAt).length;
+  const contactsWithEmailCount = contacts.filter((contact) => contact.email).length;
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: contactDatabaseQuery.queryKey });
@@ -350,8 +327,8 @@ function ContactDatabasePage() {
           icon={FileSpreadsheet}
         />
         <MetricTile
-          label="Previously contacted"
-          value={contactedCount.toLocaleString()}
+          label="With email"
+          value={contactsWithEmailCount.toLocaleString()}
           icon={Check}
         />
       </section>
@@ -429,7 +406,7 @@ function ContactDatabasePage() {
             <input
               value={q}
               onChange={(event) => setQ(event.target.value)}
-              placeholder="Search brand, contact, email, notes..."
+              placeholder="Search brand, contact, email, position..."
               className="tb-search h-10 w-full rounded-2xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
@@ -456,17 +433,16 @@ function ContactDatabasePage() {
               <tr>
                 <th className="px-3 py-2.5 text-left font-medium">Brand</th>
                 <th className="px-3 py-2.5 text-left font-medium">Contact</th>
+                <th className="px-3 py-2.5 text-left font-medium">First name</th>
                 <th className="px-3 py-2.5 text-left font-medium">Email</th>
                 <th className="px-3 py-2.5 text-left font-medium">Position</th>
-                <th className="px-3 py-2.5 text-left font-medium">Last contacted</th>
-                <th className="px-3 py-2.5 text-left font-medium">Source</th>
                 <th className="px-3 py-2.5 text-left font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredContacts.length === 0 && (
                 <tr className="border-t border-border/60">
-                  <td colSpan={7} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={6} className="px-3 py-8 text-center text-sm text-muted-foreground">
                     No contacts found.
                   </td>
                 </tr>
@@ -477,25 +453,15 @@ function ContactDatabasePage() {
                   className="tb-row-hover border-t border-border/60"
                 >
                   <td className="min-w-[180px] px-3 py-3 font-semibold">{contact.brandName}</td>
-                  <td className="min-w-[180px] px-3 py-3">
-                    <div>{contact.contactName || "-"}</div>
-                    {contact.contactFirstName && (
-                      <div className="text-xs text-muted-foreground">
-                        {contact.contactFirstName}
-                      </div>
-                    )}
+                  <td className="min-w-[180px] px-3 py-3">{contact.contactName || "-"}</td>
+                  <td className="min-w-[140px] px-3 py-3 text-muted-foreground">
+                    {contact.contactFirstName || "-"}
                   </td>
                   <td className="min-w-[220px] px-3 py-3 text-muted-foreground">
                     {contact.email || "-"}
                   </td>
                   <td className="min-w-[220px] px-3 py-3 text-muted-foreground">
                     {contact.position || "-"}
-                  </td>
-                  <td className="min-w-[170px] px-3 py-3 text-muted-foreground">
-                    {contact.lastContactedAt || "-"}
-                  </td>
-                  <td className="min-w-[140px] px-3 py-3 text-muted-foreground">
-                    {contact.source || "-"}
                   </td>
                   <td className="min-w-[130px] px-3 py-3">
                     <div className="flex items-center gap-2">
@@ -558,39 +524,7 @@ function ContactDatabasePage() {
                   value={form.position}
                   onChange={(value) => setForm((current) => ({ ...current, position: value }))}
                 />
-                <TextField
-                  label="Source"
-                  value={form.source}
-                  onChange={(value) => setForm((current) => ({ ...current, source: value }))}
-                />
-                <TextField
-                  label="First found at"
-                  value={form.firstFoundAt}
-                  onChange={(value) => setForm((current) => ({ ...current, firstFoundAt: value }))}
-                />
-                <TextField
-                  label="Last contacted at"
-                  value={form.lastContactedAt}
-                  onChange={(value) =>
-                    setForm((current) => ({ ...current, lastContactedAt: value }))
-                  }
-                />
               </div>
-              <TextField
-                label="Gmail thread ID"
-                value={form.gmailThreadId}
-                onChange={(value) => setForm((current) => ({ ...current, gmailThreadId: value }))}
-              />
-              <label className="block text-sm font-semibold">
-                Notes
-                <Textarea
-                  value={form.notes}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, notes: event.target.value }))
-                  }
-                  className="mt-1 min-h-28 rounded-2xl bg-background text-sm"
-                />
-              </label>
               {error && (
                 <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive">
                   {error}
@@ -714,6 +648,8 @@ function ContactModal({
             <h4 className="text-base font-semibold">{title}</h4>
             <button
               type="button"
+              aria-label="Close contact form"
+              title="Close"
               onClick={onClose}
               className="tb-action rounded-full p-2 hover:bg-accent"
             >

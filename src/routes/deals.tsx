@@ -33,19 +33,6 @@ const statusStyles: Record<string, string> = {
   Overdue: "bg-fun-pink text-rose-900",
 };
 
-const yesNoStyles = {
-  yes: "bg-fun-lime text-emerald-900",
-  no: "bg-muted text-muted-foreground",
-};
-
-const paymentFilters = [
-  "All payments",
-  "Paid total",
-  "Unpaid total",
-  "Paid this month",
-  "Not paid this month",
-] as const;
-
 const linkFilters = [
   "All links",
   "Has contract",
@@ -54,7 +41,6 @@ const linkFilters = [
   "Missing live link",
 ] as const;
 
-type PaymentFilter = (typeof paymentFilters)[number];
 type LinkFilter = (typeof linkFilters)[number];
 const PAGE_SIZE = 20;
 
@@ -71,7 +57,6 @@ function DealsPage() {
   const [member, setMember] = useState("All members");
   const [status, setStatus] = useState("All statuses");
   const [platform, setPlatform] = useState("All platforms");
-  const [payment, setPayment] = useState<PaymentFilter>("All payments");
   const [links, setLinks] = useState<LinkFilter>("All links");
   const [page, setPage] = useState(1);
   const { data } = useQuery(dashboardSheetQuery);
@@ -106,14 +91,12 @@ function DealsPage() {
     member !== "All members" ||
     status !== "All statuses" ||
     platform !== "All platforms" ||
-    payment !== "All payments" ||
     links !== "All links";
   const clearFilters = () => {
     setQ("");
     setMember("All members");
     setStatus("All statuses");
     setPlatform("All platforms");
-    setPayment("All payments");
     setLinks("All links");
   };
   const filtered = useMemo(
@@ -127,6 +110,7 @@ function DealsPage() {
           d.manager,
           d.platform,
           d.status,
+          d.month,
           d.netTerms,
           d.profitMargin,
           d.notes,
@@ -135,10 +119,6 @@ function DealsPage() {
           d.totalPricingGbp.toString(),
           d.creatorTotalGbp.toString(),
           d.managerTotalGbp.toString(),
-          d.managerTotalPaid ? "paid total paid yes" : "unpaid total unpaid no",
-          d.managerPaidCurrentMonth
-            ? "paid this month current month yes"
-            : "not paid this month current month no",
         ]
           .filter(Boolean)
           .join(" ")
@@ -148,12 +128,6 @@ function DealsPage() {
         const matchesMember = member === "All members" || d.manager === member;
         const matchesStatus = status === "All statuses" || d.status === status;
         const matchesPlatform = platform === "All platforms" || d.platform === platform;
-        const matchesPayment =
-          payment === "All payments" ||
-          (payment === "Paid total" && d.managerTotalPaid) ||
-          (payment === "Unpaid total" && !d.managerTotalPaid) ||
-          (payment === "Paid this month" && d.managerPaidCurrentMonth) ||
-          (payment === "Not paid this month" && !d.managerPaidCurrentMonth);
         const matchesLinks =
           links === "All links" ||
           (links === "Has contract" && Boolean(d.contractLink)) ||
@@ -166,11 +140,10 @@ function DealsPage() {
           matchesMember &&
           matchesStatus &&
           matchesPlatform &&
-          matchesPayment &&
           matchesLinks
         );
       }),
-    [deals, links, member, payment, platform, q, status],
+    [deals, links, member, platform, q, status],
   );
   const sortedDeals = useMemo(
     () =>
@@ -192,7 +165,7 @@ function DealsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [links, member, payment, platform, q, status]);
+  }, [links, member, platform, q, status]);
 
   return (
     <div className="space-y-6">
@@ -266,12 +239,6 @@ function DealsPage() {
               onChange={setPlatform}
             />
             <DashboardSelectField
-              label="Payment"
-              value={payment}
-              options={[...paymentFilters]}
-              onChange={(value) => setPayment(value as PaymentFilter)}
-            />
-            <DashboardSelectField
               label="Links"
               value={links}
               options={[...linkFilters]}
@@ -310,11 +277,10 @@ function DealsPage() {
                   "Platform",
                   "Brand",
                   "Status",
+                  "Month",
                   "Total pricing",
                   "Creator total",
                   "Manager total",
-                  "Paid total?",
-                  "Paid this month?",
                   "Profit margin",
                   "Net terms",
                   "Contract",
@@ -330,7 +296,7 @@ function DealsPage() {
             <tbody>
               {sortedDeals.length === 0 && (
                 <tr className="tb-row-hover border-t border-border/60">
-                  <td colSpan={16} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={15} className="px-3 py-8 text-center text-sm text-muted-foreground">
                     No deals match those filters.
                   </td>
                 </tr>
@@ -352,29 +318,10 @@ function DealsPage() {
                       {d.status}
                     </span>
                   </td>
+                  <td className="px-3 py-3 text-muted-foreground">{d.month || "-"}</td>
                   <td className="px-3 py-3">£{d.totalPricingGbp.toLocaleString()}</td>
                   <td className="px-3 py-3">£{d.creatorTotalGbp.toLocaleString()}</td>
                   <td className="px-3 py-3 font-semibold">£{d.managerTotalGbp.toLocaleString()}</td>
-                  <td className="px-3 py-3">
-                    <span
-                      className={cn(
-                        "rounded-full px-2.5 py-1 text-xs font-medium",
-                        d.managerTotalPaid ? yesNoStyles.yes : yesNoStyles.no,
-                      )}
-                    >
-                      {d.managerTotalPaid ? "Yes" : "No"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3">
-                    <span
-                      className={cn(
-                        "rounded-full px-2.5 py-1 text-xs font-medium",
-                        d.managerPaidCurrentMonth ? yesNoStyles.yes : yesNoStyles.no,
-                      )}
-                    >
-                      {d.managerPaidCurrentMonth ? "Yes" : "No"}
-                    </span>
-                  </td>
                   <td className="px-3 py-3">{d.profitMargin}</td>
                   <td className="px-3 py-3 text-muted-foreground">{d.netTerms}</td>
                   <td className="px-3 py-3">

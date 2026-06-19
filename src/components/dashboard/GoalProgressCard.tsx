@@ -8,7 +8,6 @@ export function GoalProgressCard({
   badge = "Monthly",
   progressLabel = "there",
   paidThisMonth,
-  pendingOwed,
   team = fallbackTeam,
 }: {
   current: number;
@@ -17,7 +16,6 @@ export function GoalProgressCard({
   badge?: string;
   progressLabel?: string;
   paidThisMonth?: number;
-  pendingOwed?: number;
   team?: Teammate[];
 }) {
   const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
@@ -52,15 +50,17 @@ export function GoalProgressCard({
         </span>
         <span className="text-muted-foreground">£{remaining.toLocaleString()} left</span>
       </div>
-      {(paidThisMonth !== undefined || pendingOwed !== undefined) && (
+      {paidThisMonth !== undefined && (
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           <div className="tb-hover-lift rounded-2xl bg-muted/50 p-3">
-            <div className="text-xs font-medium text-muted-foreground">Paid this month</div>
+            <div className="text-xs font-medium text-muted-foreground">
+              Current month commission
+            </div>
             <div className="mt-1 text-lg font-bold">£{(paidThisMonth ?? 0).toLocaleString()}</div>
           </div>
           <div className="tb-hover-lift rounded-2xl bg-muted/50 p-3">
-            <div className="text-xs font-medium text-muted-foreground">Pending owed</div>
-            <div className="mt-1 text-lg font-bold">£{(pendingOwed ?? 0).toLocaleString()}</div>
+            <div className="text-xs font-medium text-muted-foreground">Goal left</div>
+            <div className="mt-1 text-lg font-bold">£{remaining.toLocaleString()}</div>
           </div>
         </div>
       )}

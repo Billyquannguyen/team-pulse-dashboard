@@ -1,22 +1,19 @@
-import { createFileRoute, getRouteApi, useRouter } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ExternalLink, Loader2, Plus, Save, UserRound, UserX } from "lucide-react";
+import { FormEvent, useMemo, useState } from "react";
+import { Edit3, ExternalLink, Loader2, Plus, UserCheck, UserRound, UserX, X } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { DashboardSelect } from "@/components/ui/dashboard-select";
-import { loginToDashboard } from "@/lib/auth";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import {
   addTeamMember,
-  offboardTeamMember,
+  createTeamMembersSheet,
   teamMembersQuery,
   updateTeamMember,
   type TeamMemberConfig,
   type TeamMemberStatus,
 } from "@/lib/team-members";
 import { cn } from "@/lib/utils";
-
-const rootRoute = getRouteApi("__root__");
 
 export const Route = createFileRoute("/team-members")({
   head: () => ({
@@ -30,75 +27,43 @@ export const Route = createFileRoute("/team-members")({
 
 type MemberDraft = {
   rowNumber?: number;
-  id: string;
   displayName: string;
-  shortCode: string;
-  worksheetName: string;
-  status: TeamMemberStatus;
-  role: string;
-  color: string;
-  sortOrder: number;
+  id: string;
   joinedMonth: string;
+  status: TeamMemberStatus;
 };
 
-function emptyDraft(sortOrder = 10): MemberDraft {
+type MemberModalState = {
+  mode: "add" | "edit";
+  draft: MemberDraft;
+} | null;
+
+function emptyDraft(): MemberDraft {
   return {
-    id: "",
     displayName: "",
-    shortCode: "",
-    worksheetName: "",
-    status: "active",
-    role: "Closer",
-    color: "#7DD3FC",
-    sortOrder,
+    id: "",
     joinedMonth: "",
+    status: "active",
   };
 }
 
 function draftFromMember(member: TeamMemberConfig): MemberDraft {
   return {
     rowNumber: member.rowNumber,
-    id: member.id,
     displayName: member.displayName,
-    shortCode: member.shortCode,
-    worksheetName: member.worksheetName,
-    status: member.status,
-    role: member.role,
-    color: member.color,
-    sortOrder: member.sortOrder,
+    id: member.id,
     joinedMonth: member.joinedMonth,
+    status: member.status,
   };
 }
 
-function nextSortOrder(members: TeamMemberConfig[]) {
-  return members.reduce((max, member) => Math.max(max, member.sortOrder), 0) + 10 || 10;
-}
-
 function TeamMembersPage() {
-  const auth = rootRoute.useLoaderData();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery(teamMembersQuery);
-  const [adminUnlocked, setAdminUnlocked] = useState(auth.isAdmin);
-  const [password, setPassword] = useState("");
-  const [passwordError, setPasswordError] = useState("");
+  const [modal, setModal] = useState<MemberModalState>(null);
   const [message, setMessage] = useState("");
   const [savingKey, setSavingKey] = useState<string | null>(null);
-  const [newMember, setNewMember] = useState<MemberDraft>(() => emptyDraft());
-  const [drafts, setDrafts] = useState<MemberDraft[]>([]);
-  const [statusView, setStatusView] = useState<TeamMemberStatus | "all">("active");
-  const isAdminReady = auth.isAdmin || adminUnlocked;
   const members = useMemo(() => data?.members ?? [], [data?.members]);
-  const filteredDrafts = useMemo(
-    () => (statusView === "all" ? drafts : drafts.filter((draft) => draft.status === statusView)),
-    [drafts, statusView],
-  );
-
-  useEffect(() => {
-    const nextDrafts = members.map(draftFromMember);
-    setDrafts(nextDrafts);
-    setNewMember(emptyDraft(nextSortOrder(members)));
-  }, [members]);
 
   const refresh = async () => {
     await Promise.all([
@@ -107,48 +72,85 @@ function TeamMembersPage() {
     ]);
   };
 
-  const submitPassword = async (event: FormEvent<HTMLFormElement>) => {
+  const openAdd = () => {
+    setMessage("");
+    setModal({ mode: "add", draft: emptyDraft() });
+  };
+
+  const openEdit = (member: TeamMemberConfig) => {
+    setMessage("");
+    setModal({ mode: "edit", draft: draftFromMember(member) });
+  };
+
+  const updateModalDraft = (patch: Partial<MemberDraft>) => {
+    setModal((current) =>
+      current ? { ...current, draft: { ...current.draft, ...patch } } : current,
+    );
+  };
+
+  const saveModal = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setPasswordError("");
-    setSavingKey("unlock");
+    if (!modal) return;
+
+    const draft = modal.draft;
+    const key = modal.mode === "add" ? "add" : `save-${draft.rowNumber}`;
+    setSavingKey(key);
+    setMessage("");
 
     try {
-      const result = await loginToDashboard({ data: { password } });
-
-      if (!result.ok) {
-        setPasswordError(result.message);
-        return;
+      if (modal.mode === "add") {
+        await addTeamMember({ data: draft });
+        setMessage(`${draft.displayName} added.`);
+      } else if (draft.rowNumber) {
+        await updateTeamMember({ data: { ...draft, rowNumber: draft.rowNumber } });
+        setMessage(`${draft.displayName} updated.`);
       }
 
-      if (result.role !== "admin") {
-        setPasswordError("That password opens team view only. Enter the admin password to edit.");
-        return;
-      }
-
-      setPassword("");
-      setAdminUnlocked(true);
-      await router.invalidate();
-    } catch {
-      setPasswordError("Admin unlock failed. Try again in a moment.");
+      setModal(null);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save this member.");
     } finally {
       setSavingKey(null);
     }
   };
 
-  const updateDraft = (rowNumber: number | undefined, patch: Partial<MemberDraft>) => {
-    setDrafts((current) =>
-      current.map((draft) => (draft.rowNumber === rowNumber ? { ...draft, ...patch } : draft)),
-    );
-  };
-
-  const saveMember = async (draft: MemberDraft) => {
-    if (!draft.rowNumber) return;
-    setSavingKey(`save-${draft.rowNumber}`);
+  const createSheet = async () => {
+    setSavingKey("create-sheet");
     setMessage("");
 
     try {
-      await updateTeamMember({ data: { ...draft, rowNumber: draft.rowNumber } });
-      setMessage(`${draft.displayName} updated.`);
+      await createTeamMembersSheet();
+      setMessage("TeamMembers sheet created.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create TeamMembers sheet.");
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const toggleStatus = async (member: TeamMemberConfig) => {
+    if (!member.rowNumber) return;
+    const nextStatus: TeamMemberStatus = member.status === "active" ? "offboarded" : "active";
+    setSavingKey(`status-${member.rowNumber}`);
+    setMessage("");
+
+    try {
+      await updateTeamMember({
+        data: {
+          rowNumber: member.rowNumber,
+          displayName: member.displayName,
+          id: member.id,
+          joinedMonth: member.joinedMonth,
+          status: nextStatus,
+        },
+      });
+      setMessage(
+        nextStatus === "active"
+          ? `${member.displayName} reactivated.`
+          : `${member.displayName} is now offboarded.`,
+      );
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not update this member.");
@@ -157,378 +159,279 @@ function TeamMembersPage() {
     }
   };
 
-  const offboardMember = async (draft: MemberDraft) => {
-    if (!draft.rowNumber) return;
-    setSavingKey(`offboard-${draft.rowNumber}`);
-    setMessage("");
-
-    try {
-      await offboardTeamMember({ data: { rowNumber: draft.rowNumber } });
-      setMessage(`${draft.displayName} is now offboarded and hidden from active dashboard views.`);
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not offboard this member.");
-    } finally {
-      setSavingKey(null);
-    }
-  };
-
-  const addMember = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSavingKey("add");
-    setMessage("");
-
-    try {
-      await addTeamMember({ data: newMember });
-      setMessage(`${newMember.displayName} added to TeamMembers.`);
-      setNewMember(emptyDraft(nextSortOrder(members) + 10));
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not add this member.");
-    } finally {
-      setSavingKey(null);
-    }
-  };
-
-  const applySuggestion = (displayName: string, worksheetName: string, shortCode: string) => {
-    setNewMember((current) => ({
-      ...current,
-      displayName,
-      worksheetName,
-      shortCode,
-      id: displayName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, ""),
-    }));
-  };
+  const showMissingState = data?.setupNeeded;
 
   return (
     <div className="space-y-6">
-      <AppHeader
-        title="Team Members"
-        subtitle="The single source of truth for active dashboard members."
-      />
+      <AppHeader title="Team Members" subtitle="Control who appears in active dashboard views." />
 
-      <section className="rounded-3xl bg-card p-6 ring-1 ring-border">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-fun-blue">
-                <UserRound className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-base font-black">TeamMembers source</h2>
-                <p className="text-sm text-muted-foreground">
-                  Active dashboard views use active rows only. Offboarded rows stay available for
-                  historical reporting later.
-                </p>
-              </div>
+      <section className="rounded-3xl bg-card p-5 ring-1 ring-border md:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-fun-blue">
+              <UserRound className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-black">TeamMembers</h2>
+              <p className="text-sm text-muted-foreground">
+                Active members appear in dashboard cards, filters, goals, and leaderboard.
+              </p>
             </div>
           </div>
-          {data?.links.teamMembersSheetUrl && (
-            <a
-              href={data.links.teamMembersSheetUrl}
-              target="_blank"
-              rel="noreferrer"
+          <div className="flex flex-wrap gap-2">
+            {data?.links.teamMembersSheetUrl && (
+              <a
+                href={data.links.teamMembersSheetUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-4 text-sm font-bold text-foreground hover:bg-accent"
+              >
+                Open Sheet <ExternalLink className="h-4 w-4" />
+              </a>
+            )}
+            {showMissingState && (
+              <button
+                type="button"
+                onClick={createSheet}
+                disabled={savingKey === "create-sheet"}
+                className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-4 text-sm font-bold text-foreground hover:bg-accent disabled:opacity-50"
+              >
+                {savingKey === "create-sheet" && <Loader2 className="h-4 w-4 animate-spin" />}
+                Create TeamMembers sheet
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={openAdd}
               className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90"
             >
-              Open Sheet <ExternalLink className="h-4 w-4" />
-            </a>
-          )}
-        </div>
-
-        {(data?.setupNeeded || data?.warning || (data?.warnings?.length ?? 0) > 0) && (
-          <div className="mt-5 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
-            <div className="flex items-start gap-2 font-bold">
-              <AlertTriangle className="mt-0.5 h-4 w-4" />
-              Team member setup notice
-            </div>
-            <div className="mt-2 space-y-1 text-xs leading-6 text-muted-foreground">
-              {data?.warning && <p>{data.warning}</p>}
-              {data?.warnings.map((warning) => (
-                <p key={warning}>{warning}</p>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {!isAdminReady && (
-          <form onSubmit={submitPassword} className="mt-5 rounded-2xl bg-muted/45 p-4">
-            <div className="text-sm font-black">Admin unlock required to edit TeamMembers</div>
-            <div className="mt-3 flex flex-wrap gap-3">
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Admin password"
-                className="tb-search h-11 min-w-[240px] flex-1 rounded-2xl border border-border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              />
-              <button
-                type="submit"
-                disabled={savingKey === "unlock" || !password.trim()}
-                className="tb-action inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-60"
-              >
-                {savingKey === "unlock" && <Loader2 className="h-4 w-4 animate-spin" />}
-                Unlock
-              </button>
-            </div>
-            {passwordError && (
-              <p className="mt-2 text-xs font-bold text-destructive">{passwordError}</p>
-            )}
-          </form>
-        )}
-      </section>
-
-      <section className="rounded-3xl bg-card p-6 ring-1 ring-border">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-black">Add member</h2>
-            <p className="text-sm text-muted-foreground">
-              Suggestions come from worksheet tabs, but nothing becomes active until you save it
-              here.
-            </p>
-          </div>
-        </div>
-
-        {(data?.suggestions.length ?? 0) > 0 && (
-          <div className="mb-5 flex flex-wrap gap-2">
-            {data?.suggestions.slice(0, 12).map((suggestion) => (
-              <button
-                key={suggestion.worksheetName}
-                type="button"
-                disabled={!isAdminReady}
-                onClick={() =>
-                  applySuggestion(
-                    suggestion.displayName,
-                    suggestion.worksheetName,
-                    suggestion.shortCode,
-                  )
-                }
-                className="tb-action rounded-full bg-muted px-3 py-1.5 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-              >
-                {suggestion.displayName}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <form onSubmit={addMember} className="grid gap-3 lg:grid-cols-10">
-          <MemberInput
-            label="Name"
-            value={newMember.displayName}
-            onChange={(value) => setNewMember((current) => ({ ...current, displayName: value }))}
-            className="lg:col-span-2"
-          />
-          <MemberInput
-            label="ID"
-            value={newMember.id}
-            onChange={(value) => setNewMember((current) => ({ ...current, id: value }))}
-          />
-          <MemberInput
-            label="Code"
-            value={newMember.shortCode}
-            onChange={(value) => setNewMember((current) => ({ ...current, shortCode: value }))}
-          />
-          <MemberInput
-            label="Worksheet"
-            value={newMember.worksheetName}
-            onChange={(value) => setNewMember((current) => ({ ...current, worksheetName: value }))}
-            className="lg:col-span-2"
-          />
-          <MemberInput
-            label="Role"
-            value={newMember.role}
-            onChange={(value) => setNewMember((current) => ({ ...current, role: value }))}
-          />
-          <MemberInput
-            label="Joined"
-            type="month"
-            value={newMember.joinedMonth}
-            onChange={(value) => setNewMember((current) => ({ ...current, joinedMonth: value }))}
-          />
-          <MemberInput
-            label="Order"
-            type="number"
-            value={String(newMember.sortOrder)}
-            onChange={(value) =>
-              setNewMember((current) => ({ ...current, sortOrder: Number(value) || 100 }))
-            }
-          />
-          <div>
-            <span className="text-xs font-bold text-muted-foreground">Color</span>
-            <input
-              type="color"
-              value={newMember.color}
-              onChange={(event) =>
-                setNewMember((current) => ({ ...current, color: event.target.value }))
-              }
-              className="mt-1 h-11 w-full rounded-2xl border border-border bg-background px-2"
-            />
-          </div>
-          <div className="flex items-end">
-            <button
-              type="submit"
-              disabled={!isAdminReady || savingKey === "add" || !newMember.displayName.trim()}
-              className="tb-action inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            >
-              {savingKey === "add" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
-              Add
+              <Plus className="h-4 w-4" />
+              Add Member
             </button>
           </div>
-        </form>
-      </section>
-
-      <section className="rounded-3xl bg-card p-6 ring-1 ring-border">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-black">Manage members</h2>
-            <p className="text-sm text-muted-foreground">
-              Dashboard pages only use active rows by default.
-            </p>
-          </div>
-          <DashboardSelect
-            value={statusView}
-            onChange={(value) => setStatusView(value as TeamMemberStatus | "all")}
-            options={[
-              { value: "active", label: "Active only" },
-              { value: "offboarded", label: "Offboarded only" },
-              { value: "all", label: "All members" },
-            ]}
-            triggerClassName="w-[190px]"
-          />
         </div>
 
         {message && (
-          <div className="mb-4 rounded-2xl bg-muted/45 px-4 py-3 text-sm font-bold">{message}</div>
-        )}
-
-        {isLoading ? (
-          <div className="rounded-2xl bg-muted/45 p-5 text-sm font-bold text-muted-foreground">
-            Loading TeamMembers...
-          </div>
-        ) : filteredDrafts.length === 0 ? (
-          <div className="rounded-2xl bg-muted/45 p-5 text-sm font-bold text-muted-foreground">
-            No members in this view yet.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {filteredDrafts.map((draft) => (
-              <div
-                key={draft.rowNumber ?? draft.id}
-                className={cn(
-                  "grid gap-3 rounded-3xl border border-border bg-background/75 p-4 lg:grid-cols-12",
-                  draft.status === "offboarded" && "opacity-75",
-                )}
-              >
-                <MemberInput
-                  label="Name"
-                  value={draft.displayName}
-                  disabled={!isAdminReady}
-                  onChange={(value) => updateDraft(draft.rowNumber, { displayName: value })}
-                  className="lg:col-span-2"
-                />
-                <MemberInput
-                  label="ID"
-                  value={draft.id}
-                  disabled={!isAdminReady}
-                  onChange={(value) => updateDraft(draft.rowNumber, { id: value })}
-                />
-                <MemberInput
-                  label="Code"
-                  value={draft.shortCode}
-                  disabled={!isAdminReady}
-                  onChange={(value) => updateDraft(draft.rowNumber, { shortCode: value })}
-                />
-                <MemberInput
-                  label="Worksheet"
-                  value={draft.worksheetName}
-                  disabled={!isAdminReady}
-                  onChange={(value) => updateDraft(draft.rowNumber, { worksheetName: value })}
-                  className="lg:col-span-2"
-                />
-                <div>
-                  <span className="text-xs font-bold text-muted-foreground">Status</span>
-                  <DashboardSelect
-                    value={draft.status}
-                    onChange={(value) =>
-                      updateDraft(draft.rowNumber, { status: value as TeamMemberStatus })
-                    }
-                    options={[
-                      { value: "active", label: "Active" },
-                      { value: "offboarded", label: "Offboarded" },
-                    ]}
-                    triggerClassName="h-11"
-                  />
-                </div>
-                <MemberInput
-                  label="Role"
-                  value={draft.role}
-                  disabled={!isAdminReady}
-                  onChange={(value) => updateDraft(draft.rowNumber, { role: value })}
-                />
-                <MemberInput
-                  label="Joined"
-                  type="month"
-                  value={draft.joinedMonth}
-                  disabled={!isAdminReady}
-                  onChange={(value) => updateDraft(draft.rowNumber, { joinedMonth: value })}
-                />
-                <MemberInput
-                  label="Order"
-                  type="number"
-                  value={String(draft.sortOrder)}
-                  disabled={!isAdminReady}
-                  onChange={(value) =>
-                    updateDraft(draft.rowNumber, { sortOrder: Number(value) || 100 })
-                  }
-                />
-                <div>
-                  <span className="text-xs font-bold text-muted-foreground">Color</span>
-                  <input
-                    type="color"
-                    value={draft.color}
-                    disabled={!isAdminReady}
-                    onChange={(event) =>
-                      updateDraft(draft.rowNumber, { color: event.target.value })
-                    }
-                    className="mt-1 h-11 w-full rounded-2xl border border-border bg-background px-2 disabled:opacity-60"
-                  />
-                </div>
-                <div className="flex items-end gap-2">
-                  <button
-                    type="button"
-                    disabled={!isAdminReady || savingKey === `save-${draft.rowNumber}`}
-                    onClick={() => saveMember(draft)}
-                    className="tb-action inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-3 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                  >
-                    {savingKey === `save-${draft.rowNumber}` ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Save className="h-4 w-4" />
-                    )}
-                  </button>
-                  {draft.status === "active" && (
-                    <button
-                      type="button"
-                      disabled={!isAdminReady || savingKey === `offboard-${draft.rowNumber}`}
-                      onClick={() => offboardMember(draft)}
-                      className="tb-action inline-flex h-11 items-center justify-center rounded-2xl bg-muted px-3 text-sm font-bold text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                      title="Offboard member"
-                    >
-                      <UserX className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+          <div className="mt-4 rounded-2xl bg-muted/45 px-4 py-3 text-sm font-bold">{message}</div>
         )}
       </section>
+
+      {showMissingState ? (
+        <section className="rounded-3xl bg-card p-8 text-center ring-1 ring-border">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
+            <UserRound className="h-5 w-5 text-muted-foreground" />
+          </div>
+          <h2 className="mt-4 text-lg font-black">TeamMembers sheet is missing.</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+            Create it to control active and offboarded dashboard members.
+          </p>
+          <button
+            type="button"
+            onClick={createSheet}
+            disabled={savingKey === "create-sheet"}
+            className="tb-action mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {savingKey === "create-sheet" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+            Create TeamMembers sheet
+          </button>
+        </section>
+      ) : (
+        <section className="overflow-hidden rounded-3xl bg-card ring-1 ring-border">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="bg-muted/45 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-5 py-4 font-black">Name</th>
+                  <th className="px-5 py-4 font-black">ID</th>
+                  <th className="px-5 py-4 font-black">Joined Month</th>
+                  <th className="px-5 py-4 font-black">Status</th>
+                  <th className="px-5 py-4 text-right font-black">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {isLoading ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-5 py-8 text-center font-bold text-muted-foreground"
+                    >
+                      Loading TeamMembers...
+                    </td>
+                  </tr>
+                ) : members.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-5 py-8 text-center font-bold text-muted-foreground"
+                    >
+                      No members yet.
+                    </td>
+                  </tr>
+                ) : (
+                  members.map((member) => (
+                    <tr
+                      key={member.rowNumber ?? member.id}
+                      className={cn(member.status === "offboarded" && "opacity-70")}
+                    >
+                      <td className="px-5 py-4 font-black">{member.displayName}</td>
+                      <td className="px-5 py-4 font-semibold text-muted-foreground">{member.id}</td>
+                      <td className="px-5 py-4 font-semibold">{member.joinedMonth || "Not set"}</td>
+                      <td className="px-5 py-4">
+                        <span
+                          className={cn(
+                            "inline-flex rounded-full px-3 py-1 text-xs font-black",
+                            member.status === "active"
+                              ? "bg-fun-lime text-emerald-950"
+                              : "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {member.status === "active" ? "Active" : "Offboarded"}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(member)}
+                            className="tb-action inline-flex h-9 items-center gap-2 rounded-xl bg-muted px-3 text-xs font-bold text-foreground hover:bg-accent"
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            disabled={savingKey === `status-${member.rowNumber}`}
+                            onClick={() => toggleStatus(member)}
+                            className="tb-action inline-flex h-9 items-center gap-2 rounded-xl bg-muted px-3 text-xs font-bold text-foreground hover:bg-accent disabled:opacity-50"
+                          >
+                            {savingKey === `status-${member.rowNumber}` ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : member.status === "active" ? (
+                              <UserX className="h-3.5 w-3.5" />
+                            ) : (
+                              <UserCheck className="h-3.5 w-3.5" />
+                            )}
+                            {member.status === "active" ? "Mark Offboarded" : "Reactivate"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {modal && (
+        <MemberModal
+          mode={modal.mode}
+          draft={modal.draft}
+          saving={savingKey === "add" || savingKey === `save-${modal.draft.rowNumber}`}
+          onChange={updateModalDraft}
+          onClose={() => setModal(null)}
+          onSubmit={saveModal}
+        />
+      )}
+    </div>
+  );
+}
+
+function MemberModal({
+  mode,
+  draft,
+  saving,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  mode: "add" | "edit";
+  draft: MemberDraft;
+  saving: boolean;
+  onChange: (patch: Partial<MemberDraft>) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+      <form
+        onSubmit={onSubmit}
+        className="w-full max-w-xl overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-border p-5">
+          <div>
+            <h2 className="text-base font-black">
+              {mode === "add" ? "Add Member" : "Edit Member"}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              ID is also the worksheet/tab name used for dashboard data.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="tb-action rounded-full p-2 hover:bg-accent"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="grid gap-4 p-5">
+          <MemberInput
+            label="Name"
+            value={draft.displayName}
+            required
+            onChange={(value) => onChange({ displayName: value })}
+          />
+          <MemberInput
+            label="ID"
+            value={draft.id}
+            required
+            onChange={(value) => onChange({ id: value })}
+          />
+          <MemberInput
+            label="Joined Month"
+            type="month"
+            value={draft.joinedMonth}
+            onChange={(value) => onChange({ joinedMonth: value })}
+          />
+          <label>
+            <span className="text-xs font-bold text-muted-foreground">Status</span>
+            <DashboardSelect
+              value={draft.status}
+              onChange={(value) => onChange({ status: value as TeamMemberStatus })}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "offboarded", label: "Offboarded" },
+              ]}
+              triggerClassName="mt-1 h-11"
+            />
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border p-5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="tb-action h-10 rounded-2xl bg-muted px-4 text-sm font-bold hover:bg-accent"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving || !draft.displayName.trim() || !draft.id.trim()}
+            className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            Save
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -537,26 +440,24 @@ function MemberInput({
   label,
   value,
   onChange,
-  className,
   type = "text",
-  disabled = false,
+  required = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  className?: string;
-  type?: "text" | "number" | "month";
-  disabled?: boolean;
+  type?: "text" | "month";
+  required?: boolean;
 }) {
   return (
-    <label className={className}>
+    <label>
       <span className="text-xs font-bold text-muted-foreground">{label}</span>
       <input
         type={type}
         value={value}
-        disabled={disabled}
+        required={required}
         onChange={(event) => onChange(event.target.value)}
-        className="tb-search mt-1 h-11 w-full rounded-2xl border border-border bg-background px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
+        className="tb-search mt-1 h-11 w-full rounded-2xl border border-border bg-background px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
       />
     </label>
   );

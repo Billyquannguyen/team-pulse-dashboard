@@ -21,7 +21,6 @@ import {
   totalCommission,
   totalDealsClosed,
   totalMonthCommission,
-  totalPendingOwed,
   type Teammate,
 } from "@/data/team";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
@@ -737,7 +736,7 @@ function AdminGoalControls({
                   <GoalEditCard
                     icon={Target}
                     title="Monthly commission"
-                    description="Compare monthly targets against pending commission."
+                    description="Compare monthly targets against deals closed in the current month."
                   >
                     <div className="grid gap-3">
                       <NumberInput
@@ -838,8 +837,8 @@ function AdminGoalControls({
                               <div>
                                 <div className="text-sm font-bold">{member.name}</div>
                                 <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                  <span>Pending {formatMoney(member.pendingOwed)}</span>
-                                  <span>Total paid {formatMoney(member.commission)}</span>
+                                  <span>Current month {formatMoney(member.monthCommission)}</span>
+                                  <span>All-time {formatMoney(member.commission)}</span>
                                   <span>Exclusive {formatCount(member.exclusiveCreators)}</span>
                                 </div>
                               </div>
@@ -974,7 +973,7 @@ function GoalsPage() {
   const totals = data?.totals ?? {
     totalPaid: canUseLocalFallback ? totalCommission : 0,
     paidThisMonth: canUseLocalFallback ? totalMonthCommission : 0,
-    pendingOwed: canUseLocalFallback ? totalPendingOwed : 0,
+    pendingOwed: 0,
     dealsClosed: canUseLocalFallback ? totalDealsClosed : 0,
     totalPricing: 0,
     averageDealSize: 0,
@@ -982,8 +981,8 @@ function GoalsPage() {
     paidGoal: 0,
     dealsGoal: 0,
   };
-  const sortedByPending = useMemo(
-    () => [...team].sort((a, b) => b.pendingOwed - a.pendingOwed),
+  const sortedByCurrentMonth = useMemo(
+    () => [...team].sort((a, b) => b.monthCommission - a.monthCommission),
     [team],
   );
   const sortedByProgression = useMemo(
@@ -1007,13 +1006,13 @@ function GoalsPage() {
     <div className="space-y-6">
       <AppHeader
         title="Goals & Analytics"
-        subtitle="Monthly pending targets first, then long-term progression."
+        subtitle="Current-month commission first, then long-term progression."
       />
 
       <GoalProgressPanel
         title="Team monthly goal"
-        label="Pending commission"
-        current={totals.pendingOwed}
+        label="Current-month commission"
+        current={totals.paidThisMonth}
         target={getTeamMonthlyGoal(settings)}
         tone="lime"
         icon={Target}
@@ -1025,7 +1024,7 @@ function GoalsPage() {
           <div>
             <h3 className="text-base font-semibold">Individual monthly goals</h3>
             <p className="text-xs text-muted-foreground">
-              Each member's pending commission compared with their monthly goal.
+              Each member's current-month commission compared with their monthly goal.
             </p>
           </div>
           <div className="hidden rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground sm:inline-flex">
@@ -1033,12 +1032,12 @@ function GoalsPage() {
           </div>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {sortedByPending.map((member, index) => (
+          {sortedByCurrentMonth.map((member, index) => (
             <GoalProgressPanel
               key={member.id}
               title={member.name}
-              label="Pending commission"
-              current={member.pendingOwed}
+              label="Current-month commission"
+              current={member.monthCommission}
               target={getMonthlyTarget(member)}
               tone={(["yellow", "pink", "purple", "blue"] as Tone[])[index % 4]}
               icon={Users}
@@ -1046,8 +1045,8 @@ function GoalsPage() {
                 setMotivationCard(
                   createMotivationCard(
                     member.name,
-                    "Monthly pending goal",
-                    member.pendingOwed,
+                    "Monthly commission goal",
+                    member.monthCommission,
                     getMonthlyTarget(member),
                   ),
                 )
@@ -1061,7 +1060,7 @@ function GoalsPage() {
         <div>
           <h3 className="text-base font-semibold">Long-term progression goals</h3>
           <p className="text-xs text-muted-foreground">
-            Total paid compared with the level needed before moving up commission.
+            All-time commission compared with the level needed before moving up commission.
           </p>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1069,7 +1068,7 @@ function GoalsPage() {
             <GoalProgressPanel
               key={member.id}
               title={member.name}
-              label="Total paid"
+              label="All-time commission"
               current={member.commission}
               target={getProgressionTarget(member)}
               tone={(["lime", "orange", "blue", "purple"] as Tone[])[index % 4]}

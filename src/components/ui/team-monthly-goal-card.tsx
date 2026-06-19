@@ -131,7 +131,9 @@ export function TeamMonthlyGoalCard({
           <div className="flex items-end justify-between gap-3">
             <div>
               <div className="text-4xl font-black leading-none text-foreground">{pct}%</div>
-              <div className="mt-1 text-xs font-semibold text-foreground/65">Pending vs target</div>
+              <div className="mt-1 text-xs font-semibold text-foreground/65">
+                Current month vs target
+              </div>
             </div>
             <div className="rounded-full bg-card/65 px-3 py-1.5 text-xs font-bold text-foreground shadow-sm backdrop-blur">
               {status.detail}

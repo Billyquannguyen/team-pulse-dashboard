@@ -82,7 +82,7 @@ const searchTypeOptions = [
 
 type SearchType = "new" | "saved" | "total";
 type TemplateTarget = "subject" | "body";
-type BrandStatus = "none" | "database" | "contacted";
+type BrandStatus = "none" | "database";
 
 type AleadsFilterState = {
   jobTitlesText: string;
@@ -115,7 +115,6 @@ type ContactRow = {
   contactFirstName: string;
   email: string;
   position: string;
-  source: "A-Leads API";
 };
 
 type SavedBrandFinderState = {
@@ -411,18 +410,12 @@ function brandMatchesContact(brand: Pick<BrandRow, "brandName">, contact: Contac
 
 function getBrandDatabaseStatus(brand: BrandRow, contacts: ContactDatabaseContact[]) {
   const matches = contacts.filter((contact) => brandMatchesContact(brand, contact));
-  const contacted = matches.some((contact) => contact.lastContactedAt);
-  const status: BrandStatus = contacted ? "contacted" : matches.length > 0 ? "database" : "none";
+  const status: BrandStatus = matches.length > 0 ? "database" : "none";
 
   return {
     status,
     count: matches.length,
-    label:
-      status === "contacted"
-        ? "Previously contacted"
-        : status === "database"
-          ? "Contacts already in database"
-          : "No contacts found",
+    label: status === "database" ? "Contacts already in database" : "No contacts found",
   };
 }
 
@@ -444,7 +437,7 @@ function findDuplicateContact(contact: ContactRow, contacts: ContactDatabaseCont
 function contactDuplicateLabel(contact: ContactRow, contacts: ContactDatabaseContact[]) {
   const match = findDuplicateContact(contact, contacts);
   if (!match) return "";
-  return match.lastContactedAt ? "Previously contacted" : "Already in database";
+  return "Already in database";
 }
 
 function contactFirstName(contactName: string, firstName = "") {
@@ -470,7 +463,6 @@ function apiContactToRow(contact: AleadsContactResult, brands: BrandRow[]): Cont
     contactFirstName: contactFirstName(contactName, contact.firstName),
     email: contact.email,
     position: contact.title,
-    source: "A-Leads API",
   };
 
   return {
@@ -512,7 +504,6 @@ function readSavedState(): SavedBrandFinderState {
 }
 
 function statusTone(status: BrandStatus) {
-  if (status === "contacted") return "border-fun-yellow/70 bg-fun-yellow/20 text-foreground";
   if (status === "database") return "border-fun-blue/60 bg-fun-blue/20 text-foreground";
   return "border-fun-lime/50 bg-fun-lime/20 text-foreground";
 }
@@ -760,10 +751,6 @@ function BrandFinderPage() {
       });
       const successfulResults = draftResult.results.filter((result) => result.ok);
       const successfulIds = new Set(successfulResults.map((result) => result.id));
-      const threadById = new Map(
-        successfulResults.map((result) => [result.id, result.gmailThreadId || result.gmailDraftId]),
-      );
-      const now = new Date().toISOString();
       const successfulContacts = selectedContacts.filter((contact) =>
         successfulIds.has(contact.id),
       );
@@ -777,11 +764,6 @@ function BrandFinderPage() {
               contactFirstName: contact.contactFirstName,
               email: contact.email,
               position: contact.position,
-              source: "Brand Finder",
-              firstFoundAt: now,
-              lastContactedAt: now,
-              gmailThreadId: threadById.get(contact.id) ?? "",
-              notes: "Created Gmail draft from Brand Finder.",
             })),
           },
         });

@@ -10,6 +10,7 @@ export type DashboardDealField =
   | "contractLink"
   | "status"
   | "liveLink"
+  | "month"
   | "totalPricingGbp"
   | "creatorTotalGbp"
   | "profitMargin"
@@ -30,6 +31,7 @@ export const DEAL_COLUMN_ALIASES: Record<DashboardDealField, string[]> = {
   contractLink: ["contract link", "contract", "contract url"],
   status: ["status", "deal status", "stage"],
   liveLink: ["live link", "live url", "post link"],
+  month: ["month", "deal month", "closed month", "closing month"],
   totalPricingGbp: ["total pricing", "total pricing £", "total pricing gbp", "total pricing (£)"],
   creatorTotalGbp: ["creator total", "creator total £", "creator total gbp", "creator total (£)"],
   profitMargin: ["profit margin", "profit margin %", "margin"],

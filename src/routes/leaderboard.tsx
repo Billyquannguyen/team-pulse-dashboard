@@ -84,12 +84,11 @@ function LeaderboardPage() {
   const { data } = useQuery(dashboardSheetQuery);
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
   const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
-  const sorted = [...team].sort((a, b) => b.commission - a.commission);
+  const sorted = [...team].sort((a, b) => b.monthCommission - a.monthCommission);
   const chartData = sorted.map((member) => ({
     name: member.name,
-    paid: member.commission,
-    paidThisMonth: member.monthCommission,
-    pending: member.pendingOwed,
+    allTime: member.commission,
+    currentMonth: member.monthCommission,
   }));
   const deals = data?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
   const activeDeals = deals.filter((deal) => deal.status !== "Cancelled");
@@ -104,7 +103,7 @@ function LeaderboardPage() {
     <div className="space-y-6">
       <AppHeader
         title="Leaderboard"
-        subtitle="Paid total, pending payouts, and the highest-value deals."
+        subtitle="Current-month commission ranking with all-time context."
       />
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -126,8 +125,10 @@ function LeaderboardPage() {
                 <div className="text-xs opacity-70">{t.role}</div>
               </div>
             </div>
-            <div className="mt-4 text-3xl font-bold">£{t.commission.toLocaleString()}</div>
-            <div className="text-xs opacity-70">{t.dealsClosed} deals closed</div>
+            <div className="mt-4 text-3xl font-bold">£{t.monthCommission.toLocaleString()}</div>
+            <div className="text-xs opacity-70">
+              £{t.commission.toLocaleString()} all-time · {t.dealsClosed} deals
+            </div>
           </div>
         ))}
       </div>
@@ -135,9 +136,9 @@ function LeaderboardPage() {
       <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold">Paid, monthly paid, and pending by member</h3>
+            <h3 className="text-base font-semibold">Current month and all-time by member</h3>
             <p className="text-xs text-muted-foreground">
-              Total paid, this month's paid commission, and pending commission.
+              Monthly ranking uses deal Month, while all-time supports progression tracking.
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
@@ -158,17 +159,16 @@ function LeaderboardPage() {
               />
               <Tooltip content={<MoneyTooltip />} cursor={{ fill: "hsl(var(--muted))" }} />
               <Legend />
-              <Bar dataKey="paid" name="Paid total" fill="var(--fun-lime)" radius={[8, 8, 0, 0]} />
               <Bar
-                dataKey="paidThisMonth"
-                name="Paid this month"
+                dataKey="currentMonth"
+                name="Current month"
                 fill="var(--fun-blue)"
                 radius={[8, 8, 0, 0]}
               />
               <Bar
-                dataKey="pending"
-                name="Pending owed"
-                fill="var(--fun-pink)"
+                dataKey="allTime"
+                name="All-time commission"
+                fill="var(--fun-lime)"
                 radius={[8, 8, 0, 0]}
               />
             </BarChart>

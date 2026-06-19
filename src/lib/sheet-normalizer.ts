@@ -66,6 +66,7 @@ const DEAL_FIELD_LABELS: Record<DashboardDealField, string> = {
   contractLink: "Contract link",
   status: "Status",
   liveLink: "Live link",
+  month: "Month",
   totalPricingGbp: "Total pricing",
   creatorTotalGbp: "Creator total",
   profitMargin: "Profit margin",
@@ -192,6 +193,37 @@ export function canonicalMemberName(value: string) {
   return cleaned;
 }
 
+function normalizeYear(value: string) {
+  if (value.length === 2) return `20${value}`;
+  return value;
+}
+
+export function getCurrentDealMonthKey(date = new Date()) {
+  return `${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+}
+
+export function normalizeDealMonthKey(value: string) {
+  const cleaned = cleanSheetName(value);
+  if (!cleaned) return "";
+
+  const yearMonth = cleaned.match(/\b(20\d{2})\s*[-/.]\s*(0?[1-9]|1[0-2])\b/);
+  if (yearMonth) {
+    return `${yearMonth[2].padStart(2, "0")}/${yearMonth[1]}`;
+  }
+
+  const monthYear = cleaned.match(/\b(0?[1-9]|1[0-2])\s*[-/.]\s*((?:20)?\d{2})\b/);
+  if (monthYear) {
+    return `${monthYear[1].padStart(2, "0")}/${normalizeYear(monthYear[2])}`;
+  }
+
+  const parsedDate = new Date(cleaned);
+  if (!Number.isNaN(parsedDate.getTime())) {
+    return getCurrentDealMonthKey(parsedDate);
+  }
+
+  return "";
+}
+
 function hasUsefulOutreachContact(row: SheetRow, lookup: Record<OutreachField, number>) {
   return Boolean(
     getHeaderCell(row, lookup, "name") ||
@@ -292,6 +324,7 @@ export function normalizeMemberDealRows(tabName: string, rows: SheetRow[]): Deal
         platform: parsePlatform(getHeaderCell(row, lookup, "platform")),
         contractLink: getHeaderCell(row, lookup, "contractLink") || undefined,
         liveLink: getHeaderCell(row, lookup, "liveLink") || undefined,
+        month: normalizeDealMonthKey(getHeaderCell(row, lookup, "month")),
         totalPricingGbp,
         creatorTotalGbp,
         profitMargin,

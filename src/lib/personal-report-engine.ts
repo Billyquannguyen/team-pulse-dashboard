@@ -205,7 +205,7 @@ function getTeamBenchmarks(
       opportunityDensity:
         exclusiveCreators.length > 0 ? memberDeals.length / exclusiveCreators.length : 0,
       avgDealValue: memberDeals.length > 0 ? revenue / memberDeals.length : 0,
-      commissionProgress: progressPct(member.pendingOwed, getMemberMonthlyGoal(settings, member)),
+      commissionProgress: progressPct(member.monthCommission, getMemberMonthlyGoal(settings, member)),
       creatorsSourced: outreach?.totalCreators ?? 0,
       contacted: outreach?.contacted ?? 0,
       emailsSent: outreach?.emailed ?? 0,
@@ -347,7 +347,7 @@ export function buildPersonalReport(
   const monthlyTarget = getMemberMonthlyGoal(settings, member);
   const progressionTarget = getMemberProgressionGoal(settings, member);
   const exclusiveTarget = getMemberExclusiveCreatorGoal(settings, member);
-  const monthlyProgress = progressPct(member.pendingOwed, monthlyTarget);
+  const monthlyProgress = progressPct(member.monthCommission, monthlyTarget);
   const progressionProgress = progressPct(member.commission, progressionTarget);
   const exclusiveProgress = progressPct(exclusiveCreatorCount, exclusiveTarget);
   const avgDealValue = memberDeals.length > 0 ? Math.round(totalDealValue / memberDeals.length) : 0;
@@ -370,7 +370,7 @@ export function buildPersonalReport(
   const brandData = getBrandRevenueRisk(memberDeals);
   const platformMix = combinePlatformMix(creatorPerformance.all);
   const strongestPlatform = getStrongestPlatform(platformMix);
-  const commissionGoalMissed = member.pendingOwed < monthlyTarget;
+  const commissionGoalMissed = member.monthCommission < monthlyTarget;
   const opportunityDensity =
     exclusiveCreatorCount > 0 ? memberDeals.length / exclusiveCreatorCount : 0;
   const insights = evaluatePersonalReportRules({
@@ -470,7 +470,7 @@ export function buildPersonalReport(
     extraInsights: expandedInsights,
     metrics: {
       monthlyProgress,
-      monthlyCurrent: member.pendingOwed,
+      monthlyCurrent: member.monthCommission,
       monthlyTarget,
       progressionProgress,
       progressionCurrent: member.commission,

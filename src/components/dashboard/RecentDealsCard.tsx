@@ -29,8 +29,8 @@ export function RecentDealsCard({ deals = recentDeals }: { deals?: Deal[] }) {
               <th className="px-3 py-2 text-left font-medium">Member</th>
               <th className="px-3 py-2 text-left font-medium">Brand</th>
               <th className="px-3 py-2 text-left font-medium">Creator</th>
+              <th className="px-3 py-2 text-left font-medium">Month</th>
               <th className="px-3 py-2 text-right font-medium">Manager total</th>
-              <th className="px-3 py-2 text-right font-medium">Paid month?</th>
               <th className="px-3 py-2 text-left font-medium">Status</th>
             </tr>
           </thead>
@@ -41,10 +41,8 @@ export function RecentDealsCard({ deals = recentDeals }: { deals?: Deal[] }) {
                 <td className="px-3 py-3 font-medium">{d.manager}</td>
                 <td className="px-3 py-3">{d.brand}</td>
                 <td className="px-3 py-3 text-muted-foreground">{d.creator}</td>
+                <td className="px-3 py-3 text-muted-foreground">{d.month || "-"}</td>
                 <td className="px-3 py-3 text-right">£{d.managerTotalGbp.toLocaleString()}</td>
-                <td className="px-3 py-3 text-right font-semibold">
-                  {d.managerPaidCurrentMonth ? "Yes" : "No"}
-                </td>
                 <td className="px-3 py-3">
                   <span
                     className={cn(

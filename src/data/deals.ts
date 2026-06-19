@@ -10,6 +10,7 @@ export type Deal = {
   platform: Platform;
   contractLink?: string;
   liveLink?: string;
+  month: string;
   totalPricingGbp: number;
   creatorTotalGbp: number;
   profitMargin: string;
@@ -54,6 +55,8 @@ const creators = [
 const platforms: Platform[] = ["Instagram", "TikTok", "YouTube", "Twitch", "X"];
 const statuses: DealStatus[] = ["Pending", "Posted", "Paid", "Overdue"];
 const netTerms = ["Net 15", "Net 30", "Net 45", "Paid upfront"];
+const fallbackNow = new Date();
+const fallbackCurrentMonth = `${String(fallbackNow.getMonth() + 1).padStart(2, "0")}/${fallbackNow.getFullYear()}`;
 
 function pick<T>(arr: T[], i: number): T {
   return arr[i % arr.length];
@@ -77,6 +80,7 @@ export const deals: Deal[] = Array.from({ length: 32 }, (_, i) => {
     platform: pick(platforms, i + 1),
     contractLink: i % 4 === 0 ? "https://docs.google.com/document/d/PLACEHOLDER" : undefined,
     liveLink: i % 3 === 0 ? "https://example.com/live-campaign" : undefined,
+    month: i < 18 ? fallbackCurrentMonth : "05/2026",
     totalPricingGbp,
     creatorTotalGbp,
     profitMargin,

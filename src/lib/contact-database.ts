@@ -12,11 +12,6 @@ const CONTACT_DATABASE_HEADERS = [
   "contactFirstName",
   "email",
   "position",
-  "source",
-  "firstFoundAt",
-  "lastContactedAt",
-  "gmailThreadId",
-  "notes",
 ];
 
 const CONTACT_DATABASE_CACHE_TTL_MS = 2 * 60 * 1000;
@@ -42,12 +37,7 @@ type ContactDatabaseField =
   | "contactName"
   | "contactFirstName"
   | "email"
-  | "position"
-  | "source"
-  | "firstFoundAt"
-  | "lastContactedAt"
-  | "gmailThreadId"
-  | "notes";
+  | "position";
 
 type ContactDatabaseWorksheet = {
   sheet: {
@@ -68,11 +58,6 @@ export type ContactDatabaseContact = {
   contactFirstName: string;
   email: string;
   position: string;
-  source: string;
-  firstFoundAt: string;
-  lastContactedAt: string;
-  gmailThreadId: string;
-  notes: string;
 };
 
 export type ContactDatabaseSheetData = {
@@ -93,11 +78,6 @@ const CONTACT_COLUMN_ALIASES: Record<ContactDatabaseField, string[]> = {
   contactFirstName: ["contactFirstName", "contact first name", "first name", "firstname"],
   email: ["email", "email address", "work email", "business email"],
   position: ["position", "title", "job title", "role"],
-  source: ["source", "found from"],
-  firstFoundAt: ["firstFoundAt", "first found at", "found at", "created at"],
-  lastContactedAt: ["lastContactedAt", "last contacted at", "contacted at"],
-  gmailThreadId: ["gmailThreadId", "gmail thread id", "thread id"],
-  notes: ["notes", "note"],
 };
 
 const emailSchema = z
@@ -114,11 +94,6 @@ const contactInput = z.object({
   contactFirstName: z.string().trim().max(120).optional().default(""),
   email: emailSchema.optional().default(""),
   position: z.string().trim().max(220).optional().default(""),
-  source: z.string().trim().max(120).optional().default("Manual"),
-  firstFoundAt: z.string().trim().max(80).optional().default(""),
-  lastContactedAt: z.string().trim().max(80).optional().default(""),
-  gmailThreadId: z.string().trim().max(220).optional().default(""),
-  notes: z.string().trim().max(2000).optional().default(""),
 });
 
 const updateContactInput = contactInput.extend({
@@ -201,10 +176,17 @@ function getCell(
 
 function hasRequiredHeaders(headers: string[]) {
   const lookup = buildLookup(headers);
-  return ["brandName", "email", "contactName"].every((field) => {
+  return CONTACT_DATABASE_HEADERS.every((field) => {
     const index = lookup[field as ContactDatabaseField];
     return index !== undefined && index >= 0;
   });
+}
+
+function hasCurrentHeaderSchema(headers: string[]) {
+  if (headers.length !== CONTACT_DATABASE_HEADERS.length) return false;
+  return CONTACT_DATABASE_HEADERS.every(
+    (header, index) => compactKey(headers[index] ?? "") === compactKey(header),
+  );
 }
 
 function sheetUrl(spreadsheetId: string, gid?: string) {
@@ -249,6 +231,12 @@ async function loadContactDatabaseWorksheet(
 
   if (rows.headers.length === 0) {
     await googleSheets.updateSheetRow(config, spreadsheetId, sheet, 1, CONTACT_DATABASE_HEADERS);
+    await googleSheets.updateSheetColumnCount(
+      config,
+      spreadsheetId,
+      sheet,
+      CONTACT_DATABASE_HEADERS.length,
+    );
     rows = {
       headers: CONTACT_DATABASE_HEADERS,
       rows: [],
@@ -259,6 +247,38 @@ async function loadContactDatabaseWorksheet(
     throw new Error(
       `${CONTACT_DATABASE_TAB_NAME} needs these columns: ${CONTACT_DATABASE_HEADERS.join(", ")}`,
     );
+  }
+
+  if (!hasCurrentHeaderSchema(rows.headers)) {
+    const currentLookup = buildLookup(rows.headers);
+    const migratedRows = rows.rows.map((row, index) => {
+      const contact = normalizeContactRow(row, index, currentLookup);
+      return contact
+        ? buildContactRow(CONTACT_DATABASE_HEADERS, contact)
+        : Array.from({ length: CONTACT_DATABASE_HEADERS.length }, () => "");
+    });
+
+    await googleSheets.updateSheetRow(config, spreadsheetId, sheet, 1, CONTACT_DATABASE_HEADERS);
+    for (let index = 0; index < migratedRows.length; index += 1) {
+      await googleSheets.updateSheetRow(
+        config,
+        spreadsheetId,
+        sheet,
+        index + 2,
+        migratedRows[index],
+      );
+    }
+    await googleSheets.updateSheetColumnCount(
+      config,
+      spreadsheetId,
+      sheet,
+      CONTACT_DATABASE_HEADERS.length,
+    );
+
+    rows = {
+      headers: CONTACT_DATABASE_HEADERS,
+      rows: migratedRows,
+    };
   }
 
   return {
@@ -289,11 +309,6 @@ function normalizeContactRow(
     contactFirstName,
     email,
     position: getCell(row, lookup, "position"),
-    source: getCell(row, lookup, "source") || "Contact Database",
-    firstFoundAt: getCell(row, lookup, "firstFoundAt"),
-    lastContactedAt: getCell(row, lookup, "lastContactedAt"),
-    gmailThreadId: getCell(row, lookup, "gmailThreadId"),
-    notes: getCell(row, lookup, "notes"),
   };
 
   return {
@@ -310,7 +325,6 @@ function normalizeContactRows(headers: string[], rows: string[][]) {
 }
 
 function contactFromInput(input: ContactInput): ContactDatabaseContact {
-  const now = new Date().toISOString();
   const contactName = input.contactName.trim();
   const contact: ContactDatabaseContact = {
     id: "",
@@ -319,11 +333,6 @@ function contactFromInput(input: ContactInput): ContactDatabaseContact {
     contactFirstName: splitFirstName(contactName, input.contactFirstName),
     email: normalizeEmail(input.email),
     position: input.position.trim(),
-    source: input.source.trim() || "Manual",
-    firstFoundAt: input.firstFoundAt.trim() || now,
-    lastContactedAt: input.lastContactedAt.trim(),
-    gmailThreadId: input.gmailThreadId.trim(),
-    notes: input.notes.trim(),
   };
 
   return {
@@ -340,11 +349,6 @@ function mergedContact(existing: ContactDatabaseContact, incoming: ContactDataba
     contactFirstName: incoming.contactFirstName || existing.contactFirstName,
     email: incoming.email || existing.email,
     position: incoming.position || existing.position,
-    source: incoming.source || existing.source,
-    firstFoundAt: existing.firstFoundAt || incoming.firstFoundAt,
-    lastContactedAt: incoming.lastContactedAt || existing.lastContactedAt,
-    gmailThreadId: incoming.gmailThreadId || existing.gmailThreadId,
-    notes: incoming.notes || existing.notes,
   };
 }
 
@@ -357,11 +361,6 @@ function buildContactRow(headers: string[], contact: ContactDatabaseContact) {
     contactFirstName: contact.contactFirstName,
     email: contact.email,
     position: contact.position,
-    source: contact.source,
-    firstFoundAt: contact.firstFoundAt,
-    lastContactedAt: contact.lastContactedAt,
-    gmailThreadId: contact.gmailThreadId,
-    notes: contact.notes,
   };
   const row = Array.from({ length: headers.length }, () => "");
 
@@ -610,7 +609,7 @@ export const deduplicateContactDatabase = createServerFn({ method: "POST" }).han
 });
 
 export const contactDatabaseQuery = {
-  queryKey: ["team-billion-contact-database", "google-sheet-v1"],
+  queryKey: ["team-billion-contact-database", "google-sheet-v2"],
   queryFn: () => fetchContactDatabaseData(),
   refetchInterval: QUERY_REFETCH_INTERVAL_MS,
   staleTime: QUERY_STALE_TIME_MS,

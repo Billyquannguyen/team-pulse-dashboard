@@ -22,30 +22,12 @@ export type TeamMemberStatus = "active" | "offboarded";
 export type TeamMemberConfig = {
   id: string;
   displayName: string;
-  shortCode: string;
-  worksheetName: string;
   status: TeamMemberStatus;
-  role: string;
-  color: string;
-  sortOrder: number;
   joinedMonth: string;
-  createdAt: string;
-  updatedAt: string;
   rowNumber?: number;
 };
 
-type TeamMemberField =
-  | "id"
-  | "displayName"
-  | "shortCode"
-  | "worksheetName"
-  | "status"
-  | "role"
-  | "color"
-  | "sortOrder"
-  | "joinedMonth"
-  | "createdAt"
-  | "updatedAt";
+type TeamMemberField = "displayName" | "id" | "joinedMonth" | "status";
 
 type TeamMembersCacheEntry = {
   data: TeamMembersSheetData;
@@ -77,27 +59,17 @@ export type TeamMembersSheetData = {
 };
 
 export type TeamMemberSuggestion = {
-  worksheetName: string;
+  id: string;
   displayName: string;
-  shortCode: string;
+  joinedMonth: string;
   reason: string;
 };
 
 export const TEAM_MEMBERS_TAB_NAME = "TeamMembers";
 
-export const TEAM_MEMBERS_HEADERS: TeamMemberField[] = [
-  "id",
-  "displayName",
-  "shortCode",
-  "worksheetName",
-  "status",
-  "role",
-  "color",
-  "sortOrder",
-  "joinedMonth",
-  "createdAt",
-  "updatedAt",
-];
+export const TEAM_MEMBERS_HEADERS = ["Name", "ID", "Joined Month", "Status"] as const;
+
+const TEAM_MEMBER_FIELDS: TeamMemberField[] = ["displayName", "id", "joinedMonth", "status"];
 
 export const SYSTEM_MEMBER_TAB_NAMES = [
   "Comm Tracking",
@@ -133,36 +105,43 @@ const SYSTEM_MEMBER_TAB_WORDS = [
   "template",
 ];
 
+const DEFAULT_SEED_MEMBERS: TeamMemberSuggestion[] = [
+  {
+    displayName: "Kim Trang",
+    id: "KTrang",
+    joinedMonth: "2024-08",
+    reason: "Suggested current dashboard member.",
+  },
+  {
+    displayName: "Hoang Yen",
+    id: "HYen",
+    joinedMonth: "2025-01",
+    reason: "Suggested current dashboard member.",
+  },
+  {
+    displayName: "Linh Ngoc",
+    id: "LNgoc",
+    joinedMonth: "2025-03",
+    reason: "Suggested current dashboard member.",
+  },
+];
+
 const TEAM_MEMBERS_CACHE_TTL_MS = 5 * 60 * 1000;
 const QUERY_STALE_TIME_MS = TEAM_MEMBERS_CACHE_TTL_MS;
 const QUERY_REFETCH_INTERVAL_MS = TEAM_MEMBERS_CACHE_TTL_MS;
 
 const TEAM_MEMBER_COLUMN_ALIASES: Record<TeamMemberField, string[]> = {
-  id: ["id", "member id", "slug"],
-  displayName: ["display name", "displayname", "name", "member", "member name"],
-  shortCode: ["short code", "shortcode", "initials", "code"],
-  worksheetName: ["worksheet name", "worksheetname", "worksheet", "sheet", "tab", "tab name"],
-  status: ["status", "active status"],
-  role: ["role", "position"],
-  color: ["color", "colour", "hex"],
-  sortOrder: ["sort order", "sortorder", "order", "position"],
+  displayName: ["name", "display name", "displayname", "member", "member name"],
+  id: ["id", "member id", "worksheet", "worksheet name", "tab", "tab name"],
   joinedMonth: ["joined month", "joinedmonth", "join month", "joined", "start month"],
-  createdAt: ["created at", "createdat", "created"],
-  updatedAt: ["updated at", "updatedat", "updated"],
+  status: ["status", "active status"],
 };
 
-const DEFAULT_COLORS = ["#A3E635", "#FACC15", "#F9A8D4", "#C4B5FD", "#7DD3FC", "#FDBA74"];
-
 const teamMemberInput = z.object({
-  id: z.string().trim().max(80).optional().default(""),
   displayName: z.string().trim().min(1).max(80),
-  shortCode: z.string().trim().max(12).optional().default(""),
-  worksheetName: z.string().trim().max(120).optional().default(""),
-  status: z.enum(["active", "offboarded"]).default("active"),
-  role: z.string().trim().max(80).optional().default("Closer"),
-  color: z.string().trim().max(40).optional().default(""),
-  sortOrder: z.number().finite().optional().default(100),
+  id: z.string().trim().min(1).max(80),
   joinedMonth: z.string().trim().max(20).optional().default(""),
+  status: z.enum(["active", "offboarded"]).default("active"),
 });
 
 const updateTeamMemberInput = teamMemberInput.extend({
@@ -222,10 +201,6 @@ function cleanValue(value: string) {
   return cleanSheetName(value);
 }
 
-function slugify(value: string, fallback: string) {
-  return normalizeKey(value).replace(/\s+/g, "-").replace(/^-|-$/g, "") || fallback;
-}
-
 export function getInitialsFromName(name: string) {
   const cleaned = cleanValue(name);
   const parts = cleaned.split(" ").filter(Boolean);
@@ -241,11 +216,6 @@ export function getInitialsFromName(name: string) {
   return cleaned.slice(0, 2).toUpperCase();
 }
 
-function parseSortOrder(value: string, index: number) {
-  const number = Number(value.replace(/[^\d.-]/g, ""));
-  return Number.isFinite(number) ? number : (index + 1) * 10;
-}
-
 function parseStatus(value: string): TeamMemberStatus {
   const normalized = normalizeKey(value);
   if (["offboarded", "offboard", "former", "inactive", "left"].includes(normalized)) {
@@ -254,10 +224,8 @@ function parseStatus(value: string): TeamMemberStatus {
   return "active";
 }
 
-function normalizeColor(value: string, index: number) {
-  const cleaned = value.trim();
-  if (/^#[0-9a-f]{6}$/i.test(cleaned)) return cleaned;
-  return DEFAULT_COLORS[index % DEFAULT_COLORS.length];
+function formatStatus(status: TeamMemberStatus) {
+  return status === "offboarded" ? "Offboarded" : "Active";
 }
 
 function buildColumnLookup(headers: string[]): HeaderLookup<TeamMemberField> {
@@ -270,7 +238,18 @@ function getCell(row: string[], lookup: HeaderLookup<TeamMemberField>, field: Te
 
 function hasMinimumTeamMemberHeaders(headers: string[]) {
   const lookup = buildColumnLookup(headers);
-  return lookup.displayName !== undefined && lookup.displayName >= 0;
+  return (
+    lookup.displayName !== undefined &&
+    lookup.displayName >= 0 &&
+    lookup.id !== undefined &&
+    lookup.id >= 0
+  );
+}
+
+function hasCanonicalTeamMemberHeaders(headers: string[]) {
+  return TEAM_MEMBERS_HEADERS.every(
+    (header, index) => normalizeKey(headers[index] ?? "") === normalizeKey(header),
+  );
 }
 
 function getTeamMembersSheetUrl(spreadsheetId: string) {
@@ -281,23 +260,37 @@ function getTeamMembersSheetUrl(spreadsheetId: string) {
 }
 
 function buildSuggestions(tabs: GoogleSheetRef[], existingMembers: TeamMemberConfig[]) {
-  const existingWorksheetKeys = new Set(
-    existingMembers.map((member) => normalizeSheetKey(member.worksheetName || member.displayName)),
+  const existingIds = new Set(existingMembers.map((member) => normalizeSheetKey(member.id)));
+  const visibleMemberTabs = tabs
+    .filter((tab) => !isSystemMemberTabName(tab.sheetName))
+    .filter((tab) => !existingIds.has(normalizeSheetKey(tab.sheetName)));
+  const visibleTabKeys = new Set(visibleMemberTabs.map((tab) => normalizeSheetKey(tab.sheetName)));
+  const seedSuggestions = DEFAULT_SEED_MEMBERS.filter(
+    (seed) => !existingIds.has(normalizeSheetKey(seed.id)),
   );
 
-  return tabs
-    .filter((tab) => !isSystemMemberTabName(tab.sheetName))
-    .filter((tab) => !existingWorksheetKeys.has(normalizeSheetKey(tab.sheetName)))
+  const likelySeedSuggestions = seedSuggestions.filter((seed) =>
+    visibleTabKeys.has(normalizeSheetKey(seed.id)),
+  );
+
+  const worksheetSuggestions = visibleMemberTabs
+    .filter(
+      (tab) =>
+        !DEFAULT_SEED_MEMBERS.some(
+          (seed) => normalizeSheetKey(seed.id) === normalizeSheetKey(tab.sheetName),
+        ),
+    )
     .map((tab) => {
-      const displayName = cleanValue(tab.sheetName);
+      const id = cleanValue(tab.sheetName);
       return {
-        worksheetName: displayName,
-        displayName,
-        shortCode: getInitialsFromName(displayName),
-        reason:
-          "Possible member worksheet. Add it only if this is a real active or offboarded person.",
+        id,
+        displayName: id,
+        joinedMonth: "",
+        reason: "Possible member worksheet. Add it only if this is a real active person.",
       };
     });
+
+  return [...likelySeedSuggestions, ...worksheetSuggestions];
 }
 
 function normalizeTeamMemberRows(headers: string[], rows: string[][]) {
@@ -306,47 +299,34 @@ function normalizeTeamMemberRows(headers: string[], rows: string[][]) {
   return rows
     .map((row, index): TeamMemberConfig | null => {
       const displayName = cleanValue(getCell(row, lookup, "displayName"));
-      if (!displayName) return null;
-
-      const id = slugify(getCell(row, lookup, "id") || displayName, `member-${index + 1}`);
-      const shortCode =
-        cleanValue(getCell(row, lookup, "shortCode")) || getInitialsFromName(displayName);
-      const worksheetName = cleanValue(getCell(row, lookup, "worksheetName")) || displayName;
-      const sortOrder = parseSortOrder(getCell(row, lookup, "sortOrder"), index);
+      const id = cleanValue(getCell(row, lookup, "id"));
+      if (!displayName || !id) return null;
 
       return {
         id,
         displayName,
-        shortCode,
-        worksheetName,
         status: parseStatus(getCell(row, lookup, "status")),
-        role: cleanValue(getCell(row, lookup, "role")) || "Closer",
-        color: normalizeColor(getCell(row, lookup, "color"), index),
-        sortOrder,
         joinedMonth: cleanValue(getCell(row, lookup, "joinedMonth")),
-        createdAt: cleanValue(getCell(row, lookup, "createdAt")),
-        updatedAt: cleanValue(getCell(row, lookup, "updatedAt")),
         rowNumber: index + 2,
       };
     })
-    .filter((member): member is TeamMemberConfig => member !== null)
-    .sort(
-      (left, right) =>
-        left.sortOrder - right.sortOrder || left.displayName.localeCompare(right.displayName),
-    );
+    .filter((member): member is TeamMemberConfig => member !== null);
 }
 
 function getKnownFallback(member: TeamMemberConfig, index: number): Teammate {
   const known = fallbackTeam.find(
-    (item) => normalizeKey(item.name) === normalizeKey(member.displayName),
+    (item) =>
+      normalizeSheetKey(item.id) === normalizeSheetKey(member.id) ||
+      normalizeSheetKey(item.name) === normalizeSheetKey(member.displayName) ||
+      normalizeSheetKey(item.worksheetName ?? "") === normalizeSheetKey(member.id),
   );
 
   return {
     ...(known ?? {
       id: member.id,
       name: member.displayName,
-      initials: member.shortCode,
-      role: member.role,
+      initials: getInitialsFromName(member.displayName),
+      role: "Closer",
       commission: 0,
       monthCommission: 0,
       pendingOwed: 0,
@@ -359,12 +339,10 @@ function getKnownFallback(member: TeamMemberConfig, index: number): Teammate {
     }),
     id: member.id || known?.id || `member-${index + 1}`,
     name: member.displayName,
-    initials: member.shortCode || getInitialsFromName(member.displayName),
-    role: member.role || known?.role || "Closer",
-    worksheetName: member.worksheetName,
+    initials: getInitialsFromName(member.displayName),
+    role: known?.role || "Closer",
+    worksheetName: member.id,
     status: member.status,
-    color: member.color,
-    sortOrder: member.sortOrder,
     joinedMonth: member.joinedMonth,
   };
 }
@@ -406,15 +384,36 @@ async function loadTeamMembersWorksheet(
     sheet,
   ]);
 
-  if (options.ensureHeaders && !hasMinimumTeamMemberHeaders(sheetRows?.headers ?? [])) {
-    await googleSheets.updateSheetRow(
-      config,
-      config.teamSpreadsheetId,
-      sheet,
-      1,
-      TEAM_MEMBERS_HEADERS,
-    );
-    sheetRows = { headers: TEAM_MEMBERS_HEADERS, rows: sheetRows?.rows ?? [] };
+  if (options.ensureHeaders) {
+    const currentHeaders = sheetRows?.headers ?? [];
+    const currentRows = sheetRows?.rows ?? [];
+    const shouldMigrateRows =
+      currentRows.length > 0 &&
+      hasMinimumTeamMemberHeaders(currentHeaders) &&
+      !hasCanonicalTeamMemberHeaders(currentHeaders);
+    const migratedRows = shouldMigrateRows
+      ? normalizeTeamMemberRows(currentHeaders, currentRows)
+      : [];
+
+    await googleSheets.updateSheetRow(config, config.teamSpreadsheetId, sheet, 1, [
+      ...TEAM_MEMBERS_HEADERS,
+    ]);
+
+    for (const member of migratedRows) {
+      if (!member.rowNumber) continue;
+      await googleSheets.updateSheetRow(
+        config,
+        config.teamSpreadsheetId,
+        sheet,
+        member.rowNumber,
+        buildTeamMemberWriteRow(member),
+      );
+    }
+
+    sheetRows = {
+      headers: [...TEAM_MEMBERS_HEADERS],
+      rows: shouldMigrateRows ? migratedRows.map(buildTeamMemberWriteRow) : currentRows,
+    };
   }
 
   return {
@@ -426,7 +425,6 @@ async function loadTeamMembersWorksheet(
 }
 
 async function readTeamMembersSheetData(config: GoogleSheetsConfig): Promise<TeamMembersSheetData> {
-  const googleSheets = await getGoogleSheetsServer();
   const tabs = await getTeamMembersTabs(config);
   const links = getTeamMembersSheetUrl(config.teamSpreadsheetId);
   const warnings: string[] = [];
@@ -436,7 +434,7 @@ async function readTeamMembersSheetData(config: GoogleSheetsConfig): Promise<Tea
 
     if (!hasMinimumTeamMemberHeaders(worksheet.headers)) {
       warnings.push(
-        `${TEAM_MEMBERS_TAB_NAME} exists, but it needs a displayName column before it can control the dashboard.`,
+        `${TEAM_MEMBERS_TAB_NAME} needs Name and ID columns before it can control the dashboard.`,
       );
     }
 
@@ -464,9 +462,6 @@ async function readTeamMembersSheetData(config: GoogleSheetsConfig): Promise<Tea
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    warnings.push(
-      `${TEAM_MEMBERS_TAB_NAME} is missing. Create it, then add real members. Worksheet tabs are suggestions only.`,
-    );
 
     logTeamMembers("team members setup needed", {
       reason: message,
@@ -480,8 +475,8 @@ async function readTeamMembersSheetData(config: GoogleSheetsConfig): Promise<Tea
       source: "google-sheet",
       setupNeeded: true,
       error: message,
-      warning: warnings[0],
-      warnings,
+      warning: `${TEAM_MEMBERS_TAB_NAME} sheet is missing.`,
+      warnings: [],
       links,
       updatedAt: new Date().toISOString(),
     };
@@ -557,56 +552,59 @@ export async function getActiveTeammatesForServer() {
   return members.map(teamMemberConfigToTeammate);
 }
 
-function buildTeamMemberWriteRow(
-  headers: string[],
-  existingRow: string[],
-  input: z.infer<typeof teamMemberInput>,
-  options: { fallbackId: string; now: string; createdAt?: string },
-) {
-  const lookup = buildColumnLookup(headers);
-  const row = [...existingRow];
-  while (row.length < headers.length) row.push("");
-
-  const id = slugify(input.id || input.displayName, options.fallbackId);
-  const values: Record<TeamMemberField, string> = {
-    id,
-    displayName: cleanValue(input.displayName),
-    shortCode: cleanValue(input.shortCode) || getInitialsFromName(input.displayName),
-    worksheetName: cleanValue(input.worksheetName) || cleanValue(input.displayName),
-    status: input.status,
-    role: cleanValue(input.role) || "Closer",
-    color: normalizeColor(input.color, 0),
-    sortOrder: String(input.sortOrder),
-    joinedMonth: cleanValue(input.joinedMonth),
-    createdAt: options.createdAt || options.now,
-    updatedAt: options.now,
-  };
-
-  TEAM_MEMBERS_HEADERS.forEach((field) => {
-    const index = lookup[field];
-    if (index !== undefined && index >= 0) {
-      row[index] = values[field];
-    }
-  });
-
-  return row;
+function buildTeamMemberWriteRow(input: z.infer<typeof teamMemberInput>) {
+  return [
+    cleanValue(input.displayName),
+    cleanValue(input.id),
+    cleanValue(input.joinedMonth),
+    formatStatus(input.status),
+  ];
 }
 
-function nextMemberSortOrder(rows: string[][], headers: string[]) {
-  const lookup = buildColumnLookup(headers);
-  const index = lookup.sortOrder;
-  const highest = rows.reduce((max, row, rowIndex) => {
-    const raw = index === undefined || index < 0 ? "" : row[index];
-    return Math.max(max, parseSortOrder(raw ?? "", rowIndex));
-  }, 0);
+function chooseSeedMembers(availableTabs: string[]) {
+  const tabKeys = new Set(availableTabs.map(normalizeSheetKey));
+  const matchingSeeds = DEFAULT_SEED_MEMBERS.filter((seed) =>
+    tabKeys.has(normalizeSheetKey(seed.id)),
+  );
 
-  return highest + 10 || 10;
+  return matchingSeeds.length > 0 ? matchingSeeds : DEFAULT_SEED_MEMBERS;
 }
 
 export const fetchTeamMembersData = createServerFn({ method: "GET" }).handler(async () => {
   const { requireDashboardAuth } = await import("@/lib/auth.server");
   await requireDashboardAuth();
   return getTeamMembersDataForServer();
+});
+
+export const createTeamMembersSheet = createServerFn({ method: "POST" }).handler(async () => {
+  const { requireAdminAuth } = await import("@/lib/auth.server");
+  await requireAdminAuth();
+  const googleSheets = await getGoogleSheetsServer();
+  const config = googleSheets.getGoogleSheetsConfig();
+  const worksheet = await loadTeamMembersWorksheet(config, {
+    createIfMissing: true,
+    ensureHeaders: true,
+  });
+
+  if (worksheet.rows.length === 0) {
+    const seeds = chooseSeedMembers(worksheet.availableTabs);
+    for (const seed of seeds) {
+      await googleSheets.appendSheetRow(
+        config,
+        config.teamSpreadsheetId,
+        worksheet.sheet,
+        buildTeamMemberWriteRow({
+          displayName: seed.displayName,
+          id: seed.id,
+          joinedMonth: seed.joinedMonth,
+          status: "active",
+        }),
+      );
+    }
+  }
+
+  await invalidateRelatedCaches();
+  return { ok: true as const };
 });
 
 export const addTeamMember = createServerFn({ method: "POST" })
@@ -620,23 +618,13 @@ export const addTeamMember = createServerFn({ method: "POST" })
       createIfMissing: true,
       ensureHeaders: true,
     });
-    const now = new Date().toISOString();
-    const nextSortOrderValue =
-      data.sortOrder || nextMemberSortOrder(worksheet.rows, worksheet.headers);
-    const row = buildTeamMemberWriteRow(
-      worksheet.headers,
-      [],
-      {
-        ...data,
-        sortOrder: nextSortOrderValue,
-      },
-      {
-        fallbackId: `member-${worksheet.rows.length + 1}`,
-        now,
-      },
-    );
 
-    await googleSheets.appendSheetRow(config, config.teamSpreadsheetId, worksheet.sheet, row);
+    await googleSheets.appendSheetRow(
+      config,
+      config.teamSpreadsheetId,
+      worksheet.sheet,
+      buildTeamMemberWriteRow(data),
+    );
     await invalidateRelatedCaches();
 
     return { ok: true as const };
@@ -659,20 +647,12 @@ export const updateTeamMember = createServerFn({ method: "POST" })
       throw new Error(`Could not find TeamMembers row ${data.rowNumber}. Refresh and try again.`);
     }
 
-    const lookup = buildColumnLookup(worksheet.headers);
-    const createdAt = getCell(existingRow, lookup, "createdAt");
-    const row = buildTeamMemberWriteRow(worksheet.headers, existingRow, data, {
-      fallbackId: `member-${data.rowNumber - 1}`,
-      now: new Date().toISOString(),
-      createdAt,
-    });
-
     await googleSheets.updateSheetRow(
       config,
       config.teamSpreadsheetId,
       worksheet.sheet,
       data.rowNumber,
-      row,
+      buildTeamMemberWriteRow(data),
     );
     await invalidateRelatedCaches();
 
@@ -698,12 +678,10 @@ export const offboardTeamMember = createServerFn({ method: "POST" })
 
     const lookup = buildColumnLookup(worksheet.headers);
     const row = [...existingRow];
-    while (row.length < worksheet.headers.length) row.push("");
+    while (row.length < TEAM_MEMBERS_HEADERS.length) row.push("");
     const statusIndex = lookup.status;
-    const updatedAtIndex = lookup.updatedAt;
-    if (statusIndex !== undefined && statusIndex >= 0) row[statusIndex] = "offboarded";
-    if (updatedAtIndex !== undefined && updatedAtIndex >= 0) {
-      row[updatedAtIndex] = new Date().toISOString();
+    if (statusIndex !== undefined && statusIndex >= 0) {
+      row[statusIndex] = "Offboarded";
     }
 
     await googleSheets.updateSheetRow(
@@ -711,7 +689,9 @@ export const offboardTeamMember = createServerFn({ method: "POST" })
       config.teamSpreadsheetId,
       worksheet.sheet,
       data.rowNumber,
-      row,
+      TEAM_MEMBER_FIELDS.map((field) =>
+        field === "status" ? "Offboarded" : getCell(row, lookup, field),
+      ),
     );
     await invalidateRelatedCaches();
 
@@ -719,7 +699,7 @@ export const offboardTeamMember = createServerFn({ method: "POST" })
   });
 
 export const teamMembersQuery = {
-  queryKey: ["team-billion-team-members", "google-sheet-v1"],
+  queryKey: ["team-billion-team-members", "google-sheet-v2"],
   queryFn: () => fetchTeamMembersData(),
   refetchInterval: QUERY_REFETCH_INTERVAL_MS,
   staleTime: QUERY_STALE_TIME_MS,

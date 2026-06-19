@@ -21,7 +21,7 @@ export function LeaderboardCard({
   team?: Teammate[];
   getProgressionGoal?: (member: Teammate) => number;
 }) {
-  const sorted = [...team].sort((a, b) => b.commission - a.commission).slice(0, limit);
+  const sorted = [...team].sort((a, b) => b.monthCommission - a.monthCommission).slice(0, limit);
   return (
     <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
       <div className="flex items-center justify-between">
@@ -57,14 +57,12 @@ export function LeaderboardCard({
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">{t.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  {t.dealsClosed} deals · {pct}% progression goal
+                  {t.dealsClosed} deals · £{t.commission.toLocaleString()} all-time
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-sm font-bold">£{t.commission.toLocaleString()}</div>
-                <div className="text-xs text-muted-foreground">
-                  / £{progressionGoal.toLocaleString()}
-                </div>
+                <div className="text-sm font-bold">£{t.monthCommission.toLocaleString()}</div>
+                <div className="text-xs text-muted-foreground">{pct}% long-term</div>
               </div>
             </li>
           );

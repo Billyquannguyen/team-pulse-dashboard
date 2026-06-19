@@ -3,10 +3,9 @@ import {
   totalCommission,
   totalDealsClosed,
   totalMonthCommission,
-  totalPendingOwed,
 } from "@/data/team";
 import type { DashboardSheetData } from "@/lib/sheets-public";
-import { Briefcase, CalendarDays, CircleDollarSign, WalletCards } from "lucide-react";
+import { Briefcase, CalendarDays, CircleDollarSign, Target } from "lucide-react";
 
 export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
@@ -14,26 +13,27 @@ export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
   const totals = data?.totals ?? {
     totalPaid: canUseLocalFallback ? totalCommission : 0,
     paidThisMonth: canUseLocalFallback ? totalMonthCommission : 0,
-    pendingOwed: canUseLocalFallback ? totalPendingOwed : 0,
+    pendingOwed: 0,
     dealsClosed: canUseLocalFallback ? totalDealsClosed : 0,
+    averageDealSize: 0,
   };
   const stats = [
     {
-      label: "Total paid",
+      label: "All-time commission",
       value: `£${totals.totalPaid.toLocaleString()}`,
       icon: CircleDollarSign,
       tone: "var(--fun-lime)",
     },
     {
-      label: "Paid this month",
+      label: "Current month",
       value: `£${totals.paidThisMonth.toLocaleString()}`,
       icon: CalendarDays,
       tone: "var(--fun-yellow)",
     },
     {
-      label: "Pending owed",
-      value: `£${totals.pendingOwed.toLocaleString()}`,
-      icon: WalletCards,
+      label: "Avg deal value",
+      value: `£${(totals.averageDealSize ?? 0).toLocaleString()}`,
+      icon: Target,
       tone: "var(--fun-pink)",
     },
     {
@@ -48,9 +48,9 @@ export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
     <div className="rounded-3xl bg-card p-6 ring-1 ring-border">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold">Member payout summary</h3>
+          <h3 className="text-base font-semibold">Member commission summary</h3>
           <p className="text-xs text-muted-foreground">
-            Team totals are calculated from each member sheet.
+            Monthly totals use the deal Month column from each member sheet.
           </p>
         </div>
         <div className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
@@ -80,9 +80,8 @@ export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
           <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-3 py-2.5 text-left font-medium">Member</th>
-              <th className="px-3 py-2.5 text-right font-medium">Total paid</th>
-              <th className="px-3 py-2.5 text-right font-medium">Paid this month</th>
-              <th className="px-3 py-2.5 text-right font-medium">Pending owed</th>
+              <th className="px-3 py-2.5 text-right font-medium">All-time</th>
+              <th className="px-3 py-2.5 text-right font-medium">Current month</th>
               <th className="px-3 py-2.5 text-right font-medium">Deals</th>
             </tr>
           </thead>
@@ -104,7 +103,6 @@ export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
                   £{member.commission.toLocaleString()}
                 </td>
                 <td className="px-3 py-3 text-right">£{member.monthCommission.toLocaleString()}</td>
-                <td className="px-3 py-3 text-right">£{member.pendingOwed.toLocaleString()}</td>
                 <td className="px-3 py-3 text-right">{member.dealsClosed.toLocaleString()}</td>
               </tr>
             ))}

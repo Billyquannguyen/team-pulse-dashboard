@@ -64,7 +64,7 @@ export function HomeGoalSnapshotCard({
   team?: Teammate[];
   settings: GoalSettings;
 }) {
-  const teamPending = team.reduce((sum, member) => sum + member.pendingOwed, 0);
+  const teamMonthCommission = team.reduce((sum, member) => sum + member.monthCommission, 0);
   const teamExclusiveCreators = team.reduce((sum, member) => sum + member.exclusiveCreators, 0);
 
   const teamMonthlyGoal = getTeamMonthlyGoal(settings);
@@ -92,7 +92,9 @@ export function HomeGoalSnapshotCard({
             </div>
             <div>
               <div className="text-sm font-semibold">Monthly commission goal</div>
-              <div className="text-xs text-muted-foreground">Pending commission vs target</div>
+              <div className="text-xs text-muted-foreground">
+                Current-month commission vs target
+              </div>
             </div>
           </div>
 
@@ -102,7 +104,7 @@ export function HomeGoalSnapshotCard({
                 <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Team
                 </div>
-                <div className="mt-1 text-2xl font-bold">{formatMoney(teamPending)}</div>
+                <div className="mt-1 text-2xl font-bold">{formatMoney(teamMonthCommission)}</div>
               </div>
               <div className="text-right text-sm text-muted-foreground">
                 / {formatMoney(teamMonthlyGoal)}
@@ -111,7 +113,7 @@ export function HomeGoalSnapshotCard({
             <div className="mt-3 h-3 overflow-hidden rounded-full bg-card">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-fun-lime to-fun-yellow"
-                style={{ width: `${getPct(teamPending, teamMonthlyGoal)}%` }}
+                style={{ width: `${getPct(teamMonthCommission, teamMonthlyGoal)}%` }}
               />
             </div>
           </div>
@@ -121,7 +123,7 @@ export function HomeGoalSnapshotCard({
               <GoalMiniRow
                 key={member.id}
                 name={member.name}
-                current={member.pendingOwed}
+                current={member.monthCommission}
                 target={getMemberMonthlyGoal(settings, member)}
                 mode="money"
               />
