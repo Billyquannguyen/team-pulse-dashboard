@@ -78,7 +78,7 @@ const DEFAULT_SENIORITY = ["manager", "director", "head", "founder", "owner"];
 const DEFAULT_EMAIL_STATUSES = ["verified", "likely to engage"];
 
 type TemplateTarget = "subject" | "body";
-type BrandStatus = "none" | "database";
+type BrandStatus = "unknown" | "none" | "database";
 
 type ApolloFilterState = {
   jobTitlesText: string;
@@ -112,6 +112,8 @@ type ContactRow = {
   contactFirstName: string;
   email: string;
   position: string;
+  emailStatus?: string;
+  source?: string;
 };
 
 type SavedBrandFinderState = {
@@ -123,6 +125,10 @@ type SavedBrandFinderState = {
   brandOverrides?: Record<string, BrandOverride>;
   brandSearchOverrides?: Record<string, boolean>;
   directSearchBrandIds?: string[];
+  directSearchQuery?: string;
+  directActiveSearch?: string;
+  directSelectedContactIds?: string[];
+  savedDraftContacts?: ContactRow[];
   contacts?: ContactRow[];
   selectedContactIds?: string[];
   draftMessage?: string;
@@ -407,15 +413,34 @@ function brandMatchesContact(brand: Pick<BrandRow, "brandName">, contact: Contac
   return compactKey(brand.brandName) === compactKey(contact.brandName);
 }
 
-function getBrandDatabaseStatus(brand: BrandRow, contacts: ContactDatabaseContact[]) {
+function getBrandDatabaseStatus(
+  brand: BrandRow,
+  contacts: ContactDatabaseContact[],
+  checked: boolean,
+) {
+  if (!checked) {
+    return {
+      status: "unknown" as BrandStatus,
+      count: 0,
+      label: "Not checked",
+    };
+  }
+
   const matches = contacts.filter((contact) => brandMatchesContact(brand, contact));
   const status: BrandStatus = matches.length > 0 ? "database" : "none";
 
   return {
     status,
     count: matches.length,
-    label: status === "database" ? "Contacts already in database" : "No contacts found",
+    label: status === "database" ? "Contacts found" : "No saved contacts",
   };
+}
+
+function contactMatchesBrandSearch(contact: ContactDatabaseContact | ContactRow, search: string) {
+  const query = compactKey(search);
+  if (!query) return false;
+  const brandKey = compactKey(contact.brandName);
+  return brandKey.includes(query) || query.includes(brandKey);
 }
 
 function findDuplicateContact(contact: ContactRow, contacts: ContactDatabaseContact[]) {
@@ -462,6 +487,8 @@ function apiContactToRow(contact: ApolloContactResult, brands: BrandRow[]): Cont
     contactFirstName: contactFirstName(contactName, contact.firstName),
     email: contact.email,
     position: contact.title,
+    emailStatus: contact.emailStatus,
+    source: "Apollo",
   };
 
   return {
@@ -481,6 +508,7 @@ function databaseContactToRow(contact: ContactDatabaseContact, brands: BrandRow[
     contactFirstName: contactFirstName(contact.contactName, contact.contactFirstName),
     email: contact.email,
     position: contact.position,
+    source: "Contact Database",
   };
 
   return {
@@ -523,6 +551,7 @@ function readSavedState(): SavedBrandFinderState {
 
 function statusTone(status: BrandStatus) {
   if (status === "database") return "border-fun-blue/60 bg-fun-blue/20 text-foreground";
+  if (status === "unknown") return "border-border bg-muted text-muted-foreground";
   return "border-fun-lime/50 bg-fun-lime/20 text-foreground";
 }
 
@@ -536,6 +565,7 @@ function BrandFinderPage() {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const { data: contactDatabaseData } = useQuery(contactDatabaseQuery);
   const databaseContacts = contactDatabaseData?.contacts ?? [];
+  const contactDatabaseChecked = Boolean(contactDatabaseData);
   const [sheetInput, setSheetInput] = useState("");
   const [sheetFileName, setSheetFileName] = useState("");
   const [subjectTemplate, setSubjectTemplate] = useState(DEFAULT_SUBJECT_TEMPLATE);
@@ -549,11 +579,16 @@ function BrandFinderPage() {
   const [directSearchBrandIds, setDirectSearchBrandIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [directSearchQuery, setDirectSearchQuery] = useState("");
+  const [directActiveSearch, setDirectActiveSearch] = useState("");
+  const [directSelectedContactIds, setDirectSelectedContactIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [savedDraftContacts, setSavedDraftContacts] = useState<ContactRow[]>([]);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const [q, setQ] = useState("");
   const [brandFilter, setBrandFilter] = useState(ALL_BRANDS);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -577,19 +612,27 @@ function BrandFinderPage() {
     () => brands.filter((brand) => directSearchBrandIds.has(brand.id)),
     [brands, directSearchBrandIds],
   );
+  const directSearchTerms = useMemo(() => {
+    const activeSearch = directActiveSearch.trim();
+    if (activeSearch) return [activeSearch];
+    return directSearchBrands.map((brand) => brand.brandName);
+  }, [directActiveSearch, directSearchBrands]);
   const directSearchContacts = useMemo(() => {
-    if (directSearchBrands.length === 0) return [];
+    if (directSearchTerms.length === 0) return [];
 
-    const brandKeys = new Set(directSearchBrands.map((brand) => compactKey(brand.brandName)));
-    const matched = databaseContacts.filter((contact) => brandKeys.has(compactKey(contact.brandName)));
-    const contactRows = matched.map((contact) => databaseContactToRow(contact, directSearchBrands));
+    const matched = databaseContacts.filter((contact) =>
+      directSearchTerms.some((term) => contactMatchesBrandSearch(contact, term)),
+    );
+    const contactRows = matched.map((contact) =>
+      databaseContactToRow(contact, directSearchBrands),
+    );
 
     return Array.from(new Map(contactRows.map((contact) => [contact.id, contact])).values()).sort(
       (left, right) =>
         left.brandName.localeCompare(right.brandName) ||
         left.contactName.localeCompare(right.contactName),
     );
-  }, [databaseContacts, directSearchBrands]);
+  }, [databaseContacts, directSearchBrands, directSearchTerms]);
   const brandOptions = useMemo(
     () => [
       ALL_BRANDS,
@@ -600,21 +643,27 @@ function BrandFinderPage() {
     [contacts],
   );
   const filteredContacts = useMemo(() => {
-    const query = q.trim().toLowerCase();
     return contacts.filter((contact) => {
-      const searchable = [contact.brandName, contact.contactName, contact.email, contact.position]
-        .join(" ")
-        .toLowerCase();
-      return (
-        (!query || searchable.includes(query)) &&
-        (brandFilter === ALL_BRANDS || contact.brandName === brandFilter)
-      );
+      return brandFilter === ALL_BRANDS || contact.brandName === brandFilter;
     });
-  }, [brandFilter, contacts, q]);
-  const selectedContacts = useMemo(
-    () => contacts.filter((contact) => selectedContactIds.has(contact.id) && contact.email),
+  }, [brandFilter, contacts]);
+  const selectedApolloContacts = useMemo(
+    () => contacts.filter((contact) => selectedContactIds.has(contact.id)),
     [contacts, selectedContactIds],
   );
+  const directSelectedContacts = useMemo(
+    () => directSearchContacts.filter((contact) => directSelectedContactIds.has(contact.id)),
+    [directSearchContacts, directSelectedContactIds],
+  );
+  const selectedDraftCandidates = useMemo(
+    () => mergeContacts(selectedApolloContacts, savedDraftContacts),
+    [savedDraftContacts, selectedApolloContacts],
+  );
+  const selectedContacts = useMemo(
+    () => selectedDraftCandidates.filter((contact) => contact.email),
+    [selectedDraftCandidates],
+  );
+  const skippedNoEmailCount = selectedDraftCandidates.length - selectedContacts.length;
   const duplicateContactCount = contacts.filter((contact) =>
     Boolean(contactDuplicateLabel(contact, databaseContacts)),
   ).length;
@@ -632,6 +681,10 @@ function BrandFinderPage() {
     setBrandOverrides(saved.brandOverrides ?? {});
     setBrandSearchOverrides(saved.brandSearchOverrides ?? {});
     setDirectSearchBrandIds(new Set(saved.directSearchBrandIds ?? []));
+    setDirectSearchQuery(saved.directSearchQuery ?? "");
+    setDirectActiveSearch(saved.directActiveSearch ?? "");
+    setDirectSelectedContactIds(new Set(saved.directSelectedContactIds ?? []));
+    setSavedDraftContacts(saved.savedDraftContacts ?? []);
     setContacts(saved.contacts ?? []);
     setSelectedContactIds(new Set(saved.selectedContactIds ?? []));
     setDraftMessage(saved.draftMessage ?? "");
@@ -651,6 +704,10 @@ function BrandFinderPage() {
       brandOverrides,
       brandSearchOverrides,
       directSearchBrandIds: Array.from(directSearchBrandIds),
+      directSearchQuery,
+      directActiveSearch,
+      directSelectedContactIds: Array.from(directSelectedContactIds),
+      savedDraftContacts,
       contacts,
       selectedContactIds: Array.from(selectedContactIds),
       draftMessage,
@@ -661,10 +718,14 @@ function BrandFinderPage() {
     brandOverrides,
     brandSearchOverrides,
     contacts,
+    directActiveSearch,
+    directSearchQuery,
     directSearchBrandIds,
+    directSelectedContactIds,
     draftMessage,
     filters,
     hasLoadedSavedState,
+    savedDraftContacts,
     selectedContactIds,
     sheetFileName,
     sheetInput,
@@ -743,6 +804,23 @@ function BrandFinderPage() {
 
   const clearDirectSearch = () => {
     setDirectSearchBrandIds(new Set());
+    setDirectActiveSearch("");
+    setDirectSearchQuery("");
+    setDirectSelectedContactIds(new Set());
+  };
+
+  const runDirectSearch = (search = directSearchQuery) => {
+    setDirectActiveSearch(search.trim());
+    setDirectSelectedContactIds(new Set());
+  };
+
+  const moveBrandToDirectSearchBar = (brand: BrandRow) => {
+    setDirectSearchQuery(brand.brandName);
+  };
+
+  const searchQueuedBrand = (brand: BrandRow) => {
+    setDirectSearchQuery(brand.brandName);
+    runDirectSearch(brand.brandName);
   };
 
   const setContactSelected = (contactId: string, checked: boolean) => {
@@ -757,25 +835,26 @@ function BrandFinderPage() {
     });
   };
 
-  const addDirectContactsToApproval = (items: ContactRow[]) => {
+  const addSelectedSavedContacts = () => {
+    const items = directSelectedContacts;
     const withEmails = items.filter((contact) => contact.email);
     if (withEmails.length === 0) return;
 
-    setContacts((current) => mergeContacts(current, withEmails));
-    setSelectedContactIds((current) => {
-      const next = new Set(current);
-      withEmails.forEach((contact) => next.add(contact.id));
-      return next;
-    });
+    setSavedDraftContacts((current) => mergeContacts(current, withEmails));
+    setDraftMessage(`${withEmails.length} saved contact${withEmails.length === 1 ? "" : "s"} added for draft creation.`);
+    setDraftError("");
   };
 
   const setDirectContactSelected = (contact: ContactRow, checked: boolean) => {
-    if (checked) {
-      addDirectContactsToApproval([contact]);
-      return;
-    }
-
-    setContactSelected(contact.id, false);
+    setDirectSelectedContactIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(contact.id);
+      } else {
+        next.delete(contact.id);
+      }
+      return next;
+    });
   };
 
   const runApolloSearch = async () => {
@@ -834,8 +913,13 @@ function BrandFinderPage() {
     setDraftError("");
     setDraftMessage("");
 
+    if (selectedDraftCandidates.length === 0) {
+      setDraftError("Select at least one contact first.");
+      return;
+    }
+
     if (selectedContacts.length === 0) {
-      setDraftError("Select at least one contact with an email first.");
+      setDraftError(`${skippedNoEmailCount} skipped because no email. Select at least one contact with an email.`);
       return;
     }
 
@@ -874,9 +958,7 @@ function BrandFinderPage() {
 
       const failedCount = draftResult.results.length - successfulResults.length;
       setDraftMessage(
-        failedCount > 0
-          ? `${successfulResults.length} drafts created. ${failedCount} failed.`
-          : `${successfulResults.length} Gmail drafts created and saved to Contact Database.`,
+        `${successfulResults.length} drafts created. ${skippedNoEmailCount} skipped because no email. ${failedCount} failed.`,
       );
     } catch (error) {
       setDraftError(error instanceof Error ? error.message : "Gmail draft creation failed.");
@@ -897,9 +979,12 @@ function BrandFinderPage() {
     setBrandOverrides({});
     setBrandSearchOverrides({});
     setDirectSearchBrandIds(new Set());
+    setDirectSearchQuery("");
+    setDirectActiveSearch("");
+    setDirectSelectedContactIds(new Set());
+    setSavedDraftContacts([]);
     setContacts([]);
     setSelectedContactIds(new Set());
-    setQ("");
     setBrandFilter(ALL_BRANDS);
     setSearchMessage("");
     setSearchError("");
@@ -996,7 +1081,7 @@ function BrandFinderPage() {
                 className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <ListPlus className="h-4 w-4" />
-                Add selected to Direct Search
+                Add selected to Direct Brand Search Queue
               </button>
             }
           >
@@ -1004,11 +1089,13 @@ function BrandFinderPage() {
               <table className="w-full text-sm">
                 <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
-                    <th className="w-12 px-3 py-2.5 text-left font-medium">Use</th>
+                    <th className="w-12 px-3 py-2.5 text-left font-medium">Select</th>
                     <th className="px-3 py-2.5 text-left font-medium">Brand</th>
                     <th className="px-3 py-2.5 text-left font-medium">Website</th>
                     <th className="px-3 py-2.5 text-left font-medium">Database status</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Direct search</th>
+                    <th className="px-3 py-2.5 text-left font-medium">
+                      Add to Direct Brand Search
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1025,7 +1112,11 @@ function BrandFinderPage() {
                   {brands.map((brand) => {
                     const useInSearch = brandSearchOverrides[brand.id] ?? true;
                     const inDirectQueue = directSearchBrandIds.has(brand.id);
-                    const status = getBrandDatabaseStatus(brand, databaseContacts);
+                    const status = getBrandDatabaseStatus(
+                      brand,
+                      databaseContacts,
+                      contactDatabaseChecked,
+                    );
 
                     return (
                       <tr key={brand.id} className="tb-row-hover border-t border-border/60">
@@ -1090,237 +1181,80 @@ function BrandFinderPage() {
           </Panel>
 
           <Panel
-            title="Contact approval"
-            subtitle="Select the contacts you want to email."
-            action={
-              <button
-                type="button"
-                disabled={isSearching || selectedBrands.length === 0}
-                onClick={() => void runApolloSearch()}
-                className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSearching ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Search className="h-4 w-4" />
-                )}
-                Run Apollo
-              </button>
-            }
-          >
-            {(searchError || searchMessage || draftError || draftMessage) && (
-              <div
-                className={cn(
-                  "mb-4 rounded-2xl border p-3 text-xs font-semibold",
-                  searchError || draftError
-                    ? "border-destructive/30 bg-destructive/10 text-destructive"
-                    : "border-fun-lime/50 bg-fun-lime/20 text-foreground",
-                )}
-              >
-                {searchError || draftError || searchMessage || draftMessage}
-              </div>
-            )}
-
-            <div className="mb-4 grid gap-3 md:grid-cols-[minmax(220px,1fr)_minmax(180px,0.28fr)]">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={q}
-                  onChange={(event) => setQ(event.target.value)}
-                  placeholder="Search contact, brand, email, position..."
-                  className="tb-search h-10 w-full rounded-2xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              </div>
-              <DashboardSelectField
-                label="Brand"
-                value={brandFilter}
-                options={brandOptions}
-                onChange={setBrandFilter}
-              />
-            </div>
-
-            <div className="overflow-x-auto rounded-2xl border border-border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-                  <tr>
-                    <th className="w-12 px-3 py-2.5 text-left font-medium">Select</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Brand</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Contact</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Email</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Position</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredContacts.length === 0 && (
-                    <tr className="border-t border-border/60">
-                      <td
-                        colSpan={5}
-                        className="px-3 py-8 text-center text-sm text-muted-foreground"
-                      >
-                        Run Apollo to load contacts.
-                      </td>
-                    </tr>
-                  )}
-                  {filteredContacts.map((contact) => {
-                    const duplicateLabel = contactDuplicateLabel(contact, databaseContacts);
-
-                    return (
-                      <tr key={contact.id} className="tb-row-hover border-t border-border/60">
-                        <td className="px-3 py-3">
-                          <Checkbox
-                            checked={selectedContactIds.has(contact.id)}
-                            onCheckedChange={(checked) =>
-                              setContactSelected(contact.id, checked === true)
-                            }
-                            aria-label={`Select ${contact.contactName}`}
-                          />
-                        </td>
-                        <td className="min-w-[170px] px-3 py-3 font-semibold">
-                          {contact.brandName}
-                        </td>
-                        <td className="min-w-[180px] px-3 py-3">{contact.contactName}</td>
-                        <td className="min-w-[240px] px-3 py-3">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                await navigator.clipboard.writeText(contact.email);
-                                flashCopied(`email-${contact.id}`);
-                              }}
-                              className="tb-action inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-foreground hover:bg-accent"
-                            >
-                              {copiedKey === `email-${contact.id}` ? (
-                                <Check className="h-3.5 w-3.5" />
-                              ) : (
-                                <Copy className="h-3.5 w-3.5" />
-                              )}
-                              {contact.email}
-                            </button>
-                            {duplicateLabel && (
-                              <span className="rounded-full bg-fun-yellow/20 px-2.5 py-1 text-xs font-bold text-foreground">
-                                {duplicateLabel}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="min-w-[220px] px-3 py-3 text-muted-foreground">
-                          {contact.position || "-"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="text-xs font-semibold text-muted-foreground">
-                {selectedContacts.length} selected contact
-                {selectedContacts.length === 1 ? "" : "s"} with email
-              </div>
-              <button
-                type="button"
-                disabled={isCreatingDrafts || selectedContacts.length === 0}
-                onClick={() => void createDrafts()}
-                className="tb-action inline-flex h-11 items-center gap-2 rounded-2xl bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isCreatingDrafts ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                Create Gmail drafts
-              </button>
-            </div>
-          </Panel>
-
-          <Panel
             title="Direct brand search"
-            subtitle={`${directSearchBrands.length} queued brand${
-              directSearchBrands.length === 1 ? "" : "s"
-            } from the parsed sheet.`}
+            subtitle="Search saved contacts from the Contact Database."
             action={
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={directSearchContacts.filter((contact) => contact.email).length === 0}
-                  onClick={() => addDirectContactsToApproval(directSearchContacts)}
-                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Check className="h-4 w-4" />
-                  Add found contacts
-                </button>
-                <button
-                  type="button"
-                  disabled={directSearchBrands.length === 0}
-                  onClick={clearDirectSearch}
-                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Clear queue
-                </button>
-              </div>
+              <button
+                type="button"
+                disabled={directSelectedContacts.filter((contact) => contact.email).length === 0}
+                onClick={addSelectedSavedContacts}
+                className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Check className="h-4 w-4" />
+                Add selected saved contacts
+              </button>
             }
           >
-            <div className="overflow-x-auto rounded-2xl border border-border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2.5 text-left font-medium">Queued brand</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Database result</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {directSearchBrands.length === 0 && (
-                    <tr className="border-t border-border/60">
-                      <td
-                        colSpan={3}
-                        className="px-3 py-8 text-center text-sm text-muted-foreground"
-                      >
-                        Add parsed brands to search the Contact Database.
-                      </td>
-                    </tr>
-                  )}
-                  {directSearchBrands.map((brand) => {
-                    const matchCount = databaseContacts.filter((contact) =>
-                      brandMatchesContact(brand, contact),
-                    ).length;
+            <div className="rounded-2xl border border-border bg-background p-3">
+              <div className="grid gap-2 md:grid-cols-[minmax(220px,1fr)_auto]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={directSearchQuery}
+                    onChange={(event) => setDirectSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") runDirectSearch();
+                    }}
+                    placeholder="Search saved contact database by brand name..."
+                    className="tb-search h-11 w-full rounded-2xl border border-border bg-card pl-9 pr-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => runDirectSearch()}
+                  className="tb-action inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                >
+                  <Search className="h-4 w-4" />
+                  Search database
+                </button>
+              </div>
 
-                    return (
-                      <tr key={brand.id} className="tb-row-hover border-t border-border/60">
-                        <td className="min-w-[220px] px-3 py-3 font-semibold">
-                          {brand.brandName}
-                        </td>
-                        <td className="min-w-[220px] px-3 py-3">
-                          <span
-                            className={cn(
-                              "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold",
-                              matchCount > 0
-                                ? "border-fun-lime/50 bg-fun-lime/20 text-foreground"
-                                : "border-border bg-muted text-muted-foreground",
-                            )}
-                          >
-                            {matchCount > 0
-                              ? `${matchCount} contact${matchCount === 1 ? "" : "s"} found`
-                              : "No contacts yet"}
-                          </span>
-                        </td>
-                        <td className="min-w-[150px] px-3 py-3">
-                          <button
-                            type="button"
-                            onClick={() => removeBrandFromDirectSearch(brand.id)}
-                            className="tb-action inline-flex h-9 items-center gap-2 rounded-xl bg-muted px-3 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {directSearchBrands.length === 0 && (
+                  <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">
+                    No queued brands yet
+                  </span>
+                )}
+                {directSearchBrands.map((brand) => (
+                  <div
+                    key={brand.id}
+                    className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2"
+                  >
+                    <span className="text-sm font-bold">{brand.brandName}</span>
+                    <button
+                      type="button"
+                      onClick={() => searchQueuedBrand(brand)}
+                      className="tb-action rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground hover:opacity-90"
+                    >
+                      Search
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveBrandToDirectSearchBar(brand)}
+                      className="tb-action rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      Move to search bar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeBrandFromDirectSearch(brand.id)}
+                      className="tb-action rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
@@ -1332,16 +1266,17 @@ function BrandFinderPage() {
                     <th className="px-3 py-2.5 text-left font-medium">Contact</th>
                     <th className="px-3 py-2.5 text-left font-medium">Email</th>
                     <th className="px-3 py-2.5 text-left font-medium">Position</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Source</th>
                   </tr>
                 </thead>
                 <tbody>
                   {directSearchContacts.length === 0 && (
                     <tr className="border-t border-border/60">
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         className="px-3 py-8 text-center text-sm text-muted-foreground"
                       >
-                        Matching saved contacts will appear here.
+                        Search a brand or add parsed brands to the queue.
                       </td>
                     </tr>
                   )}
@@ -1349,7 +1284,7 @@ function BrandFinderPage() {
                     <tr key={contact.id} className="tb-row-hover border-t border-border/60">
                       <td className="px-3 py-3">
                         <Checkbox
-                          checked={selectedContactIds.has(contact.id)}
+                          checked={directSelectedContactIds.has(contact.id)}
                           disabled={!contact.email}
                           onCheckedChange={(checked) =>
                             setDirectContactSelected(contact, checked === true)
@@ -1387,12 +1322,190 @@ function BrandFinderPage() {
                       <td className="min-w-[220px] px-3 py-3 text-muted-foreground">
                         {contact.position || "-"}
                       </td>
+                      <td className="min-w-[160px] px-3 py-3">
+                        <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
+                          {contact.source || "Contact Database"}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </Panel>
+
+          <Panel
+            title="Apollo contact approval"
+            subtitle="Approve returned Apollo contacts for Gmail drafts."
+            action={
+              <div className="flex flex-wrap items-end gap-2">
+                <DashboardSelectField
+                  label="Brand filter"
+                  value={brandFilter}
+                  options={brandOptions}
+                  onChange={setBrandFilter}
+                  className="min-w-[190px]"
+                />
+                <button
+                  type="button"
+                  disabled={isSearching || selectedBrands.length === 0}
+                  onClick={() => void runApolloSearch()}
+                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSearching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
+                  Run Apollo
+                </button>
+              </div>
+            }
+          >
+            {(searchError || searchMessage || draftError || draftMessage) && (
+              <div
+                className={cn(
+                  "mb-4 rounded-2xl border p-3 text-xs font-semibold",
+                  searchError || draftError
+                    ? "border-destructive/30 bg-destructive/10 text-destructive"
+                    : "border-fun-lime/50 bg-fun-lime/20 text-foreground",
+                )}
+              >
+                {searchError || draftError || searchMessage || draftMessage}
+              </div>
+            )}
+
+            <div className="overflow-x-auto rounded-2xl border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="w-12 px-3 py-2.5 text-left font-medium">Select</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Brand</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Contact</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Email</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Position</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Email status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredContacts.length === 0 && (
+                    <tr className="border-t border-border/60">
+                      <td
+                        colSpan={6}
+                        className="px-3 py-8 text-center text-sm text-muted-foreground"
+                      >
+                        Run Apollo to load contacts.
+                      </td>
+                    </tr>
+                  )}
+                  {filteredContacts.map((contact) => {
+                    return (
+                      <tr key={contact.id} className="tb-row-hover border-t border-border/60">
+                        <td className="px-3 py-3">
+                          <Checkbox
+                            checked={selectedContactIds.has(contact.id)}
+                            onCheckedChange={(checked) =>
+                              setContactSelected(contact.id, checked === true)
+                            }
+                            aria-label={`Select ${contact.contactName}`}
+                          />
+                        </td>
+                        <td className="min-w-[170px] px-3 py-3 font-semibold">
+                          {contact.brandName}
+                        </td>
+                        <td className="min-w-[180px] px-3 py-3">{contact.contactName}</td>
+                        <td className="min-w-[240px] px-3 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await navigator.clipboard.writeText(contact.email);
+                                flashCopied(`email-${contact.id}`);
+                              }}
+                              className="tb-action inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-foreground hover:bg-accent"
+                            >
+                              {copiedKey === `email-${contact.id}` ? (
+                                <Check className="h-3.5 w-3.5" />
+                              ) : (
+                                <Copy className="h-3.5 w-3.5" />
+                              )}
+                              {contact.email}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="min-w-[220px] px-3 py-3 text-muted-foreground">
+                          {contact.position || "-"}
+                        </td>
+                        <td className="min-w-[150px] px-3 py-3">
+                          <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
+                            {contact.emailStatus || "Unknown"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs font-semibold text-muted-foreground">
+                {selectedContacts.length} selected contact
+                {selectedContacts.length === 1 ? "" : "s"} with email
+              </div>
+              <button
+                type="button"
+                disabled={isCreatingDrafts || selectedContacts.length === 0}
+                onClick={() => void createDrafts()}
+                className="tb-action inline-flex h-11 items-center gap-2 rounded-2xl bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isCreatingDrafts ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Create Gmail drafts
+              </button>
+            </div>
+          </Panel>
+
+          <Panel title="Email template" subtitle="Only brand and contact first name are filled.">
+            <div className="mb-3 flex flex-wrap gap-2">
+              {TEMPLATE_FIELDS.map((field) => (
+                <button
+                  key={field}
+                  type="button"
+                  onClick={() => insertTemplateField(field)}
+                  className="tb-action h-10 rounded-2xl bg-muted px-3 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  {`{{${field}}}`}
+                </button>
+              ))}
+            </div>
+
+            <label className="block text-sm font-semibold">
+              Subject
+              <input
+                ref={subjectRef}
+                value={subjectTemplate}
+                onFocus={() => setTemplateTarget("subject")}
+                onChange={(event) => setSubjectTemplate(event.target.value)}
+                className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </label>
+
+            <label className="mt-4 block text-sm font-semibold">
+              Body
+              <Textarea
+                ref={bodyRef}
+                value={bodyTemplate}
+                onFocus={() => setTemplateTarget("body")}
+                onChange={(event) => setBodyTemplate(event.target.value)}
+                className="mt-1 min-h-56 rounded-2xl bg-background text-sm"
+              />
+            </label>
+          </Panel>
+
         </div>
 
         <div className="space-y-4">
@@ -1467,43 +1580,6 @@ function BrandFinderPage() {
                 }
               />
             </div>
-          </Panel>
-
-          <Panel title="Email template" subtitle="Only brand and contact first name are filled.">
-            <div className="mb-3 flex flex-wrap gap-2">
-              {TEMPLATE_FIELDS.map((field) => (
-                <button
-                  key={field}
-                  type="button"
-                  onClick={() => insertTemplateField(field)}
-                  className="tb-action h-10 rounded-2xl bg-muted px-3 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  {`{{${field}}}`}
-                </button>
-              ))}
-            </div>
-
-            <label className="block text-sm font-semibold">
-              Subject
-              <input
-                ref={subjectRef}
-                value={subjectTemplate}
-                onFocus={() => setTemplateTarget("subject")}
-                onChange={(event) => setSubjectTemplate(event.target.value)}
-                className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </label>
-
-            <label className="mt-4 block text-sm font-semibold">
-              Body
-              <Textarea
-                ref={bodyRef}
-                value={bodyTemplate}
-                onFocus={() => setTemplateTarget("body")}
-                onChange={(event) => setBodyTemplate(event.target.value)}
-                className="mt-1 min-h-56 rounded-2xl bg-background text-sm"
-              />
-            </label>
           </Panel>
 
           <Panel title="Contact Database" subtitle="Used for duplicate flags.">

@@ -21,13 +21,13 @@ export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
   };
   const stats = [
     {
-      label: "All-time commission",
+      label: "All-time closed commission",
       value: `£${totals.totalPaid.toLocaleString()}`,
       icon: CircleDollarSign,
       tone: "var(--fun-lime)",
     },
     {
-      label: "Current month",
+      label: "Current month closed",
       value: `£${totals.paidThisMonth.toLocaleString()}`,
       icon: CalendarDays,
       tone: "var(--fun-yellow)",

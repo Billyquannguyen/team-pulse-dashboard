@@ -799,8 +799,7 @@ function AdminGoalControls({
                       <div>
                         <h5 className="text-sm font-bold">Custom member goals</h5>
                         <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          Only use this when one member needs a different target from everyone
-                          else.
+                          Only use this when one member needs a different target from everyone else.
                         </p>
                       </div>
                     </div>
@@ -837,8 +836,10 @@ function AdminGoalControls({
                               <div>
                                 <div className="text-sm font-bold">{member.name}</div>
                                 <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                  <span>Current month {formatMoney(member.monthCommission)}</span>
-                                  <span>All-time {formatMoney(member.commission)}</span>
+                                  <span>
+                                    Current month closed {formatMoney(member.monthCommission)}
+                                  </span>
+                                  <span>All-time closed {formatMoney(member.commission)}</span>
                                   <span>Exclusive {formatCount(member.exclusiveCreators)}</span>
                                 </div>
                               </div>
@@ -1007,12 +1008,12 @@ function GoalsPage() {
     <div className="space-y-6">
       <AppHeader
         title="Goals & Analytics"
-        subtitle="Current-month commission first, then long-term progression."
+        subtitle="Current-month closed commission first, then long-term progression."
       />
 
       <GoalProgressPanel
         title="Team monthly goal"
-        label="Current-month commission"
+        label="Current-month closed"
         current={totals.paidThisMonth}
         target={getTeamMonthlyGoal(settings)}
         tone="lime"
@@ -1025,7 +1026,7 @@ function GoalsPage() {
           <div>
             <h3 className="text-base font-semibold">Individual monthly goals</h3>
             <p className="text-xs text-muted-foreground">
-              Each member's current-month commission compared with their monthly goal.
+              Each member's current-month closed commission compared with their monthly goal.
             </p>
           </div>
           <div className="hidden rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground sm:inline-flex">
@@ -1037,7 +1038,7 @@ function GoalsPage() {
             <GoalProgressPanel
               key={member.id}
               title={member.name}
-              label="Current-month commission"
+              label="Current-month closed"
               current={member.monthCommission}
               target={getMonthlyTarget(member)}
               tone={(["yellow", "pink", "purple", "blue"] as Tone[])[index % 4]}
@@ -1061,7 +1062,7 @@ function GoalsPage() {
         <div>
           <h3 className="text-base font-semibold">Long-term progression goals</h3>
           <p className="text-xs text-muted-foreground">
-            All-time commission compared with the level needed before moving up commission.
+            All-time closed commission compared with the level needed before moving up commission.
           </p>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1069,7 +1070,7 @@ function GoalsPage() {
             <GoalProgressPanel
               key={member.id}
               title={member.name}
-              label="All-time commission"
+              label="All-time closed commission"
               current={member.commission}
               target={getProgressionTarget(member)}
               tone={(["lime", "orange", "blue", "purple"] as Tone[])[index % 4]}

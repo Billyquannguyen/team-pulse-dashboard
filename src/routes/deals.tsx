@@ -29,6 +29,7 @@ export const Route = createFileRoute("/deals")({
 
 const statusStyles: Record<string, string> = {
   Posted: "bg-fun-lime text-emerald-900",
+  "Pending content": "bg-fun-yellow text-amber-900",
   Pending: "bg-fun-yellow text-amber-900",
   Paid: "bg-fun-purple text-purple-900",
   Overdue: "bg-fun-pink text-rose-900",

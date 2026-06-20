@@ -93,7 +93,7 @@ export function HomeGoalSnapshotCard({
             <div>
               <div className="text-sm font-semibold">Monthly commission goal</div>
               <div className="text-xs text-muted-foreground">
-                Current-month commission vs target
+                Current-month closed commission vs target
               </div>
             </div>
           </div>

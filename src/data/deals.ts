@@ -1,4 +1,11 @@
-export type DealStatus = "Pending" | "Posted" | "Paid" | "Overdue" | "Cancelled";
+export type DealStatus =
+  | ""
+  | "Pending"
+  | "Pending content"
+  | "Posted"
+  | "Paid"
+  | "Overdue"
+  | "Cancelled";
 export type Platform = "Instagram" | "TikTok" | "YouTube" | "Twitch" | "X";
 
 export type Deal = {
@@ -23,8 +30,76 @@ export type Deal = {
   notes?: string;
 };
 
-export function isActiveDashboardDeal(deal: Pick<Deal, "status">) {
-  return deal.status !== "Cancelled";
+export type DealExclusionReason =
+  | "Cancelled"
+  | "Blank status"
+  | "Blank/filler row"
+  | "Zero/invalid commission"
+  | "Other status";
+
+export const CLOSED_COMMISSION_STATUSES = new Set<DealStatus>(["Posted", "Pending content"]);
+export const POSTED_COMMISSION_STATUSES = new Set<DealStatus>(["Posted"]);
+
+function hasDealIdentity(deal: Pick<Deal, "brand" | "creator">) {
+  return Boolean(deal.brand?.trim() || deal.creator?.trim());
+}
+
+function hasPositiveManagerTotal(deal: Pick<Deal, "managerTotalGbp">) {
+  return Number.isFinite(deal.managerTotalGbp) && deal.managerTotalGbp > 0;
+}
+
+export function getDealRowExclusionReason(
+  deal: Pick<Deal, "brand" | "creator" | "managerTotalGbp" | "status">,
+  acceptedStatuses: Set<DealStatus> = CLOSED_COMMISSION_STATUSES,
+): DealExclusionReason | null {
+  if (!hasDealIdentity(deal)) return "Blank/filler row";
+  if (deal.status === "Cancelled") return "Cancelled";
+  if (!deal.status) return "Blank status";
+  if (!hasPositiveManagerTotal(deal)) return "Zero/invalid commission";
+  if (!acceptedStatuses.has(deal.status)) return "Other status";
+
+  return null;
+}
+
+export function isValidDealRow(
+  deal: Pick<Deal, "brand" | "creator" | "managerTotalGbp" | "status">,
+  acceptedStatuses: Set<DealStatus> = CLOSED_COMMISSION_STATUSES,
+) {
+  return getDealRowExclusionReason(deal, acceptedStatuses) === null;
+}
+
+export function isClosedCommissionDeal(
+  deal: Pick<Deal, "brand" | "creator" | "managerTotalGbp" | "status">,
+) {
+  return isValidDealRow(deal, CLOSED_COMMISSION_STATUSES);
+}
+
+export function isPostedCommissionDeal(
+  deal: Pick<Deal, "brand" | "creator" | "managerTotalGbp" | "status">,
+) {
+  return isValidDealRow(deal, POSTED_COMMISSION_STATUSES);
+}
+
+export function isPaidCommissionDeal(
+  deal: Pick<Deal, "brand" | "creator" | "managerTotalGbp" | "managerTotalPaid" | "status">,
+) {
+  return (
+    hasDealIdentity(deal) &&
+    hasPositiveManagerTotal(deal) &&
+    deal.status !== "Cancelled" &&
+    deal.managerTotalPaid
+  );
+}
+
+export function isActiveDashboardDeal(
+  deal: Pick<Deal, "brand" | "creator" | "managerTotalGbp" | "status">,
+) {
+  return (
+    hasDealIdentity(deal) &&
+    hasPositiveManagerTotal(deal) &&
+    deal.status !== "Cancelled" &&
+    Boolean(deal.status)
+  );
 }
 
 const managers = ["KTrang", "HYen", "BNgan", "LNgoc"];
@@ -57,7 +132,7 @@ const creators = [
   "@thezenmove",
 ];
 const platforms: Platform[] = ["Instagram", "TikTok", "YouTube", "Twitch", "X"];
-const statuses: DealStatus[] = ["Pending", "Posted", "Paid", "Overdue"];
+const statuses: DealStatus[] = ["Pending content", "Posted", "Paid", "Overdue"];
 const netTerms = ["Net 15", "Net 30", "Net 45", "Paid upfront"];
 const fallbackNow = new Date();
 const fallbackCurrentMonth = `${String(fallbackNow.getMonth() + 1).padStart(2, "0")}/${fallbackNow.getFullYear()}`;

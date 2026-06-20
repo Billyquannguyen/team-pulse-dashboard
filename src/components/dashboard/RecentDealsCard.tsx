@@ -1,9 +1,11 @@
 import { Link } from "@tanstack/react-router";
-import { isActiveDashboardDeal, recentDeals, type Deal, type DealStatus } from "@/data/deals";
+import { isClosedCommissionDeal, recentDeals, type Deal, type DealStatus } from "@/data/deals";
 import { cn } from "@/lib/utils";
 
 const statusStyles: Record<DealStatus, string> = {
+  "": "bg-muted text-muted-foreground",
   Posted: "bg-fun-lime text-emerald-900",
+  "Pending content": "bg-fun-yellow text-amber-900",
   Pending: "bg-fun-yellow text-amber-900",
   Paid: "bg-fun-purple text-purple-900",
   Overdue: "bg-fun-pink text-rose-900",
@@ -11,7 +13,7 @@ const statusStyles: Record<DealStatus, string> = {
 };
 
 export function RecentDealsCard({ deals = recentDeals }: { deals?: Deal[] }) {
-  const rows = deals.filter(isActiveDashboardDeal).slice(0, 8);
+  const rows = deals.filter(isClosedCommissionDeal).slice(0, 8);
 
   return (
     <div className="rounded-3xl bg-card p-6 ring-1 ring-border">

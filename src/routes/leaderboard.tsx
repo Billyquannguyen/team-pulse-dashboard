@@ -104,7 +104,7 @@ function LeaderboardPage() {
     <div className="space-y-6">
       <AppHeader
         title="Leaderboard"
-        subtitle="Current-month commission ranking with all-time context."
+        subtitle="Current-month closed commission ranking with all-time context."
       />
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -143,7 +143,8 @@ function LeaderboardPage() {
           <div>
             <h3 className="text-base font-semibold">Current month and all-time by member</h3>
             <p className="text-xs text-muted-foreground">
-              Monthly ranking uses deal Month, while all-time supports progression tracking.
+              Monthly ranking uses closed deals in the deal Month, while all-time supports
+              progression tracking.
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
@@ -166,13 +167,13 @@ function LeaderboardPage() {
               <Legend />
               <Bar
                 dataKey="currentMonth"
-                name="Current month"
+                name="Current month closed"
                 fill="var(--fun-blue)"
                 radius={[8, 8, 0, 0]}
               />
               <Bar
                 dataKey="allTime"
-                name="All-time commission"
+                name="All-time closed commission"
                 fill="var(--fun-lime)"
                 radius={[8, 8, 0, 0]}
               />

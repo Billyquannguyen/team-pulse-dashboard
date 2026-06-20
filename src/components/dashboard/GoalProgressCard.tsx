@@ -54,9 +54,7 @@ export function GoalProgressCard({
       {paidThisMonth !== undefined && (
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           <div className="tb-hover-lift rounded-2xl bg-muted/50 p-3">
-            <div className="text-xs font-medium text-muted-foreground">
-              Current month commission
-            </div>
+            <div className="text-xs font-medium text-muted-foreground">Current month closed</div>
             <div className="mt-1 text-lg font-bold">£{(paidThisMonth ?? 0).toLocaleString()}</div>
           </div>
           <div className="tb-hover-lift rounded-2xl bg-muted/50 p-3">

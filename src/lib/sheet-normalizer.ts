@@ -127,11 +127,14 @@ function parseInteger(value: string) {
 }
 
 function parseDealStatus(value: string): DealStatus {
-  const normalized = value.toLowerCase();
+  const normalized = cleanSheetName(value).toLowerCase();
+  if (!normalized) return "";
   if (normalized.includes("cancel")) return "Cancelled";
   if (normalized.includes("overdue") || normalized.includes("late")) return "Overdue";
   if (normalized.includes("paid")) return "Paid";
   if (normalized.includes("posted") || normalized.includes("live")) return "Posted";
+  if (normalized.includes("pending") && normalized.includes("content")) return "Pending content";
+  if (normalized.includes("pending")) return "Pending";
   return "Pending";
 }
 
@@ -302,42 +305,34 @@ export function normalizeMemberDealRows(tabName: string, rows: SheetRow[]): Deal
 
   const lookup = createHeaderLookup<DashboardDealField>(headers, DEAL_COLUMN_ALIASES);
 
-  return body
-    .filter((row) => {
-      const brand = getHeaderCell(row, lookup, "brand");
-      const creator = getHeaderCell(row, lookup, "creator");
-      const totalPricing = parseMoney(getHeaderCell(row, lookup, "totalPricingGbp"));
-      return Boolean(brand || creator || totalPricing);
-    })
-    .map((row, index) => {
-      const totalPricingGbp = parseMoney(getHeaderCell(row, lookup, "totalPricingGbp"));
-      const creatorTotalGbp = parseMoney(getHeaderCell(row, lookup, "creatorTotalGbp"));
-      const managerTotalGbp = parseMoney(getHeaderCell(row, lookup, "managerTotalGbp"));
-      const profitMargin = getHeaderCell(row, lookup, "profitMargin");
+  return body.map((row, index) => {
+    const totalPricingGbp = parseMoney(getHeaderCell(row, lookup, "totalPricingGbp"));
+    const creatorTotalGbp = parseMoney(getHeaderCell(row, lookup, "creatorTotalGbp"));
+    const managerTotalGbp = parseMoney(getHeaderCell(row, lookup, "managerTotalGbp"));
+    const profitMargin = getHeaderCell(row, lookup, "profitMargin");
 
-      return {
-        id: `${tabName}-${index + 1}`,
-        rowNumber: getHeaderCell(row, lookup, "rowNumber") || `${index + 1}`,
-        manager: tabName,
-        brand: getHeaderCell(row, lookup, "brand"),
-        creator: getHeaderCell(row, lookup, "creator"),
-        platform: parsePlatform(getHeaderCell(row, lookup, "platform")),
-        contractLink: getHeaderCell(row, lookup, "contractLink") || undefined,
-        liveLink: getHeaderCell(row, lookup, "liveLink") || undefined,
-        month: normalizeDealMonthKey(getHeaderCell(row, lookup, "month")),
-        totalPricingGbp,
-        creatorTotalGbp,
-        profitMargin,
-        managerTotalGbp,
-        vnd: parseMoney(getHeaderCell(row, lookup, "vnd")),
-        netTerms: getHeaderCell(row, lookup, "netTerms"),
-        managerTotalPaid: parseBoolean(getHeaderCell(row, lookup, "managerTotalPaid")),
-        managerPaidCurrentMonth: parseBoolean(getHeaderCell(row, lookup, "managerPaidCurrentMonth")),
-        status: parseDealStatus(getHeaderCell(row, lookup, "status")),
-        notes: getHeaderCell(row, lookup, "notes") || undefined,
-      };
-    })
-    .filter((deal) => deal.status !== "Cancelled");
+    return {
+      id: `${tabName}-${index + 1}`,
+      rowNumber: getHeaderCell(row, lookup, "rowNumber") || `${index + 1}`,
+      manager: tabName,
+      brand: getHeaderCell(row, lookup, "brand"),
+      creator: getHeaderCell(row, lookup, "creator"),
+      platform: parsePlatform(getHeaderCell(row, lookup, "platform")),
+      contractLink: getHeaderCell(row, lookup, "contractLink") || undefined,
+      liveLink: getHeaderCell(row, lookup, "liveLink") || undefined,
+      month: normalizeDealMonthKey(getHeaderCell(row, lookup, "month")),
+      totalPricingGbp,
+      creatorTotalGbp,
+      profitMargin,
+      managerTotalGbp,
+      vnd: parseMoney(getHeaderCell(row, lookup, "vnd")),
+      netTerms: getHeaderCell(row, lookup, "netTerms"),
+      managerTotalPaid: parseBoolean(getHeaderCell(row, lookup, "managerTotalPaid")),
+      managerPaidCurrentMonth: parseBoolean(getHeaderCell(row, lookup, "managerPaidCurrentMonth")),
+      status: parseDealStatus(getHeaderCell(row, lookup, "status")),
+      notes: getHeaderCell(row, lookup, "notes") || undefined,
+    };
+  });
 }
 
 export function normalizeCreatorRows(rows: SheetRow[]): Creator[] {

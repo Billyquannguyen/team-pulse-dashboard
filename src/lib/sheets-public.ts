@@ -1,7 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
 import { IGNORED_OUTREACH_TAB_NAMES, SIGNED_CREATORS_TAB_NAME } from "@/data/sheetConfig";
 import { team as fallbackTeam, type Teammate } from "@/data/team";
-import { deals as fallbackDeals, isActiveDashboardDeal, type Deal } from "@/data/deals";
+import {
+  deals as fallbackDeals,
+  getDealRowExclusionReason,
+  isActiveDashboardDeal,
+  isClosedCommissionDeal,
+  isPaidCommissionDeal,
+  isPostedCommissionDeal,
+  type Deal,
+  type DealExclusionReason,
+} from "@/data/deals";
 import { creators as fallbackCreators, type Creator } from "@/data/creators";
 import {
   canonicalMemberName,
@@ -585,7 +594,7 @@ function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fa
   const currentMonthKey = getCurrentDealMonthKey();
   const pendingOwed = getSummaryValue(rows, SUMMARY_LABELS.pendingOwed);
   const memberDeals = deals.filter(
-    (deal) => deal.manager === tabName && isActiveDashboardDeal(deal),
+    (deal) => deal.manager === tabName && isClosedCommissionDeal(deal),
   );
   const allTimeCommission = memberDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
   const currentMonthCommission = memberDeals
@@ -603,6 +612,45 @@ function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fa
     dealsClosed: memberDeals.length,
     revenue: totalPricing,
   };
+}
+
+function logCommissionDebug(team: Teammate[], deals: Deal[]) {
+  const reasonCounts: Record<DealExclusionReason, number> = {
+    Cancelled: 0,
+    "Blank status": 0,
+    "Blank/filler row": 0,
+    "Zero/invalid commission": 0,
+    "Other status": 0,
+  };
+  const closedCommissionByMember: Record<string, number> = Object.fromEntries(
+    team.map((member) => [member.name, 0]),
+  );
+  let rowsCountedForClosedCommission = 0;
+
+  for (const deal of deals) {
+    const reason = getDealRowExclusionReason(deal);
+
+    if (reason) {
+      reasonCounts[reason] += 1;
+      continue;
+    }
+
+    rowsCountedForClosedCommission += 1;
+
+    closedCommissionByMember[deal.manager] =
+      (closedCommissionByMember[deal.manager] ?? 0) + deal.managerTotalGbp;
+  }
+
+  console.info("[team-billion:commission-debug]", {
+    totalRowsProcessed: deals.length,
+    rowsCountedForClosedCommission,
+    rowsExcluded: deals.length - rowsCountedForClosedCommission,
+    exclusionReasonCounts: reasonCounts,
+    closedCommissionByMember: closedCommissionByMember,
+    postedCommission: deals
+      .filter(isPostedCommissionDeal)
+      .reduce((sum, deal) => sum + deal.managerTotalGbp, 0),
+  });
 }
 
 function percentage(numerator: number, denominator: number) {
@@ -1021,17 +1069,19 @@ async function readCreatorSourcingData(
 }
 
 function calculateTotals(team: Teammate[], deals: Deal[]) {
-  const activeDeals = deals.filter(isActiveDashboardDeal);
-  const totalPaid = activeDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
-  const totalPaidCommission = activeDeals
-    .filter((deal) => deal.status === "Paid" || deal.managerTotalPaid)
+  const closedDeals = deals.filter(isClosedCommissionDeal);
+  logCommissionDebug(team, deals);
+
+  const totalPaid = closedDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
+  const totalPaidCommission = deals
+    .filter(isPaidCommissionDeal)
     .reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
   const paidThisMonth = team.reduce((sum, member) => sum + member.monthCommission, 0);
   const pendingOwed = team.reduce((sum, member) => sum + member.pendingOwed, 0);
-  const dealsClosed = activeDeals.length;
-  const totalPricing = activeDeals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
-  const pricedDeals = activeDeals.filter((deal) => deal.totalPricingGbp > 0);
-  const marginValues = activeDeals
+  const dealsClosed = closedDeals.length;
+  const totalPricing = closedDeals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
+  const pricedDeals = closedDeals.filter((deal) => deal.totalPricingGbp > 0);
+  const marginValues = closedDeals
     .map((deal) => parsePercent(deal.profitMargin))
     .filter((margin) => margin > 0);
 

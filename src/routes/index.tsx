@@ -1,11 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  Briefcase,
-  CalendarDays,
-  CircleDollarSign,
-  CirclePercent,
-  DollarSign,
-} from "lucide-react";
+import { Briefcase, CalendarDays, CircleDollarSign, CirclePercent, DollarSign } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { KpiCard } from "@/components/dashboard/KpiCard";
@@ -61,25 +55,25 @@ function Dashboard() {
         subtitle={
           isLoading
             ? "Loading live Google Sheets data..."
-            : "Current-month commission, all-time commission, and deal value in one view."
+            : "Closed commission, paid commission, and deal value in one view."
         }
       />
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <KpiCard
-          label="All-time commission"
+          label="All-time closed commission"
           value={`£${totals.totalPaid.toLocaleString()}`}
           icon={DollarSign}
           tone="lime"
         />
         <KpiCard
-          label="Current month"
+          label="Current month closed"
           value={`£${totals.paidThisMonth.toLocaleString()}`}
           icon={CalendarDays}
           tone="orange"
         />
         <KpiCard
-          label="Total paid commission"
+          label="Paid commission"
           value={`£${totals.totalPaidCommission.toLocaleString()}`}
           icon={CircleDollarSign}
           tone="yellow"

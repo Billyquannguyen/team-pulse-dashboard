@@ -1,4 +1,4 @@
-import { isActiveDashboardDeal, type Deal } from "@/data/deals";
+import { isClosedCommissionDeal, type Deal } from "@/data/deals";
 import type { Teammate } from "@/data/team";
 import {
   buildExclusiveCreatorPerformance,
@@ -142,7 +142,7 @@ function getMemberExclusiveCreators(data: DashboardSheetData | undefined, member
 
 function getMemberDeals(data: DashboardSheetData | undefined, memberName: string) {
   return (
-    data?.deals.filter((deal) => deal.manager === memberName && isActiveDashboardDeal(deal)) ?? []
+    data?.deals.filter((deal) => deal.manager === memberName && isClosedCommissionDeal(deal)) ?? []
   );
 }
 
