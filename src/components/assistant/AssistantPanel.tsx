@@ -571,8 +571,10 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
                 <span>
                   Storage:{" "}
                   {diagnostics
-                    ? diagnostics.storageMode === "redis"
-                      ? "Redis"
+                    ? diagnostics.storageMode === "google-sheet"
+                      ? "Team Assets sheet"
+                      : diagnostics.storageMode === "redis"
+                        ? "Redis"
                       : diagnostics.storageMode === "local-dev"
                         ? "Local dev server memory"
                         : "Not configured"

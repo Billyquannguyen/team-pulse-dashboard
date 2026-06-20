@@ -148,18 +148,28 @@ function splitFirstName(contactName: string, explicitFirstName: string) {
 }
 
 function dedupeKey(contact: Pick<ContactDatabaseContact, "brandName" | "contactName" | "email">) {
+  const brand = compactKey(contact.brandName);
   const email = normalizeEmail(contact.email);
+  if (brand && email) return `brand-email:${brand}:${email}`;
   if (email) return `email:${email}`;
-  return `name:${compactKey(contact.brandName)}:${compactKey(contact.contactName)}`;
+  return `brand-name:${brand}:${compactKey(contact.contactName)}`;
+}
+
+function slugForId(value: string) {
+  return normalizeKey(value).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function idFromContact(
   contact: Pick<ContactDatabaseContact, "brandName" | "contactName" | "email">,
 ) {
-  const key = dedupeKey(contact)
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-  return key || `contact-${Date.now()}`;
+  const brand = slugForId(contact.brandName);
+  const email = slugForId(normalizeEmail(contact.email));
+  if (brand && email) return `brand-contact-${brand}-${email}`;
+
+  const name = slugForId(contact.contactName);
+  if (brand && name) return `brand-contact-${brand}-${name}`;
+  if (email) return `brand-contact-${email}`;
+  return `contact-${Date.now()}`;
 }
 
 function buildLookup(headers: string[]): HeaderLookup<ContactDatabaseField> {

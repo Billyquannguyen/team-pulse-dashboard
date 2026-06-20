@@ -1,0 +1,404 @@
+{
+  "runId": "BRAND-CONTACTS-20260620193457",
+  "startedAt": "2026-06-20T19:34:57.593Z",
+  "finishedAt": "2026-06-20T19:35:04.280Z",
+  "query": "in:anywhere -in:spam -in:trash {campaign collaboration partnership creator influencer sponsorship paid \"brand brief\" booking collab \"creator campaign\" \"influencer campaign\" \"brand partnership\"}",
+  "nextPageToken": "08651509183139851807",
+  "pagesScanned": 1,
+  "emailsScanned": 100,
+  "contactsFound": 19,
+  "contactsCreated": 19,
+  "contactsUpdated": 0,
+  "duplicatesSkipped": 4,
+  "skipped": 81,
+  "skippedMissingBrand": 8,
+  "skippedMissingEmail": 0,
+  "skippedNoReply": 69,
+  "extractionSamples": [
+    {
+      "subject": "Re: SuperFan | Early Sports Creator Opportunity",
+      "sender": "Melisa Cicio <m.cicio@superrfan.com>",
+      "brandName": "Superrfan",
+      "email": "m.cicio@superrfan.com",
+      "contactName": "Melisa Cicio",
+      "position": "Founder"
+    },
+    {
+      "subject": "[Dongwon Tuna x @urmomsajoe69] Looking for Foodie Creators 👀",
+      "sender": "PLAY LAB <team@creator.playxlab.com>",
+      "brandName": "Dongwon Tuna",
+      "email": "team@creator.playxlab.com",
+      "contactName": "PLAY LAB",
+      "position": ""
+    },
+    {
+      "subject": "Re: Rachael Turner x Stride Social: Let's secure deals!",
+      "sender": "Rachael Turner <rachturner21@icloud.com>",
+      "brandName": "Rachael Turner",
+      "email": "rachturner21@icloud.com",
+      "contactName": "Rachael Turner",
+      "position": "Talent Manager"
+    },
+    {
+      "subject": "EXCLUSIVE SCREENER | 40 Dates and 40 Nights",
+      "sender": "Rose Catipon <rose@pixelscene.media>",
+      "brandName": "Pixelscene",
+      "email": "rose@pixelscene.media",
+      "contactName": "Rose Catipon",
+      "position": ""
+    },
+    {
+      "subject": "Euro Summer | Song Promotion",
+      "sender": "Create Mate <creators@connect.createmate.world>",
+      "brandName": "Createmate",
+      "email": "creators@connect.createmate.world",
+      "contactName": "Create Mate",
+      "position": ""
+    },
+    {
+      "subject": "Confirmation of Contract Terms",
+      "sender": "\"花朝\" <huachao@ceelike.com>",
+      "brandName": "Ceelike",
+      "email": "huachao@ceelike.com",
+      "contactName": "花朝",
+      "position": ""
+    },
+    {
+      "subject": "Collab Inquiry: Tipsy.chat x musa & stella (Paid)",
+      "sender": "\"demi@tipsy.chat\" <Lilia@inflink.tipsy.chat>",
+      "brandName": "Tipsy",
+      "email": "lilia@inflink.tipsy.chat",
+      "contactName": "demi@tipsy.chat",
+      "position": ""
+    },
+    {
+      "subject": "160 RSVPs. $3B in the Room. We're Doing It Again June 25.",
+      "sender": "Dylan Oriundo <dylan-oriundo@mail.beehiiv.com>",
+      "brandName": "Beehiiv",
+      "email": "dylan-oriundo@mail.beehiiv.com",
+      "contactName": "Dylan Oriundo",
+      "position": "Founder"
+    },
+    {
+      "subject": "【Creator Collaboration Offer】Dreamina TikTok Campaign",
+      "sender": "Christoph <huanglejun@bwmcanada.com>",
+      "brandName": "Dreamina Link",
+      "email": "huanglejun@bwmcanada.com",
+      "contactName": "Christoph",
+      "position": "Manager"
+    },
+    {
+      "subject": "Snoop Dogg & Chaka Khan | Song Promotion",
+      "sender": "Create Mate <creators@sound.createmate.world>",
+      "brandName": "Createmate",
+      "email": "creators@sound.createmate.world",
+      "contactName": "Create Mate",
+      "position": ""
+    },
+    {
+      "subject": "⏳ Limited Spots: Bonus Rewards + Full Product Reimbursement💸",
+      "sender": "AEGISLAB <aegislab_beauty2@crevasse.ai>",
+      "brandName": "behind luluti",
+      "email": "aegislab_beauty2@crevasse.ai",
+      "contactName": "AEGISLAB",
+      "position": ""
+    },
+    {
+      "subject": "Re: Trulee Rodney x Stride Social: Let's secure deals!",
+      "sender": "Madison West <madison.west@thedigitalbrandarchitects.com>",
+      "brandName": "Trulee Rodney",
+      "email": "madison.west@thedigitalbrandarchitects.com",
+      "contactName": "Madison West",
+      "position": "Talent Manager"
+    },
+    {
+      "subject": "Re: Caleb Wielhouwer x Stride Social: Collaboration opportunity with HYPIC!",
+      "sender": "Caleb Wielhouwer <calebwielhouwers@gmail.com>",
+      "brandName": "Caleb Wielhouwer",
+      "email": "calebwielhouwers@gmail.com",
+      "contactName": "Caleb Wielhouwer",
+      "position": "Talent Manager"
+    },
+    {
+      "subject": "Re: Paid Collaboration with Gorchic",
+      "sender": "Candy <candy@kol.gorchic.net>",
+      "brandName": "Gorchic",
+      "email": "candy@kol.gorchic.net",
+      "contactName": "Candy",
+      "position": ""
+    },
+    {
+      "subject": "Re: Quick question about a video project✨",
+      "sender": "manage@eezycollab.xyz",
+      "brandName": "Eezycollab",
+      "email": "manage@eezycollab.xyz",
+      "contactName": "manage",
+      "position": "CEO"
+    },
+    {
+      "subject": "Re: EXECUTION: @_lifeatdallas x DREO TurboCool™ Summer Campaign",
+      "sender": "Vanessa Pan <vanessa.pan@kolsummit.com>",
+      "brandName": "Kolsummit",
+      "email": "vanessa.pan@kolsummit.com",
+      "contactName": "Vanessa Pan",
+      "position": "Coordinator"
+    },
+    {
+      "subject": "Re: Stride Social x JD Sports: New potential collaboration!",
+      "sender": "Sophie Dugdale <Sophie.Dugdale@jdplc.com>",
+      "brandName": "Stride Social",
+      "email": "sophie.dugdale@jdplc.com",
+      "contactName": "Sophie Dugdale",
+      "position": "Talent Manager"
+    },
+    {
+      "subject": "Re: Cal AI x @imjustagirl4930 (i)",
+      "sender": "ness@calai.app",
+      "brandName": "Cal AI",
+      "email": "ness@calai.app",
+      "contactName": "ness",
+      "position": "Assistant"
+    },
+    {
+      "subject": "Re: Henri Palms x Prime Video: Would You Rather Campaign",
+      "sender": "Dani Loewensohn <dani@the-cast.co.uk>",
+      "brandName": "Henri Palms",
+      "email": "dani@the-cast.co.uk",
+      "contactName": "Dani Loewensohn",
+      "position": "Account Manager"
+    }
+  ],
+  "skippedSamples": [
+    {
+      "subject": "Dola Campaign OpportunitiesX lydia_robberts",
+      "sender": "bubblesblowblow@gmail.com",
+      "reason": "Could not detect brand name"
+    },
+    {
+      "subject": "https://tiktok.com/@serenaneel x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "https://tiktok.com/@stizzchung x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "https://tiktok.com/@laurenwolfe x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Connor x Stride Social: New potential collaboration!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Re: Daysha Taylor x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Re: Collab Inquiry: Tipsy.chat x musa & stella (Paid)",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Re: lilhuhofficial x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Re: nefertitixoxo x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Zap Could Not Be Switched On",
+      "sender": "Zapier Notifications <notifications@mail.zapier.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Zap Could Not Be Switched On",
+      "sender": "Zapier Notifications <notifications@mail.zapier.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Zap Could Not Be Switched On",
+      "sender": "Zapier Notifications <notifications@mail.zapier.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Zap Could Not Be Switched On",
+      "sender": "Zapier Notifications <notifications@mail.zapier.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Zap Could Not Be Switched On",
+      "sender": "Zapier Notifications <notifications@mail.zapier.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Find Winn-Dixie on Amazon!",
+      "sender": "\"Amazon.com\" <store-news@amazon.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Re: 𝐀𝐝𝐡𝐚𝐦𝐲𝐲 x Stride Social: Let's secure deals!",
+      "sender": "Adham Collab <adhamcollab@gmail.com>",
+      "reason": "Could not detect brand name"
+    },
+    {
+      "subject": "Re: nefertitixoxo x Stride Social: Let's secure deals!",
+      "sender": "Nefertiti Thomas <nefertiti.managementinquiries@gmail.com>",
+      "reason": "Could not detect brand name"
+    },
+    {
+      "subject": "New Event: Nefertiti Thomas - 16:30 Mon, 22 Jun 2026 - Creator introductory call",
+      "sender": "Calendly <notifications@calendly.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Re: 𝐀𝐝𝐡𝐚𝐦𝐲𝐲 x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Re: Amanda king x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Your Channel Was Referred to Us",
+      "sender": "Creator Ads <creatorads@invite.creatorads.io>",
+      "reason": "Could not detect brand name"
+    },
+    {
+      "subject": "Re: Kylee Deweese x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Re: Rain x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Re: nefertitixoxo x Stride Social: Let's secure deals!",
+      "sender": "Billy Nguyen <quan@stride-social.com>",
+      "reason": "No-reply or automated sender"
+    },
+    {
+      "subject": "Re: lilhuhofficial x Stride Social: Let's secure deals!",
+      "sender": "\"LILHUOFFICIAL VLOG'S\" <contactlilhuhofficial@gmail.com>",
+      "reason": "Could not detect brand name"
+    }
+  ],
+  "errors": [],
+  "processedMessageIds": [
+    "19ee5caea62eb5e8",
+    "19ee576ad373ac7e",
+    "19ee563e8de1b40a",
+    "19ee56369771b7af",
+    "19ee56364530f383",
+    "19ee54d3d73cc17f",
+    "19ee5486ad1d583e",
+    "19ee521bc2bbc6e1",
+    "19ee43d0e57b3a38",
+    "19ee435bba13cbf9",
+    "19ee433b7cb01edf",
+    "19ee4253cfc3fb54",
+    "19ee424318abbda6",
+    "19ee407591e9d19d",
+    "19ee4049956065fe",
+    "19ee400988431c2e",
+    "19ee3fd8698c73a5",
+    "19ee3fb66ad96230",
+    "19ee3fb34c85565b",
+    "19ee31c63aee0c98",
+    "19ee2fe88c5dfba4",
+    "19ee2489cf1ca9af",
+    "19ee246a36f0e60f",
+    "19ee2464d06c5f6b",
+    "19ee2399115aadd3",
+    "19ee23523684d5dd",
+    "19ee23318a71e9f1",
+    "19ee22a652b7213f",
+    "19ee229d5387ef34",
+    "19ee22077e2a52e0",
+    "19ee21d867d7a062",
+    "19ee21b6cc190f4c",
+    "19ee20b863d25b26",
+    "19ee1c4c7fdc977f",
+    "19ee1c3a1f3942f5",
+    "19ee1c25f13e571d",
+    "19ee1a4bb19ae39d",
+    "19ee149d2f52f766",
+    "19ee1477b04a7412",
+    "19ee144e9ad70840",
+    "19ee1444f2f42300",
+    "19ee142df22deb78",
+    "19ee141e1b64a7a9",
+    "19ee13f73114cdbd",
+    "19ee13ed23648167",
+    "19ee13d2c400d344",
+    "19ee13c1f3b96879",
+    "19ee13a378c800bb",
+    "19ee139d1ea7c231",
+    "19ee1394298a47ec",
+    "19ee137cb31522c2",
+    "19ee135ce2dd4af9",
+    "19ee134f0a1156c3",
+    "19ee132c80e26434",
+    "19ee131a1e1940c0",
+    "19ee130870d7d83a",
+    "19ee12e5782e8735",
+    "19ee12c9d394e554",
+    "19ee12c039ed92db",
+    "19ee12a62bcda0fd",
+    "19ee1292cd98859c",
+    "19ee127553381782",
+    "19ee127070102411",
+    "19ee1262448fa114",
+    "19ee124a7fcb7418",
+    "19ee10f3e50fdae5",
+    "19ee0d8ecc6151a1",
+    "19ee0b5a07217ec8",
+    "19ee0aaa2f61cc6b",
+    "19ee0a82b07d7c26",
+    "19ee0a738e75997a",
+    "19ee0a58e3b920d4",
+    "19ee099df432420c",
+    "19ee091f2733c3f4",
+    "19ee0815e946bd16",
+    "19ee05273541caee",
+    "19ee04d76c0b0c82",
+    "19ee033f7d1d4444",
+    "19ee001113f4fe33",
+    "19edfd9c5c3c6895",
+    "19edfcbceef9741c",
+    "19edf8bfb424de27",
+    "19edf82d3f87cac6",
+    "19edf72c758c1fae",
+    "19edf71dc92e963a",
+    "19edf6f8f912b0b5",
+    "19edf6f505dab6c5",
+    "19edf6ef03ed4376",
+    "19edf6b70bdb3a18",
+    "19edf6769d1d7c8f",
+    "19edf6711c49cbdd",
+    "19edf66e3826dc9e",
+    "19edf65a364a8f4b",
+    "19edf64fb263ae59",
+    "19edf5e76ef430f9",
+    "19edf5d20478d9d0",
+    "19edf47812b32c9d",
+    "19edf3f24badee3e",
+    "19edf2a797c282d2",
+    "19edf22434b0a664"
+  ],
+  "lastProcessedAt": "2026-06-20T19:35:04.279Z",
+  "lastProcessedMessageId": "19edf22434b0a664",
+  "done": true
+}

@@ -1,5 +1,6 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { createHeaderLookup, getHeaderCell } from "@/lib/sheet-headers";
 import type { ExternalGptAssetLink } from "@/lib/team-asset-link-resolver";
 import { resolveExternalGptLinksFromTeamAssets } from "@/lib/team-asset-link-resolver";
 
@@ -14,10 +15,14 @@ export type MeetingTopic = {
 
 export type BillyAssistantHubDiagnostics = {
   checkedAt: string;
+  storageConfigured: boolean;
+  storageReadable: boolean;
+  storageWritable: boolean;
   redisConfigured: boolean;
   redisReadable: boolean;
   redisWritable: boolean;
-  storageMode: "redis" | "local-dev" | "unavailable";
+  storageMode: "google-sheet" | "redis" | "local-dev" | "unavailable";
+  storageTabName: string;
   currentWeekKey: string;
   currentWeekStartsAtLabel: string;
   currentWeekTopicCount: number;
@@ -46,6 +51,28 @@ const REDIS_KEY_PREFIX = "team-billion:billy-gpt";
 const MEETING_TOPICS_KEY_PREFIX = `${REDIS_KEY_PREFIX}:meeting-topics`;
 const DIAGNOSTICS_KEY = `${REDIS_KEY_PREFIX}:diagnostics`;
 const BERLIN_TIME_ZONE = "Europe/Berlin";
+const TEAM_ASSETS_SPREADSHEET_ENV = "TEAM_ASSETS_SPREADSHEET_ID";
+const MEETING_CONTENT_MEMORY_TAB_NAME = "Meeting Content Memory";
+
+const MEETING_TOPIC_HEADERS = [
+  "ID",
+  "Week Key",
+  "Member Name",
+  "Topic Title",
+  "Details",
+  "Created At",
+] as const;
+
+type MeetingTopicField = "id" | "weekKey" | "memberName" | "title" | "details" | "createdAt";
+
+const MEETING_TOPIC_COLUMN_ALIASES: Record<MeetingTopicField, string[]> = {
+  id: ["id", "topic id"],
+  weekKey: ["week key", "week", "meeting week"],
+  memberName: ["member name", "member", "name"],
+  title: ["topic title", "title", "topic"],
+  details: ["details", "notes", "content"],
+  createdAt: ["created at", "created", "timestamp"],
+};
 
 const saveMeetingTopicInput = z.object({
   memberName: z.string().trim().min(1).max(80),
@@ -84,7 +111,98 @@ function getRedisConfig(env = readEnv()) {
 }
 
 function canUseLocalDevStore() {
-  return !isProductionRuntime() && !getRedisConfig();
+  return !isProductionRuntime() && !getTeamAssetsSpreadsheetId() && !getRedisConfig();
+}
+
+function normalizeSheetKey(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function getTeamAssetsSpreadsheetId() {
+  return process.env[TEAM_ASSETS_SPREADSHEET_ENV]?.trim() ?? "";
+}
+
+const getGoogleSheetsServer = createServerOnlyFn(async () => import("@/lib/google-sheets.server"));
+
+function getMeetingContentMemorySheet(tabs: Array<{ sheetName: string; gid?: string }>) {
+  const expectedKey = normalizeSheetKey(MEETING_CONTENT_MEMORY_TAB_NAME);
+  const matchedTab = tabs.find((tab) => normalizeSheetKey(tab.sheetName) === expectedKey);
+
+  if (!matchedTab) return null;
+
+  return {
+    memberName: MEETING_CONTENT_MEMORY_TAB_NAME,
+    sheetName: matchedTab.sheetName,
+    gid: matchedTab.gid,
+  };
+}
+
+async function loadMeetingContentMemoryWorksheet(options: { createIfMissing?: boolean } = {}) {
+  const spreadsheetId = getTeamAssetsSpreadsheetId();
+
+  if (!spreadsheetId) {
+    throw new Error(`Missing required Google Sheets env var: ${TEAM_ASSETS_SPREADSHEET_ENV}`);
+  }
+
+  const googleSheets = await getGoogleSheetsServer();
+  const config = googleSheets.getGoogleSheetsConfig();
+  let tabs = await googleSheets.fetchSpreadsheetTabs(config, spreadsheetId);
+  let sheet = getMeetingContentMemorySheet(tabs);
+
+  if (!sheet && options.createIfMissing) {
+    await googleSheets.createSheetTab(config, spreadsheetId, MEETING_CONTENT_MEMORY_TAB_NAME);
+    tabs = await googleSheets.fetchSpreadsheetTabs(config, spreadsheetId);
+    sheet = getMeetingContentMemorySheet(tabs);
+  }
+
+  if (!sheet) {
+    throw new Error(
+      `Could not find a worksheet tab named "${MEETING_CONTENT_MEMORY_TAB_NAME}" in ${TEAM_ASSETS_SPREADSHEET_ENV}.`,
+    );
+  }
+
+  const [sheetRows] = await googleSheets.fetchSheetRowsBatch(config, spreadsheetId, [sheet]);
+  const headers = sheetRows?.headers ?? [];
+  const rows = sheetRows?.rows ?? [];
+  const hasHeaders = MEETING_TOPIC_HEADERS.every(
+    (header, index) => normalizeSheetKey(headers[index] ?? "") === normalizeSheetKey(header),
+  );
+
+  if (!hasHeaders) {
+    await googleSheets.updateSheetRow(config, spreadsheetId, sheet, 1, [...MEETING_TOPIC_HEADERS]);
+  }
+
+  return {
+    googleSheets,
+    config,
+    spreadsheetId,
+    sheet,
+    headers: hasHeaders ? headers : [...MEETING_TOPIC_HEADERS],
+    rows,
+  };
+}
+
+function normalizeMeetingTopic(headers: string[], row: string[], index: number): MeetingTopic | null {
+  const lookup = createHeaderLookup(headers, MEETING_TOPIC_COLUMN_ALIASES);
+  const weekKey = getHeaderCell(row, lookup, "weekKey");
+  const memberName = getHeaderCell(row, lookup, "memberName");
+  const title = getHeaderCell(row, lookup, "title");
+  const createdAt = getHeaderCell(row, lookup, "createdAt");
+
+  if (!weekKey || !memberName || !title || !createdAt) return null;
+
+  return {
+    id: getHeaderCell(row, lookup, "id") || `meeting-topic-row-${index + 2}`,
+    weekKey,
+    memberName,
+    title,
+    details: getHeaderCell(row, lookup, "details"),
+    createdAt,
+  };
+}
+
+function buildMeetingTopicRow(topic: MeetingTopic) {
+  return [topic.id, topic.weekKey, topic.memberName, topic.title, topic.details, topic.createdAt];
 }
 
 function getBerlinParts(date = new Date()) {
@@ -198,6 +316,15 @@ async function writeSaveDiagnostics(diagnostics: SaveDiagnostics) {
 async function readCurrentWeekTopics() {
   const { weekKey } = getCurrentMeetingWeek();
 
+  if (getTeamAssetsSpreadsheetId()) {
+    const worksheet = await loadMeetingContentMemoryWorksheet();
+
+    return worksheet.rows
+      .map((row, index) => normalizeMeetingTopic(worksheet.headers, row, index))
+      .filter((topic): topic is MeetingTopic => Boolean(topic))
+      .filter((topic) => topic.weekKey === weekKey);
+  }
+
   if (canUseLocalDevStore()) {
     return getLocalTopicStore().get(weekKey) ?? [];
   }
@@ -220,6 +347,17 @@ async function readCurrentWeekTopics() {
 }
 
 async function appendMeetingTopic(topic: MeetingTopic) {
+  if (getTeamAssetsSpreadsheetId()) {
+    const worksheet = await loadMeetingContentMemoryWorksheet({ createIfMissing: true });
+    await worksheet.googleSheets.appendSheetRow(
+      worksheet.config,
+      worksheet.spreadsheetId,
+      worksheet.sheet,
+      buildMeetingTopicRow(topic),
+    );
+    return;
+  }
+
   if (canUseLocalDevStore()) {
     const store = getLocalTopicStore();
     store.set(topic.weekKey, [...(store.get(topic.weekKey) ?? []), topic]);
@@ -237,6 +375,10 @@ export function getBillyAssistantEnvDiagnostics() {
   const env = readEnv();
 
   return [
+    {
+      name: TEAM_ASSETS_SPREADSHEET_ENV,
+      exists: Boolean(getTeamAssetsSpreadsheetId()),
+    },
     { name: "UPSTASH_REDIS_REST_URL", exists: Boolean(env.upstashRedisRestUrl) },
     { name: "UPSTASH_REDIS_REST_TOKEN", exists: Boolean(env.upstashRedisRestToken) },
   ];
@@ -245,17 +387,33 @@ export function getBillyAssistantEnvDiagnostics() {
 export async function getBillyAssistantHubDiagnosticsData(): Promise<BillyAssistantHubDiagnostics> {
   const env = readEnv();
   const redisConfigured = Boolean(getRedisConfig(env));
+  const storageConfigured = Boolean(getTeamAssetsSpreadsheetId());
   const week = getCurrentMeetingWeek();
   const saveDiagnostics = await readSaveDiagnostics();
   let redisReadable = false;
   let redisWritable = false;
+  let storageReadable = false;
+  let storageWritable = false;
   let topicCount = 0;
   let storageMode: BillyAssistantHubDiagnostics["storageMode"] = "unavailable";
   let externalGptLinks = resolveExternalGptLinksFromTeamAssets([]);
 
-  if (canUseLocalDevStore()) {
+  if (storageConfigured) {
+    storageMode = "google-sheet";
+
+    try {
+      topicCount = (await readCurrentWeekTopics()).length;
+      storageReadable = true;
+      storageWritable = true;
+    } catch {
+      storageReadable = false;
+      storageWritable = false;
+    }
+  } else if (canUseLocalDevStore()) {
     redisReadable = true;
     redisWritable = true;
+    storageReadable = true;
+    storageWritable = true;
     storageMode = "local-dev";
     topicCount = (getLocalTopicStore().get(week.weekKey) ?? []).length;
   } else if (redisConfigured) {
@@ -265,9 +423,13 @@ export async function getBillyAssistantHubDiagnosticsData(): Promise<BillyAssist
       topicCount = await redisCommand<number>(["LLEN", meetingTopicsKey(week.weekKey)]);
       redisReadable = true;
       redisWritable = true;
+      storageReadable = true;
+      storageWritable = true;
     } catch {
       redisReadable = false;
       redisWritable = false;
+      storageReadable = false;
+      storageWritable = false;
     }
   }
 
@@ -281,10 +443,14 @@ export async function getBillyAssistantHubDiagnosticsData(): Promise<BillyAssist
 
   return {
     checkedAt: new Date().toISOString(),
+    storageConfigured,
+    storageReadable,
+    storageWritable,
     redisConfigured,
     redisReadable,
     redisWritable,
     storageMode,
+    storageTabName: MEETING_CONTENT_MEMORY_TAB_NAME,
     currentWeekKey: week.weekKey,
     currentWeekStartsAtLabel: week.label,
     currentWeekTopicCount: topicCount,

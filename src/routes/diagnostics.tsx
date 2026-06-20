@@ -731,8 +731,8 @@ function BillyAssistantHubDiagnosticsCard({
 
   const ok =
     diagnostics.storageMode !== "unavailable" &&
-    diagnostics.redisReadable &&
-    diagnostics.redisWritable;
+    diagnostics.storageReadable &&
+    diagnostics.storageWritable;
 
   return (
     <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
@@ -748,9 +748,9 @@ function BillyAssistantHubDiagnosticsCard({
 
       <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         <MetricBox label="Storage mode" value={diagnostics.storageMode} />
-        <MetricBox label="Redis configured" value={diagnostics.redisConfigured ? "Yes" : "No"} />
-        <MetricBox label="Redis readable" value={diagnostics.redisReadable ? "Yes" : "No"} />
-        <MetricBox label="Redis writable" value={diagnostics.redisWritable ? "Yes" : "No"} />
+        <MetricBox label="Sheet configured" value={diagnostics.storageConfigured ? "Yes" : "No"} />
+        <MetricBox label="Sheet readable" value={diagnostics.storageReadable ? "Yes" : "No"} />
+        <MetricBox label="Sheet writable" value={diagnostics.storageWritable ? "Yes" : "No"} />
         <MetricBox label="Week key" value={diagnostics.currentWeekKey} />
         <MetricBox label="Topics this week" value={diagnostics.currentWeekTopicCount} />
       </div>
@@ -759,6 +759,7 @@ function BillyAssistantHubDiagnosticsCard({
         <div className="rounded-2xl bg-muted/45 p-4 text-sm">
           <div className="font-semibold">Meeting topic storage</div>
           <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>Worksheet: {diagnostics.storageTabName}</div>
             <div>Rollover: {diagnostics.currentWeekStartsAtLabel}</div>
             <div>
               Last save:{" "}
@@ -796,12 +797,12 @@ function BillyAssistantHubDiagnosticsCard({
         </div>
       </div>
 
-      {!diagnostics.redisConfigured && (
+      {!diagnostics.storageConfigured && (
         <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
-          <div className="font-bold">Redis setup note</div>
+          <div className="font-bold">Meeting memory setup note</div>
           <p className="mt-1 text-xs font-semibold text-muted-foreground">
-            Local preview can use server memory, but production meeting topics need
-            UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.
+            Production meeting topics need TEAM_ASSETS_SPREADSHEET_ID and the Meeting Content
+            Memory worksheet.
           </p>
         </div>
       )}
