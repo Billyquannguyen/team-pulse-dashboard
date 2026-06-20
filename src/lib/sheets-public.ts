@@ -362,6 +362,7 @@ function getKnownFallback(name: string, index: number): Teammate {
     initials: getInitials(cleanedName),
     role: "Closer",
     commission: 0,
+    paidCommission: 0,
     monthCommission: 0,
     pendingOwed: 0,
     dealsClosed: 0,
@@ -596,7 +597,9 @@ function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fa
   const memberDeals = deals.filter(
     (deal) => deal.manager === tabName && isClosedCommissionDeal(deal),
   );
+  const paidDeals = deals.filter((deal) => deal.manager === tabName && isPaidCommissionDeal(deal));
   const allTimeCommission = memberDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
+  const paidCommission = paidDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
   const currentMonthCommission = memberDeals
     .filter((deal) => normalizeDealMonthKey(deal.month) === currentMonthKey)
     .reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
@@ -607,6 +610,7 @@ function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fa
     name: tabName,
     initials: getInitials(tabName),
     commission: allTimeCommission,
+    paidCommission,
     monthCommission: currentMonthCommission,
     pendingOwed,
     dealsClosed: memberDeals.length,

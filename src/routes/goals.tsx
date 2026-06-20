@@ -142,6 +142,10 @@ function formatMoney(value: number) {
   return `£${Math.round(value).toLocaleString()}`;
 }
 
+function getPaidCommission(member: Teammate) {
+  return Number.isFinite(member.paidCommission) ? member.paidCommission : 0;
+}
+
 function getProgressPct(current: number, target: number) {
   if (target <= 0) return 0;
   return Math.min(100, Math.round((current / target) * 100));
@@ -777,7 +781,7 @@ function AdminGoalControls({
                     <GoalEditCard
                       icon={TrendingUp}
                       title="Long-term progression"
-                      description="Used by the leaderboard to track when a member is ready for the next commission level."
+                      description="Uses paid commission to track when a member is ready for the next commission level."
                     >
                       <div className="max-w-sm">
                         <NumberInput
@@ -839,7 +843,9 @@ function AdminGoalControls({
                                   <span>
                                     Current month closed {formatMoney(member.monthCommission)}
                                   </span>
-                                  <span>All-time closed {formatMoney(member.commission)}</span>
+                                  <span>
+                                    Paid commission {formatMoney(getPaidCommission(member))}
+                                  </span>
                                   <span>Exclusive {formatCount(member.exclusiveCreators)}</span>
                                 </div>
                               </div>
@@ -988,7 +994,7 @@ function GoalsPage() {
     [team],
   );
   const sortedByProgression = useMemo(
-    () => [...team].sort((a, b) => b.commission - a.commission),
+    () => [...team].sort((a, b) => getPaidCommission(b) - getPaidCommission(a)),
     [team],
   );
   const sortedByExclusiveCreators = useMemo(
@@ -1004,11 +1010,28 @@ function GoalsPage() {
   const getExclusiveCreatorTarget = (member: Teammate) =>
     getMemberExclusiveCreatorGoal(settings, member);
 
+  useEffect(() => {
+    console.info(
+      "[team-billion:progression-debug]",
+      team.map((member) => {
+        const paidCommission = getPaidCommission(member);
+        const progressionTarget = getProgressionTarget(member);
+
+        return {
+          member: member.name,
+          paidCommissionTotal: paidCommission,
+          progressionTarget,
+          progressPct: getProgressPct(paidCommission, progressionTarget),
+        };
+      }),
+    );
+  }, [team, settings]);
+
   return (
     <div className="space-y-6">
       <AppHeader
         title="Goals & Analytics"
-        subtitle="Current-month closed commission first, then long-term progression."
+        subtitle="Current-month closed commission for productivity, paid commission for progression."
       />
 
       <GoalProgressPanel
@@ -1062,31 +1085,34 @@ function GoalsPage() {
         <div>
           <h3 className="text-base font-semibold">Long-term progression goals</h3>
           <p className="text-xs text-muted-foreground">
-            All-time closed commission compared with the level needed before moving up commission.
+            Paid commission compared against the level needed before moving up commission tiers.
           </p>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {sortedByProgression.map((member, index) => (
-            <GoalProgressPanel
-              key={member.id}
-              title={member.name}
-              label="All-time closed commission"
-              current={member.commission}
-              target={getProgressionTarget(member)}
-              tone={(["lime", "orange", "blue", "purple"] as Tone[])[index % 4]}
-              icon={TrendingUp}
-              onMotivationOpen={() =>
-                setMotivationCard(
-                  createMotivationCard(
-                    member.name,
-                    "Long-term progression goal",
-                    member.commission,
-                    getProgressionTarget(member),
-                  ),
-                )
-              }
-            />
-          ))}
+          {sortedByProgression.map((member, index) => {
+            const paidCommission = getPaidCommission(member);
+            return (
+              <GoalProgressPanel
+                key={member.id}
+                title={member.name}
+                label="Paid commission"
+                current={paidCommission}
+                target={getProgressionTarget(member)}
+                tone={(["lime", "orange", "blue", "purple"] as Tone[])[index % 4]}
+                icon={TrendingUp}
+                onMotivationOpen={() =>
+                  setMotivationCard(
+                    createMotivationCard(
+                      member.name,
+                      "Long-term progression goal",
+                      paidCommission,
+                      getProgressionTarget(member),
+                    ),
+                  )
+                }
+              />
+            );
+          })}
         </div>
       </section>
 

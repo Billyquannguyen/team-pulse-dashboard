@@ -14,6 +14,8 @@ export type Teammate = {
   youtubeUrl?: string;
   // Parsed from the member summary label/value cells in the deal worksheet.
   commission: number;
+  // Sum of Manager Total rows where Manager Total Paid is checked.
+  paidCommission: number;
   // Parsed from the member summary label/value cells in the deal worksheet.
   monthCommission: number;
   // Parsed from the member summary label/value cells in the deal worksheet.
@@ -38,6 +40,7 @@ export const team: Teammate[] = [
     sortOrder: 10,
     joinedMonth: "",
     commission: 84200,
+    paidCommission: 0,
     monthCommission: 31200,
     pendingOwed: 12450,
     dealsClosed: 23,
@@ -58,6 +61,7 @@ export const team: Teammate[] = [
     sortOrder: 20,
     joinedMonth: "",
     commission: 69750,
+    paidCommission: 0,
     monthCommission: 24500,
     pendingOwed: 10480,
     dealsClosed: 18,
@@ -78,6 +82,7 @@ export const team: Teammate[] = [
     sortOrder: 30,
     joinedMonth: "",
     commission: 61980,
+    paidCommission: 0,
     monthCommission: 22100,
     pendingOwed: 8950,
     dealsClosed: 19,
@@ -98,6 +103,7 @@ export const team: Teammate[] = [
     sortOrder: 40,
     joinedMonth: "",
     commission: 44250,
+    paidCommission: 0,
     monthCommission: 16800,
     pendingOwed: 7200,
     dealsClosed: 12,
@@ -110,6 +116,7 @@ export const team: Teammate[] = [
 ];
 
 export const totalCommission = team.reduce((s, t) => s + t.commission, 0);
+export const totalPaidCommission = team.reduce((s, t) => s + t.paidCommission, 0);
 export const totalMonthCommission = team.reduce((s, t) => s + t.monthCommission, 0);
 export const totalPendingOwed = team.reduce((s, t) => s + t.pendingOwed, 0);
 export const totalDealsClosed = team.reduce((s, t) => s + t.dealsClosed, 0);

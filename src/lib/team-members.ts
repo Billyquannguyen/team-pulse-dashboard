@@ -28,6 +28,7 @@ export type TeamMemberConfig = {
   instagramUrl: string;
   tiktokUrl: string;
   youtubeUrl: string;
+  websiteUrl: string;
   rowNumber?: number;
 };
 
@@ -39,7 +40,8 @@ type TeamMemberField =
   | "avatarUrl"
   | "instagramUrl"
   | "tiktokUrl"
-  | "youtubeUrl";
+  | "youtubeUrl"
+  | "websiteUrl";
 
 type TeamMembersCacheEntry = {
   data: TeamMembersSheetData;
@@ -89,6 +91,7 @@ export const TEAM_MEMBERS_HEADERS = [
   "Instagram",
   "TikTok",
   "YouTube",
+  "Website",
 ] as const;
 
 const TEAM_MEMBER_FIELDS: TeamMemberField[] = [
@@ -100,6 +103,7 @@ const TEAM_MEMBER_FIELDS: TeamMemberField[] = [
   "instagramUrl",
   "tiktokUrl",
   "youtubeUrl",
+  "websiteUrl",
 ];
 
 export const SYSTEM_MEMBER_TAB_NAMES = [
@@ -170,6 +174,7 @@ const TEAM_MEMBER_COLUMN_ALIASES: Record<TeamMemberField, string[]> = {
   instagramUrl: ["instagram", "instagram url", "ig", "ig url"],
   tiktokUrl: ["tiktok", "tiktok url", "tik tok", "tik tok url"],
   youtubeUrl: ["youtube", "youtube url", "yt", "yt url"],
+  websiteUrl: ["website", "website url", "site", "link"],
 };
 
 const teamMemberInput = z.object({
@@ -177,6 +182,11 @@ const teamMemberInput = z.object({
   id: z.string().trim().min(1).max(80),
   joinedMonth: z.string().trim().max(20).optional().default(""),
   status: z.enum(["active", "offboarded"]).default("active"),
+  avatarUrl: z.string().max(50000).optional(),
+  instagramUrl: z.string().trim().max(500).optional(),
+  tiktokUrl: z.string().trim().max(500).optional(),
+  youtubeUrl: z.string().trim().max(500).optional(),
+  websiteUrl: z.string().trim().max(500).optional(),
 });
 
 const updateTeamMemberInput = teamMemberInput.extend({
@@ -195,6 +205,7 @@ const teamMemberProfileInput = z.object({
   instagramUrl: z.string().trim().max(500).optional().default(""),
   tiktokUrl: z.string().trim().max(500).optional().default(""),
   youtubeUrl: z.string().trim().max(500).optional().default(""),
+  websiteUrl: z.string().trim().max(500).optional().default(""),
 });
 
 let teamMembersCache: TeamMembersCacheEntry | null = null;
@@ -364,6 +375,7 @@ function normalizeTeamMemberRows(headers: string[], rows: string[][]) {
         instagramUrl: getCell(row, lookup, "instagramUrl").trim(),
         tiktokUrl: getCell(row, lookup, "tiktokUrl").trim(),
         youtubeUrl: getCell(row, lookup, "youtubeUrl").trim(),
+        websiteUrl: getCell(row, lookup, "websiteUrl").trim(),
         rowNumber: index + 2,
       };
     })
@@ -385,6 +397,7 @@ function getKnownFallback(member: TeamMemberConfig, index: number): Teammate {
       initials: getInitialsFromName(member.displayName),
       role: "Closer",
       commission: 0,
+      paidCommission: 0,
       monthCommission: 0,
       pendingOwed: 0,
       dealsClosed: 0,
@@ -405,6 +418,7 @@ function getKnownFallback(member: TeamMemberConfig, index: number): Teammate {
     instagramUrl: member.instagramUrl,
     tiktokUrl: member.tiktokUrl,
     youtubeUrl: member.youtubeUrl,
+    websiteUrl: member.websiteUrl,
   };
 }
 
@@ -613,7 +627,12 @@ export async function getActiveTeammatesForServer() {
 
 function buildTeamMemberWriteRow(
   input: z.infer<typeof teamMemberInput> &
-    Partial<Pick<TeamMemberConfig, "avatarUrl" | "instagramUrl" | "tiktokUrl" | "youtubeUrl">>,
+    Partial<
+      Pick<
+        TeamMemberConfig,
+        "avatarUrl" | "instagramUrl" | "tiktokUrl" | "youtubeUrl" | "websiteUrl"
+      >
+    >,
   existingRow?: string[],
   existingLookup?: HeaderLookup<TeamMemberField>,
 ) {
@@ -629,6 +648,7 @@ function buildTeamMemberWriteRow(
     input.instagramUrl ?? existing("instagramUrl"),
     input.tiktokUrl ?? existing("tiktokUrl"),
     input.youtubeUrl ?? existing("youtubeUrl"),
+    input.websiteUrl ?? existing("websiteUrl"),
   ];
 }
 
@@ -842,6 +862,7 @@ export const updateTeamMemberProfile = createServerFn({ method: "POST" })
           instagramUrl: data.instagramUrl,
           tiktokUrl: data.tiktokUrl,
           youtubeUrl: data.youtubeUrl,
+          websiteUrl: data.websiteUrl,
         },
         existingRow,
         lookup,

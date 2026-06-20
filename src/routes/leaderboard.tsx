@@ -88,7 +88,7 @@ function LeaderboardPage() {
   const sorted = [...team].sort((a, b) => b.monthCommission - a.monthCommission);
   const chartData = sorted.map((member) => ({
     name: member.name,
-    allTime: member.commission,
+    paidCommission: member.paidCommission,
     currentMonth: member.monthCommission,
   }));
   const deals = data?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
@@ -104,7 +104,7 @@ function LeaderboardPage() {
     <div className="space-y-6">
       <AppHeader
         title="Leaderboard"
-        subtitle="Current-month closed commission ranking with all-time context."
+        subtitle="Current-month closed commission ranking with paid progression context."
       />
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -132,7 +132,7 @@ function LeaderboardPage() {
             </div>
             <div className="mt-4 text-3xl font-bold">£{t.monthCommission.toLocaleString()}</div>
             <div className="text-xs opacity-70">
-              £{t.commission.toLocaleString()} all-time · {t.dealsClosed} deals
+              £{t.paidCommission.toLocaleString()} paid · {t.dealsClosed} deals
             </div>
           </div>
         ))}
@@ -141,9 +141,9 @@ function LeaderboardPage() {
       <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold">Current month and all-time by member</h3>
+            <h3 className="text-base font-semibold">Current month and paid commission by member</h3>
             <p className="text-xs text-muted-foreground">
-              Monthly ranking uses closed deals in the deal Month, while all-time supports
+              Monthly ranking uses closed deals in the deal Month, while paid commission supports
               progression tracking.
             </p>
           </div>
@@ -172,8 +172,8 @@ function LeaderboardPage() {
                 radius={[8, 8, 0, 0]}
               />
               <Bar
-                dataKey="allTime"
-                name="All-time closed commission"
+                dataKey="paidCommission"
+                name="Paid commission"
                 fill="var(--fun-lime)"
                 radius={[8, 8, 0, 0]}
               />

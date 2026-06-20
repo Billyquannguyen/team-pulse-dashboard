@@ -39,6 +39,7 @@ export type DealExclusionReason =
 
 export const CLOSED_COMMISSION_STATUSES = new Set<DealStatus>(["Posted", "Pending content"]);
 export const POSTED_COMMISSION_STATUSES = new Set<DealStatus>(["Posted"]);
+export const PAID_COMMISSION_STATUSES = new Set<DealStatus>(["Posted", "Paid"]);
 
 function hasDealIdentity(deal: Pick<Deal, "brand" | "creator">) {
   return Boolean(deal.brand?.trim() || deal.creator?.trim());
@@ -83,12 +84,7 @@ export function isPostedCommissionDeal(
 export function isPaidCommissionDeal(
   deal: Pick<Deal, "brand" | "creator" | "managerTotalGbp" | "managerTotalPaid" | "status">,
 ) {
-  return (
-    hasDealIdentity(deal) &&
-    hasPositiveManagerTotal(deal) &&
-    deal.status !== "Cancelled" &&
-    deal.managerTotalPaid
-  );
+  return isValidDealRow(deal, PAID_COMMISSION_STATUSES) && deal.managerTotalPaid;
 }
 
 export function isActiveDashboardDeal(

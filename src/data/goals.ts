@@ -4,6 +4,7 @@ import {
   totalCommission,
   totalDealsClosed,
   totalDealsGoal,
+  totalPaidCommission,
   totalRevenueGoal,
   totalMonthCommission,
   totalPendingOwed,
@@ -74,7 +75,7 @@ export function createGoalRows(
 
 export const defaultGoalRows: GoalRow[] = createGoalRows(team, {
   totalPaid: totalCommission,
-  totalPaidCommission: 0,
+  totalPaidCommission,
   paidThisMonth: totalMonthCommission,
   pendingOwed: totalPendingOwed,
   dealsClosed: totalDealsClosed,

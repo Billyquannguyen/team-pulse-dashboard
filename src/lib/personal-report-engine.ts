@@ -349,8 +349,9 @@ export function buildPersonalReport(
   const monthlyTarget = getMemberMonthlyGoal(settings, member);
   const progressionTarget = getMemberProgressionGoal(settings, member);
   const exclusiveTarget = getMemberExclusiveCreatorGoal(settings, member);
+  const paidCommission = Number.isFinite(member.paidCommission) ? member.paidCommission : 0;
   const monthlyProgress = progressPct(member.monthCommission, monthlyTarget);
-  const progressionProgress = progressPct(member.commission, progressionTarget);
+  const progressionProgress = progressPct(paidCommission, progressionTarget);
   const exclusiveProgress = progressPct(exclusiveCreatorCount, exclusiveTarget);
   const avgDealValue = memberDeals.length > 0 ? Math.round(totalDealValue / memberDeals.length) : 0;
   const revenueEfficiency =
@@ -480,7 +481,7 @@ export function buildPersonalReport(
       monthlyCurrent: member.monthCommission,
       monthlyTarget,
       progressionProgress,
-      progressionCurrent: member.commission,
+      progressionCurrent: paidCommission,
       progressionTarget,
       exclusiveProgress,
       exclusiveCreatorCount,
