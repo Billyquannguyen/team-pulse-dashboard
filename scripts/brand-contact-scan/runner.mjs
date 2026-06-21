@@ -58,7 +58,23 @@ const AUTOMATED_OR_LOW_VALUE_DOMAINS = new Set(["amazon.com", "beehiiv.com", "su
 
 const TEAM_ENTITY_NAMES = ["Team Billion", "Stride Social", "Katlas", "Katlas Media"];
 
-const KNOWN_CREATOR_NAMES = new Set(["henri palms"]);
+const KNOWN_CREATOR_NAMES = new Set([
+  "henri palms",
+  "henri palmer",
+  "dilshoda",
+  "simon",
+  "simone",
+]);
+
+const KNOWN_CREATOR_EMAIL_HINTS = new Set([
+  "henriandebs",
+  "henripalms",
+  "henripalms11",
+  "henripalmsbusiness",
+  "dilshoda",
+  "simon",
+  "simone",
+]);
 
 const CREATOR_REFERENCE_PATTERN =
   /\b(creator|creators|content creator|influencer|influencers|talent|which creator|specify which creator|creator name|which talent|talent name)\b/i;
@@ -84,6 +100,7 @@ const BAD_BRAND_CANDIDATES = new Set([
   "influencer",
   "influencers",
   "intent",
+  "manager",
   "partnership",
   "partnerships",
   "paid",
@@ -838,7 +855,8 @@ function extractBrandContact(email) {
   if (
     isNoReplyEmail(contactEmail) ||
     domainMatches(senderDomain, INTERNAL_EMAIL_DOMAINS) ||
-    domainMatches(senderDomain, AUTOMATED_OR_LOW_VALUE_DOMAINS)
+    domainMatches(senderDomain, AUTOMATED_OR_LOW_VALUE_DOMAINS) ||
+    isKnownCreatorSender({ sender, contactEmail, senderDomain })
   ) {
     return { ok: false, reason: "No-reply or automated sender", code: "no-reply" };
   }
@@ -887,6 +905,10 @@ function inferBrandName({ email, sender, text }) {
     /^\[?\s*([A-Z][A-Za-z0-9&'.+ -]{1,55})\s+(?:x|X|×)\s+@?[A-Za-z0-9_.-]+/g,
     new RegExp(
       `\\b(?:${TEAM_ENTITY_NAMES.map(flexibleNamePattern).join("|")})\\s+(?:x|X|×)\\s+([A-Z][A-Za-z0-9&'.+ -]{1,55})(?:[:|,!.]|\\s+-|$)`,
+      "gi",
+    ),
+    new RegExp(
+      `\\b([A-Z][A-Za-z0-9&'.+ -]{1,45})\\s+(?:dear|for|with|awaits)\\s+(?:${knownCreatorAliasPattern()})\\b`,
       "gi",
     ),
     /\b([A-Z][A-Za-z0-9&'.+ -]{1,45})\s+featuring\b/g,
@@ -964,6 +986,7 @@ function isBadBrandCandidate(value) {
     isInternalPairCandidate(value) ||
     normalized.includes("@") ||
     /^introduction\s+please\s+find\b/i.test(value) ||
+    /^(cooperation|manager|thailand\s+trip)\b/i.test(value) ||
     /^(review|approval|rate|rates|details|deck|brief)$/i.test(value) ||
     /\b(creator|creators|collaborations?|partnerships?|equity|visibility|instagram|youtube)\b/i.test(value) ||
     /^(for|from|with|new|potential|paid|creator|influencer|brand|campaign)\b/i.test(value) ||
@@ -1000,6 +1023,16 @@ function isCreatorTeamThread(subject) {
 
 function isCreatorManagementSender({ senderDomain, position }) {
   return GENERIC_EMAIL_DOMAINS.has(senderDomain) || /\b(talent manager|creator manager|management)\b/i.test(position);
+}
+
+function isKnownCreatorSender({ sender, contactEmail, senderDomain }) {
+  if (!GENERIC_EMAIL_DOMAINS.has(senderDomain)) return false;
+  const localPart = normalizeKey(String(contactEmail).split("@")[0] ?? "");
+  const senderName = normalizeKey(sender.name);
+  return [...KNOWN_CREATOR_EMAIL_HINTS].some((hint) => {
+    const normalizedHint = normalizeKey(hint);
+    return localPart.includes(normalizedHint) || senderName.includes(normalizedHint);
+  });
 }
 
 function isCreatorReferenceCandidate(candidate, context) {
@@ -1287,12 +1320,35 @@ function looksLikePersonName(value) {
 }
 
 function cleanBrandName(value) {
-  return cleanEntityName(value)
+  return stripKnownCreatorFragments(cleanEntityName(value))
     .replace(/\s+featuring\b.*$/i, "")
+    .replace(/\s+on\s+(?:tiktok|instagram|youtube)\b.*$/i, "")
     .replace(/\b(?:creator|influencer|campaign|collaboration|collab|partnership|sponsorship|brief|booking|opportunity|activation|promotion)\b.*$/i, "")
     .replace(/\s+(?:tiktok|instagram|youtube|ugc)\s*$/i, "")
+    .replace(/^(?:the\s+)?(.+?)\s+app$/i, "$1")
     .replace(/\s+(?:for|with|from|by)$/i, "")
     .trim();
+}
+
+function stripKnownCreatorFragments(value) {
+  let cleaned = String(value ?? "");
+  for (const alias of knownCreatorAliases()) {
+    const pattern = flexibleNamePattern(alias);
+    if (!pattern) continue;
+    cleaned = cleaned
+      .replace(new RegExp(`\\s+(?:dear|for|with|awaits)\\s+${pattern}\\b.*$`, "i"), "")
+      .replace(new RegExp(`\\bdear\\s+${pattern}\\b.*$`, "i"), "")
+      .replace(new RegExp(`\\bcooperation\\s+with\\s+${pattern}\\b.*$`, "i"), "");
+  }
+  return cleaned.trim();
+}
+
+function knownCreatorAliases() {
+  return [...KNOWN_CREATOR_NAMES, ...KNOWN_CREATOR_EMAIL_HINTS];
+}
+
+function knownCreatorAliasPattern() {
+  return knownCreatorAliases().map(flexibleNamePattern).filter(Boolean).join("|");
 }
 
 function cleanContactName(value) {
@@ -1615,6 +1671,38 @@ function runSelfTest() {
   const featuringSubject = extractBrandContact(featuringSubjectEmail);
   assert(featuringSubject.ok, "Featuring subject should still extract a brand.");
   assert(featuringSubject.contact.brandName === "COSRX", "Featuring subject should clean down to COSRX.");
+
+  const creatorOwnedEmail = {
+    id: "msg-9",
+    from: '"Henri Palmer" <henripalmsbusiness@gmail.com>',
+    subject: "TEMU campaign update",
+    snippet: "TEMU is ready to review.",
+    body: "I am the creator on this campaign.",
+  };
+  const creatorOwned = extractBrandContact(creatorOwnedEmail);
+  assert(!creatorOwned.ok, "Known creator-owned Gmail should not be saved as a brand contact.");
+
+  const creatorSubjectBrandDomain = {
+    id: "msg-10",
+    from: '"Madelyn Cline" <madelyn.cline@paulaschoice.com>',
+    subject: "Dilshoda partnership",
+    snippet: "Creator name: Dilshoda.",
+    body: "Paid partnership for Dilshoda.",
+  };
+  const creatorSubject = extractBrandContact(creatorSubjectBrandDomain);
+  assert(creatorSubject.ok, "Creator-name subject from a brand domain should fall back to domain brand.");
+  assert(creatorSubject.contact.brandName === "Paulaschoice", "Creator-name subject should not save Dilshoda as the brand.");
+
+  const creatorHandleSuffix = {
+    id: "msg-11",
+    from: '"Iris" <iris@darryring.com>',
+    subject: "Darry Ring Dear henripalms",
+    snippet: "Darry Ring campaign.",
+    body: "Hi Henri.",
+  };
+  const creatorHandle = extractBrandContact(creatorHandleSuffix);
+  assert(creatorHandle.ok, "Brand plus creator handle should still extract the brand.");
+  assert(creatorHandle.contact.brandName === "Darry Ring", "Creator handle suffix should be removed from brand.");
 
   console.log("Brand contact scanner self-test passed.");
 }

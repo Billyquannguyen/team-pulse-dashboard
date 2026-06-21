@@ -77,6 +77,13 @@ const DEFAULT_KEYWORDS = [
 const DEFAULT_SENIORITY = ["manager", "director", "head", "founder", "owner"];
 const DEFAULT_EMAIL_STATUSES = ["verified", "likely to engage"];
 
+const WORKFLOW_STEPS = [
+  { label: "Upload", detail: "Dream sheet", icon: Upload },
+  { label: "Check", detail: "Saved contacts", icon: Database },
+  { label: "Search", detail: "Apollo", icon: Search },
+  { label: "Draft", detail: "Gmail", icon: Send },
+] as const;
+
 type TemplateTarget = "subject" | "body";
 type BrandStatus = "unknown" | "none" | "database";
 
@@ -538,6 +545,16 @@ function fillTemplate(template: string, contact: ContactRow) {
   });
 }
 
+function contactToDatabaseInput(contact: ContactRow) {
+  return {
+    brandName: contact.brandName,
+    contactName: contact.contactName,
+    contactFirstName: contact.contactFirstName,
+    email: contact.email,
+    position: contact.position,
+  };
+}
+
 function readSavedState(): SavedBrandFinderState {
   if (typeof window === "undefined") return {};
 
@@ -925,6 +942,13 @@ function BrandFinderPage() {
 
     setIsCreatingDrafts(true);
     try {
+      const databaseResult = await upsertContactDatabaseContacts({
+        data: {
+          contacts: selectedContacts.map(contactToDatabaseInput),
+        },
+      });
+      await queryClient.invalidateQueries({ queryKey: contactDatabaseQuery.queryKey });
+
       const draftResult = await createGmailDrafts({
         data: {
           drafts: selectedContacts.map((contact) => ({
@@ -936,29 +960,9 @@ function BrandFinderPage() {
         },
       });
       const successfulResults = draftResult.results.filter((result) => result.ok);
-      const successfulIds = new Set(successfulResults.map((result) => result.id));
-      const successfulContacts = selectedContacts.filter((contact) =>
-        successfulIds.has(contact.id),
-      );
-
-      if (successfulContacts.length > 0) {
-        await upsertContactDatabaseContacts({
-          data: {
-            contacts: successfulContacts.map((contact) => ({
-              brandName: contact.brandName,
-              contactName: contact.contactName,
-              contactFirstName: contact.contactFirstName,
-              email: contact.email,
-              position: contact.position,
-            })),
-          },
-        });
-        await queryClient.invalidateQueries({ queryKey: contactDatabaseQuery.queryKey });
-      }
-
       const failedCount = draftResult.results.length - successfulResults.length;
       setDraftMessage(
-        `${successfulResults.length} drafts created. ${skippedNoEmailCount} skipped because no email. ${failedCount} failed.`,
+        `${databaseResult.created} contacts added and ${databaseResult.updated} updated in Contact Database. ${successfulResults.length} drafts created. ${skippedNoEmailCount} skipped because no email. ${failedCount} failed.`,
       );
     } catch (error) {
       setDraftError(error instanceof Error ? error.message : "Gmail draft creation failed.");
@@ -1024,8 +1028,15 @@ function BrandFinderPage() {
         />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.52fr)]">
-        <div className="space-y-4">
+      <WorkflowStrip
+        parsedCount={brands.length}
+        queuedCount={directSearchBrandIds.size}
+        apolloCount={contacts.length}
+        draftCount={selectedContacts.length}
+      />
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.42fr)] 2xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="min-w-0 space-y-4">
           <Panel
             title="Dream brand sheet"
             subtitle={
@@ -1085,8 +1096,8 @@ function BrandFinderPage() {
               </button>
             }
           >
-            <div className="overflow-x-auto rounded-2xl border border-border">
-              <table className="w-full text-sm">
+            <div className="max-w-full overflow-x-auto rounded-2xl border border-border">
+              <table className="w-full min-w-[880px] text-sm">
                 <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="w-12 px-3 py-2.5 text-left font-medium">Select</th>
@@ -1182,17 +1193,32 @@ function BrandFinderPage() {
 
           <Panel
             title="Direct brand search"
-            subtitle="Search saved contacts from the Contact Database."
+            subtitle={`${directSearchBrandIds.size} queued. Search saved contacts before spending Apollo credits.`}
             action={
-              <button
-                type="button"
-                disabled={directSelectedContacts.filter((contact) => contact.email).length === 0}
-                onClick={addSelectedSavedContacts}
-                className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Check className="h-4 w-4" />
-                Add selected saved contacts
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={
+                    directSearchBrandIds.size === 0 &&
+                    !directSearchQuery.trim() &&
+                    !directActiveSearch.trim()
+                  }
+                  onClick={clearDirectSearch}
+                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Clear queue
+                </button>
+                <button
+                  type="button"
+                  disabled={directSelectedContacts.filter((contact) => contact.email).length === 0}
+                  onClick={addSelectedSavedContacts}
+                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Check className="h-4 w-4" />
+                  Add selected saved contacts
+                </button>
+              </div>
             }
           >
             <div className="rounded-2xl border border-border bg-background p-3">
@@ -1257,8 +1283,8 @@ function BrandFinderPage() {
               </div>
             </div>
 
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-              <table className="w-full text-sm">
+            <div className="mt-4 max-w-full overflow-x-auto rounded-2xl border border-border">
+              <table className="w-full min-w-[920px] text-sm">
                 <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="w-12 px-3 py-2.5 text-left font-medium">Select</th>
@@ -1336,15 +1362,15 @@ function BrandFinderPage() {
 
           <Panel
             title="Apollo contact approval"
-            subtitle="Approve returned Apollo contacts for Gmail drafts."
+            subtitle={`${contacts.length} returned contacts. ${duplicateContactCount} already saved.`}
             action={
-              <div className="flex flex-wrap items-end gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                 <DashboardSelectField
                   label="Brand filter"
                   value={brandFilter}
                   options={brandOptions}
                   onChange={setBrandFilter}
-                  className="min-w-[190px]"
+                  className="min-w-[190px] sm:w-[210px]"
                 />
                 <button
                   type="button"
@@ -1375,8 +1401,8 @@ function BrandFinderPage() {
               </div>
             )}
 
-            <div className="overflow-x-auto rounded-2xl border border-border">
-              <table className="w-full text-sm">
+            <div className="max-w-full overflow-x-auto rounded-2xl border border-border">
+              <table className="w-full min-w-[900px] text-sm">
                 <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="w-12 px-3 py-2.5 text-left font-medium">Select</th>
@@ -1399,6 +1425,8 @@ function BrandFinderPage() {
                     </tr>
                   )}
                   {filteredContacts.map((contact) => {
+                    const duplicateLabel = contactDuplicateLabel(contact, databaseContacts);
+
                     return (
                       <tr key={contact.id} className="tb-row-hover border-t border-border/60">
                         <td className="px-3 py-3">
@@ -1416,30 +1444,43 @@ function BrandFinderPage() {
                         <td className="min-w-[180px] px-3 py-3">{contact.contactName}</td>
                         <td className="min-w-[240px] px-3 py-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                await navigator.clipboard.writeText(contact.email);
-                                flashCopied(`email-${contact.id}`);
-                              }}
-                              className="tb-action inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-foreground hover:bg-accent"
-                            >
-                              {copiedKey === `email-${contact.id}` ? (
-                                <Check className="h-3.5 w-3.5" />
-                              ) : (
-                                <Copy className="h-3.5 w-3.5" />
-                              )}
-                              {contact.email}
-                            </button>
+                            {contact.email ? (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await navigator.clipboard.writeText(contact.email);
+                                  flashCopied(`email-${contact.id}`);
+                                }}
+                                className="tb-action inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-foreground hover:bg-accent"
+                              >
+                                {copiedKey === `email-${contact.id}` ? (
+                                  <Check className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5" />
+                                )}
+                                {contact.email}
+                              </button>
+                            ) : (
+                              <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
+                                No email
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="min-w-[220px] px-3 py-3 text-muted-foreground">
                           {contact.position || "-"}
                         </td>
                         <td className="min-w-[150px] px-3 py-3">
-                          <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
-                            {contact.emailStatus || "Unknown"}
-                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
+                              {contact.emailStatus || "Unknown"}
+                            </span>
+                            {duplicateLabel && (
+                              <span className="rounded-full border border-fun-blue/60 bg-fun-blue/20 px-2.5 py-1 text-xs font-bold text-foreground">
+                                {duplicateLabel}
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1469,46 +1510,9 @@ function BrandFinderPage() {
             </div>
           </Panel>
 
-          <Panel title="Email template" subtitle="Only brand and contact first name are filled.">
-            <div className="mb-3 flex flex-wrap gap-2">
-              {TEMPLATE_FIELDS.map((field) => (
-                <button
-                  key={field}
-                  type="button"
-                  onClick={() => insertTemplateField(field)}
-                  className="tb-action h-10 rounded-2xl bg-muted px-3 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  {`{{${field}}}`}
-                </button>
-              ))}
-            </div>
-
-            <label className="block text-sm font-semibold">
-              Subject
-              <input
-                ref={subjectRef}
-                value={subjectTemplate}
-                onFocus={() => setTemplateTarget("subject")}
-                onChange={(event) => setSubjectTemplate(event.target.value)}
-                className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </label>
-
-            <label className="mt-4 block text-sm font-semibold">
-              Body
-              <Textarea
-                ref={bodyRef}
-                value={bodyTemplate}
-                onFocus={() => setTemplateTarget("body")}
-                onChange={(event) => setBodyTemplate(event.target.value)}
-                className="mt-1 min-h-56 rounded-2xl bg-background text-sm"
-              />
-            </label>
-          </Panel>
-
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4 xl:sticky xl:top-6 xl:self-start">
           <Panel title="Apollo filters" subtitle="Saved search settings for this browser.">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-xs font-semibold text-muted-foreground">
@@ -1582,6 +1586,43 @@ function BrandFinderPage() {
             </div>
           </Panel>
 
+          <Panel title="Email template" subtitle="Only brand and contact first name are filled.">
+            <div className="mb-3 flex flex-wrap gap-2">
+              {TEMPLATE_FIELDS.map((field) => (
+                <button
+                  key={field}
+                  type="button"
+                  onClick={() => insertTemplateField(field)}
+                  className="tb-action h-10 rounded-2xl bg-muted px-3 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  {`{{${field}}}`}
+                </button>
+              ))}
+            </div>
+
+            <label className="block text-sm font-semibold">
+              Subject
+              <input
+                ref={subjectRef}
+                value={subjectTemplate}
+                onFocus={() => setTemplateTarget("subject")}
+                onChange={(event) => setSubjectTemplate(event.target.value)}
+                className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </label>
+
+            <label className="mt-4 block text-sm font-semibold">
+              Body
+              <Textarea
+                ref={bodyRef}
+                value={bodyTemplate}
+                onFocus={() => setTemplateTarget("body")}
+                onChange={(event) => setBodyTemplate(event.target.value)}
+                className="mt-1 min-h-56 rounded-2xl bg-background text-sm"
+              />
+            </label>
+          </Panel>
+
           <Panel title="Contact Database" subtitle="Used for duplicate flags.">
             <div className="flex items-center gap-3 rounded-2xl border border-border bg-background p-3">
               <Database className="h-5 w-5 text-primary" />
@@ -1601,6 +1642,50 @@ function BrandFinderPage() {
   );
 }
 
+function WorkflowStrip({
+  parsedCount,
+  queuedCount,
+  apolloCount,
+  draftCount,
+}: {
+  parsedCount: number;
+  queuedCount: number;
+  apolloCount: number;
+  draftCount: number;
+}) {
+  const counts = [parsedCount, queuedCount, apolloCount, draftCount];
+
+  return (
+    <section className="grid gap-3 rounded-3xl bg-card p-3 ring-1 ring-border sm:grid-cols-2 xl:grid-cols-4">
+      {WORKFLOW_STEPS.map((step, index) => {
+        const Icon = step.icon;
+
+        return (
+          <div
+            key={step.label}
+            className="flex min-h-20 items-center justify-between gap-3 rounded-2xl bg-background px-4 py-3"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary">
+                <Icon className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-bold">{step.label}</div>
+                <div className="truncate text-xs font-semibold text-muted-foreground">
+                  {step.detail}
+                </div>
+              </div>
+            </div>
+            <div className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold tabular-nums text-muted-foreground">
+              {metricValue(counts[index] ?? 0)}
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 function Panel({
   title,
   subtitle,
@@ -1613,13 +1698,13 @@ function Panel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-3xl bg-card p-6 ring-1 ring-border">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
+    <section className="rounded-3xl bg-card p-5 ring-1 ring-border sm:p-6">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h2 className="text-base font-bold">{title}</h2>
           {subtitle && <p className="mt-1 text-xs font-medium text-muted-foreground">{subtitle}</p>}
         </div>
-        {action}
+        {action && <div className="w-full sm:w-auto sm:shrink-0">{action}</div>}
       </div>
       {children}
     </section>
