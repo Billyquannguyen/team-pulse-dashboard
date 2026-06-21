@@ -46,11 +46,25 @@ const SOURCE_ORG_HINTS = [
   "network",
   "affiliate",
   "katlas",
+  "cast",
+  "casting",
+  "kol",
+  "ugc",
 ];
 
 const INTERNAL_EMAIL_DOMAINS = new Set(["stride-social.com"]);
 
 const AUTOMATED_OR_LOW_VALUE_DOMAINS = new Set(["amazon.com", "beehiiv.com", "substack.com"]);
+
+const TEAM_ENTITY_NAMES = ["Team Billion", "Stride Social", "Katlas", "Katlas Media"];
+
+const KNOWN_CREATOR_NAMES = new Set(["henri palms"]);
+
+const CREATOR_REFERENCE_PATTERN =
+  /\b(creator|creators|content creator|influencer|influencers|talent|which creator|specify which creator|creator name|which talent|talent name)\b/i;
+
+const CREATOR_CLARIFICATION_PATTERN =
+  /\b(?:can|could|would)\s+you\s+(?:please\s+)?(?:specify|confirm|clarify|tell me|let me know)\s+(?:which|what)\s+(?:creator|talent|influencer)\b/i;
 
 const BAD_BRAND_CANDIDATES = new Set([
   "a creator",
@@ -64,6 +78,7 @@ const BAD_BRAND_CANDIDATES = new Set([
   "creators",
   "deals on youtube",
   "equity",
+  "for their review",
   "foodie creators",
   "has confirmed everything",
   "influencer",
@@ -72,6 +87,7 @@ const BAD_BRAND_CANDIDATES = new Set([
   "partnership",
   "partnerships",
   "paid",
+  "review",
   "stride social",
   "team",
   "the brand",
@@ -680,6 +696,7 @@ async function loadContactDatabase(sheets) {
 
   return {
     sheetId: tab.properties.sheetId,
+    gridRowCount: tab.properties.gridProperties?.rowCount ?? Math.max(CONTACT_HEADERS.length, table.rows.length + 1),
     contacts: normalizeContactRows(table.headers, table.rows),
   };
 }
@@ -827,6 +844,12 @@ function extractBrandContact(email) {
   }
 
   const text = `${email.subject}\n${email.snippet}\n${email.body}`.slice(0, 80_000);
+  const position = inferPosition(text);
+
+  if (isCreatorTeamThread(email.subject) && isCreatorManagementSender({ senderDomain, position })) {
+    return { ok: false, reason: "Creator-management thread without a clear brand", code: "missing-brand" };
+  }
+
   const brandName = inferBrandName({ email, sender, text });
 
   if (!brandName) {
@@ -834,7 +857,6 @@ function extractBrandContact(email) {
   }
 
   const contactName = cleanContactName(sender.name);
-  const position = inferPosition(text);
 
   if (sameEntityName(brandName, contactName)) {
     return { ok: false, reason: "Brand looked like the sender contact name", code: "missing-brand" };
@@ -861,11 +883,17 @@ function inferBrandName({ email, sender, text }) {
   const subject = String(email.subject ?? "").replace(/^(re|fw|fwd)\s*:\s*/i, "").trim();
 
   collectMatches(candidates, subject, [
+    /^\s*\[\s*(?:paid\s+collab|paid\s+collaboration|collab|collaboration|campaign|brief)[^\]/]*\/\s*([A-Z][A-Za-z0-9&'.+ -]{1,55})\s*\]/gi,
     /^\[?\s*([A-Z][A-Za-z0-9&'.+ -]{1,55})\s+(?:x|X|×)\s+@?[A-Za-z0-9_.-]+/g,
+    new RegExp(
+      `\\b(?:${TEAM_ENTITY_NAMES.map(flexibleNamePattern).join("|")})\\s+(?:x|X|×)\\s+([A-Z][A-Za-z0-9&'.+ -]{1,55})(?:[:|,!.]|\\s+-|$)`,
+      "gi",
+    ),
+    /\b([A-Z][A-Za-z0-9&'.+ -]{1,45})\s+featuring\b/g,
     /\b(?:booking|campaign|collab|collaboration|partnership|sponsorship|brief|opportunity|activation|promotion)\s+(?:for|with|from)\s+([A-Z][A-Za-z0-9&'.+ -]{1,55})/gi,
     /\b(?:client|brand|on behalf of)\s+([A-Z][A-Za-z0-9&'.+ -]{1,55})/gi,
     /\b([A-Z][A-Za-z0-9&'.+ -]{1,55})\s+(?:x|X)\s+(?:Team Billion|creator|creators|campaign|collab|collaboration|partnership)/g,
-    /\b([A-Z][A-Za-z0-9&'.+ -]{1,45})\s+(?:campaign|collab|collaboration|partnership|sponsorship|brief|booking|opportunity)\b/g,
+    /\b([A-Z][A-Za-z0-9&'.+ -]{1,45})\s+(?:(?:TikTok|Instagram|YouTube|UGC)\s+)?(?:campaign|collab|collaboration|partnership|sponsorship|brief|booking|opportunity)\b/g,
   ]);
 
   collectMatches(candidates, text, [
@@ -874,19 +902,31 @@ function inferBrandName({ email, sender, text }) {
     /\bon behalf of\s+([A-Z][A-Za-z0-9&'.+ -]{1,55})(?:[\n\r:|,!.]|\s+-)/gi,
   ]);
 
-  const domainBrand = inferBrandFromSenderDomain(sender.domain);
-  if (domainBrand) candidates.push(domainBrand);
+  const brandCandidates = candidates.filter(
+    (candidate) => !isCreatorReferenceCandidate(candidate, { subject, text }),
+  );
+  const explicitBrand = chooseBestBrandCandidate(brandCandidates);
+  if (explicitBrand) return explicitBrand;
 
-  return chooseBestBrandCandidate(candidates);
+  const domainBrand = inferBrandFromSenderDomain(sender.domain);
+  if (domainBrand) return chooseBestBrandCandidate([domainBrand]);
+
+  return "";
 }
 
 function collectMatches(candidates, text, patterns) {
   for (const pattern of patterns) {
     for (const match of String(text ?? "").matchAll(pattern)) {
+      if (!hasBrandCandidateCapitalization(match[1])) continue;
       const candidate = cleanBrandName(match[1]);
       if (candidate && !isBadBrandCandidate(candidate)) candidates.push(candidate);
     }
   }
+}
+
+function hasBrandCandidateCapitalization(value) {
+  const cleaned = cleanEntityName(value);
+  return /^[A-Z0-9]/.test(cleaned) || /\b[A-Z]{2,}\b/.test(cleaned);
 }
 
 function inferBrandFromSenderDomain(domain) {
@@ -920,13 +960,114 @@ function isBadBrandCandidate(value) {
     !normalized ||
     normalized.length < 2 ||
     BAD_BRAND_CANDIDATES.has(normalized) ||
+    isTeamEntityCandidate(value) ||
+    isInternalPairCandidate(value) ||
     normalized.includes("@") ||
+    /^introduction\s+please\s+find\b/i.test(value) ||
+    /^(review|approval|rate|rates|details|deck|brief)$/i.test(value) ||
     /\b(creator|creators|collaborations?|partnerships?|equity|visibility|instagram|youtube)\b/i.test(value) ||
-    /^(new|potential|paid|creator|influencer|brand|campaign)\b/i.test(value) ||
+    /^(for|from|with|new|potential|paid|creator|influencer|brand|campaign)\b/i.test(value) ||
     /^behind\b/i.test(value) ||
-    /\b(your content|your creator|our client|the client|next steps|calendar|meeting|invoice|receipt|confirmed everything|best)\b/i.test(value) ||
+    /\b(your content|your creator|their review|our review|your review|our client|the client|next steps|calendar|meeting|invoice|receipt|confirmed everything|best)\b/i.test(value) ||
     String(value).length > 60
   );
+}
+
+function isTeamEntityCandidate(value) {
+  const normalized = normalizeKey(value);
+  return TEAM_ENTITY_NAMES.some((entity) => {
+    const team = normalizeKey(entity);
+    return normalized === team || normalized.startsWith(`${team} `);
+  });
+}
+
+function isInternalPairCandidate(value) {
+  const normalized = normalizeKey(value);
+  return TEAM_ENTITY_NAMES.some((entity) => {
+    const team = normalizeKey(entity);
+    return normalized.includes(` x ${team}`) || normalized.includes(`${team} x `);
+  });
+}
+
+function isCreatorTeamThread(subject) {
+  const cleanSubject = String(subject ?? "").replace(/^(re|fw|fwd)\s*:\s*/i, "").trim();
+  const team = TEAM_ENTITY_NAMES.map(flexibleNamePattern).join("|");
+  if (!team) return false;
+  return new RegExp(`^\\s*(?:@?[A-Za-z0-9_.-]+|[A-Z][A-Za-z0-9&'.+ -]{1,55})\\s*(?:x|X|×)\\s*(?:${team})\\b`, "i").test(
+    cleanSubject,
+  );
+}
+
+function isCreatorManagementSender({ senderDomain, position }) {
+  return GENERIC_EMAIL_DOMAINS.has(senderDomain) || /\b(talent manager|creator manager|management)\b/i.test(position);
+}
+
+function isCreatorReferenceCandidate(candidate, context) {
+  const value = cleanBrandName(candidate);
+  if (!value) return false;
+  if (isKnownCreatorName(value)) return true;
+
+  const subject = String(context.subject ?? "");
+  const text = String(context.text ?? "");
+  const combined = `${subject}\n${text}`;
+
+  if (appearsAsBrandCreatorPair(value, subject)) return false;
+  if (appearsAsTeamBrandPair(value, subject)) return false;
+  if (appearsAsTeamCreatorPair(value, combined)) return true;
+  if (appearsAfterCreatorLabel(value, combined)) return true;
+
+  if (looksLikePersonName(value)) {
+    return CREATOR_REFERENCE_PATTERN.test(combined) || CREATOR_CLARIFICATION_PATTERN.test(combined);
+  }
+
+  return false;
+}
+
+function appearsAsBrandCreatorPair(candidate, text) {
+  const name = flexibleNamePattern(candidate);
+  const team = TEAM_ENTITY_NAMES.map(flexibleNamePattern).join("|");
+  if (!name) return false;
+  const match = String(text ?? "").match(new RegExp(`^\\[?\\s*${name}\\s*(?:x|X|×)\\s+([^\\]\\n:|,-]+)`, "i"));
+  if (!match?.[1]) return false;
+  return team ? !new RegExp(`^(?:${team})$`, "i").test(cleanEntityName(match[1])) : true;
+}
+
+function appearsAsTeamBrandPair(candidate, text) {
+  const name = flexibleNamePattern(candidate);
+  const team = TEAM_ENTITY_NAMES.map(flexibleNamePattern).join("|");
+  if (!name || !team) return false;
+  return new RegExp(`\\b(?:${team})\\b\\s*(?:x|X|×)\\s*${name}\\b`, "i").test(String(text ?? ""));
+}
+
+function isKnownCreatorName(value) {
+  const normalized = normalizeKey(value);
+  const configured = String(process.env.BRAND_CONTACT_CREATOR_NAMES ?? "")
+    .split(",")
+    .map(normalizeKey)
+    .filter(Boolean);
+  const names = [...KNOWN_CREATOR_NAMES, ...configured];
+  return names.some((name) => normalized === name || normalized.startsWith(`${name} x `));
+}
+
+function appearsAsTeamCreatorPair(candidate, text) {
+  const name = flexibleNamePattern(candidate);
+  const team = TEAM_ENTITY_NAMES.map(flexibleNamePattern).join("|");
+  if (!name || !team) return false;
+  return new RegExp(`\\b${name}\\b\\s*(?:x|X|and|for|with)\\s*(?:${team})\\b`, "i").test(text);
+}
+
+function appearsAfterCreatorLabel(candidate, text) {
+  const name = flexibleNamePattern(candidate);
+  if (!name) return false;
+  return new RegExp(`\\b(?:creator|talent|influencer)(?:\\s+name)?\\s*:?\\s*${name}\\b`, "i").test(text);
+}
+
+function flexibleNamePattern(value) {
+  return escapeRegExp(cleanEntityName(value)).replace(/\s+/g, "\\s+");
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function inferPosition(text) {
@@ -1002,6 +1143,13 @@ function stripHtml(value) {
 
 async function flushWritePlan(sheets, contactDatabase, plan) {
   const writes = [];
+  const createdEndRow = contactDatabase.contacts.length + plan.creates.length + 1;
+  const updatedEndRow = Math.max(0, ...plan.updates.map((update) => update.rowNumber));
+  const neededRows = Math.max(createdEndRow, updatedEndRow, 1);
+
+  if (neededRows > contactDatabase.gridRowCount) {
+    await ensureSheetRowCapacity(sheets, contactDatabase, neededRows);
+  }
 
   if (plan.creates.length > 0) {
     const startRow = contactDatabase.contacts.length + 2;
@@ -1021,6 +1169,22 @@ async function flushWritePlan(sheets, contactDatabase, plan) {
   }
 
   if (writes.length > 0) await sheets.valuesBatchUpdate(writes);
+}
+
+async function ensureSheetRowCapacity(sheets, contactDatabase, neededRows) {
+  const rowCount = Math.max(neededRows + 500, Math.ceil(neededRows * 1.25));
+  await sheets.batchUpdate([
+    {
+      updateSheetProperties: {
+        properties: {
+          sheetId: contactDatabase.sheetId,
+          gridProperties: { rowCount },
+        },
+        fields: "gridProperties.rowCount",
+      },
+    },
+  ]);
+  contactDatabase.gridRowCount = rowCount;
 }
 
 function applyPlanToMemory(contactDatabase, existingById, plan) {
@@ -1119,12 +1283,14 @@ function sameEntityName(left, right) {
 
 function looksLikePersonName(value) {
   const words = cleanEntityName(value).split(/\s+/).filter(Boolean);
-  return words.length === 2 && words.every((word) => /^[A-Z][a-z'’-]{2,}$/.test(word));
+  return words.length === 2 && words.every((word) => /^[A-Z][a-z'-]{2,}$/.test(word));
 }
 
 function cleanBrandName(value) {
   return cleanEntityName(value)
+    .replace(/\s+featuring\b.*$/i, "")
     .replace(/\b(?:creator|influencer|campaign|collaboration|collab|partnership|sponsorship|brief|booking|opportunity|activation|promotion)\b.*$/i, "")
+    .replace(/\s+(?:tiktok|instagram|youtube|ugc)\s*$/i, "")
     .replace(/\s+(?:for|with|from|by)$/i, "")
     .trim();
 }
@@ -1375,6 +1541,80 @@ function runSelfTest() {
   assert(row[0] === extracted.contact.id, "Sheet row should include stable ID.");
   assert(row[1] === "Dola AI", "Sheet row should include brandName.");
   assert(row[4] === "abc@katlasmedia.com", "Sheet row should include email.");
+
+  const brandXCreatorEmail = {
+    id: "msg-2",
+    from: '"PLAY LAB" <team@creator.playxlab.com>',
+    subject: "[Dongwon Tuna x @creator] Creator campaign",
+    snippet: "Dongwon Tuna is interested in a paid booking.",
+    body: "Hi, we are coordinating this campaign.",
+  };
+  const brandXCreator = extractBrandContact(brandXCreatorEmail);
+  assert(brandXCreator.ok, "Brand x creator subject should still extract the brand.");
+  assert(brandXCreator.contact.brandName === "Dongwon Tuna", "Brand x creator subject should keep the brand side.");
+
+  const creatorTargetedEmail = {
+    id: "msg-3",
+    from: '"Dani Loewensohn" <dani@the-cast.co.uk>',
+    subject: "Henri Palms creator partnership",
+    snippet: "Checking if Henri Palms is available.",
+    body: "Hi, can you specify which creator this campaign is for?",
+  };
+  const creatorTargeted = extractBrandContact(creatorTargetedEmail);
+  assert(!creatorTargeted.ok, "Creator-targeted inbound should not save the creator as a brand.");
+
+  const creatorTeamPairEmail = {
+    id: "msg-4",
+    from: '"Agency Contact" <hello@creatoragency.com>',
+    subject: "Henri Palms x Team Billion potential campaign",
+    snippet: "Following up on Henri Palms.",
+    body: "Creator name: Henri Palms",
+  };
+  const creatorTeamPair = extractBrandContact(creatorTeamPairEmail);
+  assert(!creatorTeamPair.ok, "Creator x Team Billion subjects should be skipped.");
+
+  const genericReviewPhraseEmail = {
+    id: "msg-5",
+    from: '"Rachael Turner" <rachturner21@icloud.com>',
+    subject: "Re: Rachael Turner x Stride Social: Let's secure deals!",
+    snippet: "Please send this over for their review.",
+    body: "Rachael Turner, Talent Manager. I can send the rates for their review.",
+  };
+  const genericReviewPhrase = extractBrandContact(genericReviewPhraseEmail);
+  assert(!genericReviewPhrase.ok, "Generic review phrases should not be saved as brand names.");
+
+  const paidCollabBracketEmail = {
+    id: "msg-6",
+    from: '"Grace Kuh" <yun.kuh@drrejuall.info>',
+    subject: "Re: [PAID COLLAB / Dr.Reju-All] - Where pharmacy science meets real results",
+    snippet: "Please find the attached file.",
+    body: "Introduction please find the attached file.",
+  };
+  const paidCollabBracket = extractBrandContact(paidCollabBracketEmail);
+  assert(paidCollabBracket.ok, "Paid collab bracket subject should extract the brand.");
+  assert(paidCollabBracket.contact.brandName === "Dr.Reju-All", "Paid collab bracket subject should extract Dr.Reju-All.");
+
+  const teamXBrandEmail = {
+    id: "msg-7",
+    from: '"Rachel Rivas" <rachel@tablerock.com>',
+    subject: "Re: Stride Social x Table Rock: New potential collaboration!",
+    snippet: "Table Rock is reviewing creators.",
+    body: "Hi, Rachel here.",
+  };
+  const teamXBrand = extractBrandContact(teamXBrandEmail);
+  assert(teamXBrand.ok, "Team x brand subject should extract the brand side.");
+  assert(teamXBrand.contact.brandName === "Table Rock", "Team x brand subject should extract Table Rock.");
+
+  const featuringSubjectEmail = {
+    id: "msg-8",
+    from: '"4AM Talent" <team@4amtalent.team>',
+    subject: "COSRX featuring our latest Blue Peptide Collection",
+    snippet: "Discover the new COSRX campaign.",
+    body: "COSRX featuring our latest Blue Peptide Collection.",
+  };
+  const featuringSubject = extractBrandContact(featuringSubjectEmail);
+  assert(featuringSubject.ok, "Featuring subject should still extract a brand.");
+  assert(featuringSubject.contact.brandName === "COSRX", "Featuring subject should clean down to COSRX.");
 
   console.log("Brand contact scanner self-test passed.");
 }

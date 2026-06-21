@@ -33,4 +33,5 @@ dist-ssr
 
 .vercel/
 .opportunity-ingestion/
+.brand-contact-scan/
 .env.opportunity-ingestion
