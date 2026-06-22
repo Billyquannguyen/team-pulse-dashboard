@@ -1,20 +1,13 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Bell,
-  Check,
-  Clock3,
-  ExternalLink,
-  Loader2,
-  MessageCircle,
-  X,
-} from "lucide-react";
+import { Bell, Check, Clock3, ExternalLink, Loader2, MessageCircle, X } from "lucide-react";
 import {
   dismissSlackNotification,
   markSlackNotificationDone,
   slackNotificationsQuery,
   snoozeSlackNotification,
   type SlackNotificationItem,
+  type SlackNotificationsPayload,
 } from "@/lib/slack-notifications";
 import { cn } from "@/lib/utils";
 
@@ -81,8 +74,7 @@ function NotificationCard({
             </span>
             <div className="min-w-0">
               <div className="text-sm font-black leading-5">
-                You have not responded to{" "}
-                <span className="text-primary">{item.personName}</span>
+                You have not responded to <span className="text-primary">{item.personName}</span>
               </div>
               <div className="mt-0.5 text-xs font-semibold text-muted-foreground">
                 Last message {formatLastMessageTime(item.lastMessageAt)}
@@ -119,7 +111,13 @@ function NotificationCard({
           </a>
         )}
         <NotificationActionButton
-          icon={disabled ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+          icon={
+            disabled ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Check className="h-3.5 w-3.5" />
+            )
+          }
           label="Done"
           onClick={() => onDone(item)}
           disabled={disabled}
@@ -152,11 +150,30 @@ export function NotificationBell() {
     await queryClient.invalidateQueries({ queryKey: slackNotificationsQuery.queryKey });
   };
 
-  const runAction = async (
-    item: SlackNotificationItem,
-    action: "done" | "snooze" | "dismiss",
-  ) => {
+  const removeItemFromCache = (item: SlackNotificationItem) => {
+    queryClient.setQueryData<SlackNotificationsPayload>(
+      slackNotificationsQuery.queryKey,
+      (current) => {
+        if (!current) return current;
+
+        const items = current.items.filter(
+          (storedItem) =>
+            storedItem.conversationId !== item.conversationId ||
+            storedItem.lastMessageTs !== item.lastMessageTs,
+        );
+
+        return {
+          ...current,
+          count: items.length,
+          items,
+        };
+      },
+    );
+  };
+
+  const runAction = async (item: SlackNotificationItem, action: "done" | "snooze" | "dismiss") => {
     setWorkingId(item.id);
+    removeItemFromCache(item);
 
     try {
       const payload = {
@@ -173,6 +190,9 @@ export function NotificationBell() {
       }
 
       await refresh();
+    } catch (error) {
+      await refresh();
+      throw error;
     } finally {
       setWorkingId(null);
     }
@@ -245,8 +265,8 @@ export function NotificationBell() {
                 </div>
                 <div className="mt-3 text-sm font-black">No current notifications</div>
                 <p className="mt-1 text-xs font-semibold text-muted-foreground">
-                  You are clear right now. Slack follow-ups will appear here when a DM has
-                  waited 24h+ for your reply.
+                  You are clear right now. Slack follow-ups will appear here when a DM has waited
+                  24h+ for your reply.
                 </p>
               </div>
             )}

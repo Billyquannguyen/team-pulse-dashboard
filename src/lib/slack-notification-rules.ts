@@ -97,7 +97,15 @@ export function shouldSuppressSlackNotification(
   lastMessageTs: string,
   nowMs: number,
 ) {
-  if (!state || state.lastMessageTs !== lastMessageTs) return false;
+  if (!state) return false;
+
+  const lastMessageMs = slackTsToMs(lastMessageTs);
+  const actionMessageMs = slackTsToMs(state.lastMessageTs);
+  const actionCoversLatestMessage =
+    state.lastMessageTs === lastMessageTs ||
+    (lastMessageMs > 0 && actionMessageMs > 0 && lastMessageMs <= actionMessageMs);
+
+  if (!actionCoversLatestMessage) return false;
 
   if (state.status === "done" || state.status === "dismissed") return true;
 

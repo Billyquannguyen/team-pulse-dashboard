@@ -338,9 +338,10 @@ async function redisCommand<T>(command: Array<string | number>) {
     body: JSON.stringify(command),
     cache: "no-store",
   });
-  const payload = (await response.json().catch(() => null)) as
-    | { result?: T; error?: string }
-    | null;
+  const payload = (await response.json().catch(() => null)) as {
+    result?: T;
+    error?: string;
+  } | null;
 
   if (!response.ok || payload?.error) {
     throw new Error(payload?.error ?? `Redis request failed with ${response.status}.`);
@@ -455,7 +456,11 @@ async function writeStoredNotifications(items: SlackNotificationItem[], warning:
 function collectScopes(
   scopeSet: Set<string>,
   response: {
-    response_metadata?: { scopes?: string[]; acceptedScopes?: string[]; accepted_scopes?: string[] };
+    response_metadata?: {
+      scopes?: string[];
+      acceptedScopes?: string[];
+      accepted_scopes?: string[];
+    };
   },
 ) {
   response.response_metadata?.scopes?.forEach((scope) => scopeSet.add(scope));
@@ -553,12 +558,7 @@ async function fetchLatestMeaningfulMessage(
 }
 
 function profileDisplayName(profile: SlackMessage["user_profile"] | undefined) {
-  return (
-    profile?.display_name?.trim() ||
-    profile?.real_name?.trim() ||
-    profile?.name?.trim() ||
-    ""
-  );
+  return profile?.display_name?.trim() || profile?.real_name?.trim() || profile?.name?.trim() || "";
 }
 
 async function fetchSlackPersonName(
@@ -644,7 +644,12 @@ async function refreshStoredNotificationNames(payload: SlackNotificationsPayload
     payload.items.map(async (item) => {
       if (!shouldRefreshStoredSlackName(item)) return item;
 
-      const lookup = await fetchSlackPersonName(item.personUserId ?? undefined, scopeSet, undefined, warnings);
+      const lookup = await fetchSlackPersonName(
+        item.personUserId ?? undefined,
+        scopeSet,
+        undefined,
+        warnings,
+      );
 
       if (lookup.error || lookup.source === "fallback") {
         return item;
@@ -925,11 +930,7 @@ export async function syncSlackNotifications(
     const notifications: SlackNotificationItem[] = [];
 
     for (const conversation of conversations) {
-      const latestMessage = await fetchLatestMeaningfulMessage(
-        conversation.id,
-        scopeSet,
-        oldestTs,
-      );
+      const latestMessage = await fetchLatestMeaningfulMessage(conversation.id, scopeSet, oldestTs);
 
       const actionState = await readNotificationActionState(conversation.id);
       const evaluation = evaluateSlackDmFollowup({
@@ -1100,14 +1101,12 @@ async function removeStoredNotification(conversationId: string, lastMessageTs: s
     (item) => item.conversationId !== conversationId || item.lastMessageTs !== lastMessageTs,
   );
 
-  await writeStoredNotificationsPayload(
-    {
-      ...stored,
-      checkedAt: nowIso(),
-      count: items.length,
-      items,
-    } satisfies SlackNotificationsPayload,
-  );
+  await writeStoredNotificationsPayload({
+    ...stored,
+    checkedAt: nowIso(),
+    count: items.length,
+    items,
+  } satisfies SlackNotificationsPayload);
 }
 
 export const createTestSlackNotification = createServerFn({ method: "POST" }).handler(async () => {
@@ -1146,15 +1145,13 @@ export const createTestSlackNotification = createServerFn({ method: "POST" }).ha
     ...existing.items.filter((item) => item.conversationId !== TEST_NOTIFICATION_ID),
   ];
 
-  await writeStoredNotificationsPayload(
-    {
-      checkedAt: nowIso(),
-      lastSyncAt: existing.lastSyncAt ?? nowIso(),
-      count: items.length,
-      items,
-      warning: existing.warning,
-    } satisfies SlackNotificationsPayload,
-  );
+  await writeStoredNotificationsPayload({
+    checkedAt: nowIso(),
+    lastSyncAt: existing.lastSyncAt ?? nowIso(),
+    count: items.length,
+    items,
+    warning: existing.warning,
+  } satisfies SlackNotificationsPayload);
 
   return {
     ok: true as const,
@@ -1191,7 +1188,6 @@ export const markSlackNotificationDone = createServerFn({ method: "POST" })
       updatedAt: nowIso(),
     });
     await removeStoredNotification(data.conversationId, data.lastMessageTs);
-    await syncSlackNotifications({ source: "manual" });
 
     return { ok: true as const };
   });
@@ -1208,7 +1204,6 @@ export const dismissSlackNotification = createServerFn({ method: "POST" })
       updatedAt: nowIso(),
     });
     await removeStoredNotification(data.conversationId, data.lastMessageTs);
-    await syncSlackNotifications({ source: "manual" });
 
     return { ok: true as const };
   });
@@ -1226,7 +1221,6 @@ export const snoozeSlackNotification = createServerFn({ method: "POST" })
       updatedAt: nowIso(),
     });
     await removeStoredNotification(data.conversationId, data.lastMessageTs);
-    await syncSlackNotifications({ source: "manual" });
 
     return { ok: true as const };
   });
