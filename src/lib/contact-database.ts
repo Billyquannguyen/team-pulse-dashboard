@@ -156,7 +156,9 @@ function dedupeKey(contact: Pick<ContactDatabaseContact, "brandName" | "contactN
 }
 
 function slugForId(value: string) {
-  return normalizeKey(value).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return normalizeKey(value)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function idFromContact(
@@ -532,8 +534,8 @@ export const fetchContactDatabaseData = createServerFn({ method: "GET" }).handle
 export const addContactDatabaseContact = createServerFn({ method: "POST" })
   .inputValidator(contactInput)
   .handler(async ({ data }) => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
     const result = await upsertContacts([data]);
     return { ok: true as const, ...result };
   });
@@ -541,8 +543,8 @@ export const addContactDatabaseContact = createServerFn({ method: "POST" })
 export const updateContactDatabaseContact = createServerFn({ method: "POST" })
   .inputValidator(updateContactInput)
   .handler(async ({ data }) => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
     const contact: ContactDatabaseContact = {
       ...contactFromInput(data),
       id: data.id,
@@ -556,8 +558,8 @@ export const updateContactDatabaseContact = createServerFn({ method: "POST" })
 export const deleteContactDatabaseContact = createServerFn({ method: "POST" })
   .inputValidator(deleteContactInput)
   .handler(async ({ data }) => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
     const googleSheets = await getGoogleSheetsServer();
     const config = googleSheets.getGoogleSheetsConfig();
     const spreadsheetId = getContactDatabaseSpreadsheetId();
@@ -579,15 +581,15 @@ export const deleteContactDatabaseContact = createServerFn({ method: "POST" })
 export const upsertContactDatabaseContacts = createServerFn({ method: "POST" })
   .inputValidator(upsertContactsInput)
   .handler(async ({ data }) => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
     const result = await upsertContacts(data.contacts);
     return { ok: true as const, ...result };
   });
 
 export const deduplicateContactDatabase = createServerFn({ method: "POST" }).handler(async () => {
-  const { requireDashboardAuth } = await import("@/lib/auth.server");
-  await requireDashboardAuth();
+  const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+  await requireWritableDashboardAuth();
   const googleSheets = await getGoogleSheetsServer();
   const config = googleSheets.getGoogleSheetsConfig();
   const spreadsheetId = getContactDatabaseSpreadsheetId();

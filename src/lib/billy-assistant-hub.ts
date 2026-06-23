@@ -182,7 +182,11 @@ async function loadMeetingContentMemoryWorksheet(options: { createIfMissing?: bo
   };
 }
 
-function normalizeMeetingTopic(headers: string[], row: string[], index: number): MeetingTopic | null {
+function normalizeMeetingTopic(
+  headers: string[],
+  row: string[],
+  index: number,
+): MeetingTopic | null {
   const lookup = createHeaderLookup(headers, MEETING_TOPIC_COLUMN_ALIASES);
   const weekKey = getHeaderCell(row, lookup, "weekKey");
   const memberName = getHeaderCell(row, lookup, "memberName");
@@ -487,8 +491,8 @@ export const getThisWeeksMeetingTopics = createServerFn({ method: "GET" }).handl
 export const saveMeetingTopic = createServerFn({ method: "POST" })
   .inputValidator(saveMeetingTopicInput)
   .handler(async ({ data }) => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
     const week = getCurrentMeetingWeek();
     const topic: MeetingTopic = {
       id: `meeting-topic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

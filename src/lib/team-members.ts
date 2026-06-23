@@ -820,8 +820,8 @@ export const offboardTeamMember = createServerFn({ method: "POST" })
 export const updateTeamMemberProfile = createServerFn({ method: "POST" })
   .inputValidator(teamMemberProfileInput)
   .handler(async ({ data }) => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
     const googleSheets = await getGoogleSheetsServer();
     const config = googleSheets.getGoogleSheetsConfig();
     const worksheet = await loadTeamMembersWorksheet(config, {

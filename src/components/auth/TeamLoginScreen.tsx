@@ -53,7 +53,7 @@ export function TeamLoginScreen({ auth }: { auth: AuthState }) {
           <form onSubmit={submitLogin} className="mt-8 space-y-4">
             <div>
               <label htmlFor="team-password" className="text-sm font-bold">
-                Enter team or admin password
+                Enter team, Hermes, or admin password
               </label>
               <input
                 id="team-password"
@@ -88,7 +88,8 @@ export function TeamLoginScreen({ auth }: { auth: AuthState }) {
           </form>
 
           <p className="mt-5 text-center text-xs font-semibold text-muted-foreground">
-            Team password gives normal access. Admin password unlocks goal editing.
+            Team password gives normal access. Hermes password is read-only. Admin password unlocks
+            editing.
           </p>
         </div>
       </div>

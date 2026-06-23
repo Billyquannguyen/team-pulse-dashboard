@@ -1,11 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-export type AuthRole = "team" | "admin";
+export type AuthRole = "team" | "admin" | "hermes_readonly";
 
 export type AuthState = {
   isAuthenticated: boolean;
   isAdmin: boolean;
+  isHermesReadOnly: boolean;
   role: AuthRole | null;
   setupReady: boolean;
   setupIssue: string | null;

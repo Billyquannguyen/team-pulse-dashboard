@@ -26,6 +26,7 @@ Add these in Vercel Project Settings:
 
 ```text
 TEAM_DASHBOARD_PASSWORD=your shared team password
+HERMES_DASHBOARD_PASSWORD=your Hermes read-only password
 ADMIN_PASSWORD=your separate admin password
 GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccount.com
 GOOGLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n
@@ -47,9 +48,11 @@ UPSTASH_REDIS_REST_URL=https://your-upstash-url.upstash.io
 UPSTASH_REDIS_REST_TOKEN=your_upstash_rest_token
 ```
 
-Keep `TEAM_DASHBOARD_PASSWORD` and `ADMIN_PASSWORD` different.
+Keep `TEAM_DASHBOARD_PASSWORD`, `HERMES_DASHBOARD_PASSWORD`, and `ADMIN_PASSWORD` different.
 
-The app checks these on the server. The browser only receives a signed session cookie containing the authenticated role: `team` or `admin`.
+The app checks these on the server. The browser only receives a signed session cookie containing the authenticated role: `team`, `hermes_readonly`, or `admin`.
+
+`TEAM_DASHBOARD_PASSWORD` keeps the normal team login behavior. `HERMES_DASHBOARD_PASSWORD` lets Hermes view dashboard analytics with read-only access. Hermes cannot create Gmail drafts, edit Google Sheets records, dismiss Slack reminders, save meeting notes, edit team members, or trigger admin actions.
 
 Google Sheets credentials are also server-side only. Do not add passwords, private keys, or service account credentials to Billy GPT files, Notion exports, markdown knowledge files, vector stores, or frontend code.
 

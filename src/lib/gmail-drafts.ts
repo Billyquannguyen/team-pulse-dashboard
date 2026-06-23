@@ -131,8 +131,8 @@ async function createOneDraft(
 export const createGmailDrafts = createServerFn({ method: "POST" })
   .inputValidator(createGmailDraftsInput)
   .handler(async ({ data }): Promise<{ results: GmailDraftResult[] }> => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
 
     const accessToken = await getGmailAccessToken();
     const results: GmailDraftResult[] = [];

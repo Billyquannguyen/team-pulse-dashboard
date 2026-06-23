@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/rules-of-hooks */
 import { useSession } from "@tanstack/react-start/server";
 import {
   ADMIN_SESSION_MAX_AGE_SECONDS,
@@ -12,6 +13,7 @@ import {
 function readAuthEnv() {
   const teamPassword = process.env.TEAM_DASHBOARD_PASSWORD ?? "";
   const adminPassword = process.env.ADMIN_PASSWORD ?? "";
+  const hermesPassword = process.env.HERMES_DASHBOARD_PASSWORD ?? "";
 
   if (!teamPassword || !adminPassword) {
     const location = process.env.VERCEL === "1" ? "in Vercel" : "for this environment";
@@ -19,6 +21,7 @@ function readAuthEnv() {
     return {
       teamPassword,
       adminPassword,
+      hermesPassword,
       setupReady: false,
       setupIssue: `Missing TEAM_DASHBOARD_PASSWORD or ADMIN_PASSWORD environment variables ${location}.`,
     };
@@ -28,6 +31,7 @@ function readAuthEnv() {
     return {
       teamPassword,
       adminPassword,
+      hermesPassword,
       setupReady: false,
       setupIssue: "Team and admin passwords must be different.",
     };
@@ -36,6 +40,7 @@ function readAuthEnv() {
   return {
     teamPassword,
     adminPassword,
+    hermesPassword,
     setupReady: true,
     setupIssue: null,
   };
@@ -69,14 +74,16 @@ async function passwordMatches(candidate: string, expected: string) {
 
 async function sessionSecret() {
   const { teamPassword, adminPassword } = readAuthEnv();
-  const bytes = await sha256Bytes(`team-billion-dashboard-auth:v1:${teamPassword}:${adminPassword}`);
+  const bytes = await sha256Bytes(
+    `team-billion-dashboard-auth:v1:${teamPassword}:${adminPassword}`,
+  );
 
   return Array.from(bytes)
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
 
-async function getAuthSession() {
+async function useAuthSession() {
   return useSession<AuthSessionData>({
     name: AUTH_COOKIE_NAME,
     password: await sessionSecret(),
@@ -92,7 +99,7 @@ async function getAuthSession() {
 }
 
 function normalizeRole(value: unknown): AuthRole | null {
-  return value === "team" || value === "admin" ? value : null;
+  return value === "team" || value === "admin" || value === "hermes_readonly" ? value : null;
 }
 
 function getRoleSessionMaxAge(role: AuthRole) {
@@ -108,7 +115,7 @@ function isValidExpiry(value: unknown) {
 }
 
 export async function readAuthStateServer(): Promise<AuthState> {
-  const session = await getAuthSession();
+  const session = await useAuthSession();
   const role = normalizeRole(session.data.role);
   const sessionExpired = role !== null && !isValidExpiry(session.data.expiresAt);
   const { setupReady, setupIssue } = readAuthEnv();
@@ -122,6 +129,7 @@ export async function readAuthStateServer(): Promise<AuthState> {
   return {
     isAuthenticated: activeRole !== null,
     isAdmin: activeRole === "admin",
+    isHermesReadOnly: activeRole === "hermes_readonly",
     role: activeRole,
     setupReady,
     setupIssue,
@@ -140,10 +148,16 @@ export async function loginToDashboardServer(password: string) {
 
   let role: AuthRole | null = null;
 
+  // Passwords are checked only on the server. The client never receives the
+  // configured passwords, only the role saved in the signed session cookie.
   if (await passwordMatches(password, env.adminPassword)) {
     role = "admin";
   } else if (await passwordMatches(password, env.teamPassword)) {
     role = "team";
+  } else if (await passwordMatches(password, env.hermesPassword)) {
+    // Hermes gets its own read-only role so it can inspect analytics without
+    // being allowed to create drafts, edit sheets, or trigger admin actions.
+    role = "hermes_readonly";
   }
 
   if (!role) {
@@ -153,7 +167,7 @@ export async function loginToDashboardServer(password: string) {
     };
   }
 
-  const session = await getAuthSession();
+  const session = await useAuthSession();
   await session.update({ role, expiresAt: getSessionExpiry(role) });
 
   return {
@@ -163,7 +177,7 @@ export async function loginToDashboardServer(password: string) {
 }
 
 export async function logoutFromDashboardServer() {
-  const session = await getAuthSession();
+  const session = await useAuthSession();
   await session.clear();
 
   return { ok: true as const };
@@ -184,6 +198,16 @@ export async function requireAdminAuth() {
 
   if (auth.role !== "admin") {
     throw new Error("Admin access required");
+  }
+
+  return auth;
+}
+
+export async function requireWritableDashboardAuth() {
+  const auth = await requireDashboardAuth();
+
+  if (auth.role === "hermes_readonly") {
+    throw new Error("Read-only access cannot modify dashboard data");
   }
 
   return auth;

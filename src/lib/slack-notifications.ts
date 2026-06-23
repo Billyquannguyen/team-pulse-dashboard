@@ -1179,8 +1179,8 @@ export const forceRefreshSlackNotifications = createServerFn({ method: "POST" })
 export const markSlackNotificationDone = createServerFn({ method: "POST" })
   .inputValidator(notificationActionInput)
   .handler(async ({ data }) => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
 
     await writeNotificationActionState(data.conversationId, {
       status: "done",
@@ -1195,8 +1195,8 @@ export const markSlackNotificationDone = createServerFn({ method: "POST" })
 export const dismissSlackNotification = createServerFn({ method: "POST" })
   .inputValidator(notificationActionInput)
   .handler(async ({ data }) => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
 
     await writeNotificationActionState(data.conversationId, {
       status: "dismissed",
@@ -1211,8 +1211,8 @@ export const dismissSlackNotification = createServerFn({ method: "POST" })
 export const snoozeSlackNotification = createServerFn({ method: "POST" })
   .inputValidator(snoozeNotificationInput)
   .handler(async ({ data }) => {
-    const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
 
     await writeNotificationActionState(data.conversationId, {
       status: "snoozed",

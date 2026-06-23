@@ -37,7 +37,7 @@ export function AppHeader({ title, subtitle }: { title: string; subtitle?: strin
           ) : (
             <UserRound className="h-4 w-4 text-muted-foreground" />
           )}
-          {auth.role === "admin" ? "Admin" : "Team"}
+          {auth.role === "admin" ? "Admin" : auth.role === "hermes_readonly" ? "Hermes" : "Team"}
         </div>
         <NotificationBell />
         <button
