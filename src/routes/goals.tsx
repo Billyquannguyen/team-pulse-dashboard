@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  CalendarDays,
   Check,
   Gift,
   Lock,
@@ -14,8 +15,18 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { TopExclusiveCreators } from "@/components/goals/TopExclusiveCreators";
+import { deals as fallbackDeals, isClosedCommissionDeal, type Deal } from "@/data/deals";
 import {
   team as fallbackTeam,
   totalCommission,
@@ -34,6 +45,7 @@ import {
 } from "@/lib/goal-targets";
 import { cn } from "@/lib/utils";
 import { loginToDashboard, type AuthRole } from "@/lib/auth";
+import { normalizeDealMonthKey } from "@/lib/sheet-normalizer";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -142,6 +154,12 @@ function formatMoney(value: number) {
   return `£${Math.round(value).toLocaleString()}`;
 }
 
+function formatCompactMoney(value: number) {
+  const rounded = Math.round(value);
+  if (Math.abs(rounded) >= 1000) return `£${(rounded / 1000).toFixed(rounded >= 10000 ? 0 : 1)}k`;
+  return formatMoney(rounded);
+}
+
 function getPaidCommission(member: Teammate) {
   return Number.isFinite(member.paidCommission) ? member.paidCommission : 0;
 }
@@ -169,6 +187,151 @@ function getCountGoalGap(current: number, target: number) {
   const gap = Math.round(target - current);
   if (gap <= 0) return `${pluralizeCreator(Math.abs(gap))} over`;
   return `${pluralizeCreator(gap)} left`;
+}
+
+type CommissionChartView = "month" | "year";
+
+type MonthlyClosedCommissionPoint = {
+  key: string;
+  label: string;
+  shortLabel: string;
+  value: number;
+  timestamp: number;
+};
+
+const monthLabelFormatter = new Intl.DateTimeFormat("en-GB", {
+  month: "short",
+  year: "numeric",
+});
+
+const joinedMonthFormatter = new Intl.DateTimeFormat("en-GB", {
+  month: "long",
+  year: "numeric",
+});
+
+function monthStart(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date: Date, months: number) {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1);
+}
+
+function monthKeyFromDate(date: Date) {
+  return `${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+}
+
+function dateFromMonthKey(value?: string) {
+  const normalized = normalizeDealMonthKey(value ?? "");
+  const match = normalized.match(/^(\d{2})\/(\d{4})$/);
+
+  if (!match) return null;
+
+  const month = Number(match[1]);
+  const year = Number(match[2]);
+  if (!Number.isFinite(month) || !Number.isFinite(year) || month < 1 || month > 12) return null;
+
+  return new Date(year, month - 1, 1);
+}
+
+function formatMonthLabel(date: Date) {
+  return monthLabelFormatter.format(date);
+}
+
+function formatJoinedMonth(value?: string) {
+  const date = dateFromMonthKey(value);
+  if (!date) return "Joined month not set";
+  return `Joined ${joinedMonthFormatter.format(date)}`;
+}
+
+function buildMonthlyClosedCommissionSeries(member: Teammate, deals: Deal[]) {
+  const memberDeals = deals.filter(
+    (deal) => deal.manager === member.name && isClosedCommissionDeal(deal),
+  );
+  const dealMonths = memberDeals
+    .map((deal) => dateFromMonthKey(deal.month))
+    .filter((date): date is Date => Boolean(date));
+  const joinedDate = dateFromMonthKey(member.joinedMonth);
+  const earliestDealDate = dealMonths.reduce<Date | null>(
+    (earliest, date) => (!earliest || date < earliest ? date : earliest),
+    null,
+  );
+  const latestDealDate = dealMonths.reduce<Date | null>(
+    (latest, date) => (!latest || date > latest ? date : latest),
+    null,
+  );
+  const currentMonth = monthStart(new Date());
+  const startDate = joinedDate ?? earliestDealDate ?? currentMonth;
+  const endDate =
+    latestDealDate && latestDealDate > currentMonth ? monthStart(latestDealDate) : currentMonth;
+  const safeEndDate = startDate > endDate ? startDate : endDate;
+  const totalsByMonth = new Map<string, number>();
+
+  for (const deal of memberDeals) {
+    const dealDate = dateFromMonthKey(deal.month);
+    if (!dealDate || dealDate < startDate) continue;
+
+    const monthKey = monthKeyFromDate(dealDate);
+    totalsByMonth.set(monthKey, (totalsByMonth.get(monthKey) ?? 0) + deal.managerTotalGbp);
+  }
+
+  const points: MonthlyClosedCommissionPoint[] = [];
+  for (let date = startDate; date <= safeEndDate; date = addMonths(date, 1)) {
+    const monthKey = monthKeyFromDate(date);
+    const label = formatMonthLabel(date);
+
+    points.push({
+      key: monthKey,
+      label,
+      shortLabel: label,
+      value: Math.round(totalsByMonth.get(monthKey) ?? 0),
+      timestamp: date.getTime(),
+    });
+  }
+
+  return points;
+}
+
+function buildYearlyClosedCommissionSeries(monthlySeries: MonthlyClosedCommissionPoint[]) {
+  const totalsByYear = new Map<string, number>();
+  const firstTimestampByYear = new Map<string, number>();
+
+  for (const point of monthlySeries) {
+    const year = new Date(point.timestamp).getFullYear().toString();
+    totalsByYear.set(year, (totalsByYear.get(year) ?? 0) + point.value);
+
+    const currentTimestamp = firstTimestampByYear.get(year);
+    if (currentTimestamp === undefined || point.timestamp < currentTimestamp) {
+      firstTimestampByYear.set(year, point.timestamp);
+    }
+  }
+
+  return [...totalsByYear.entries()].map(([year, value]) => ({
+    key: year,
+    label: year,
+    shortLabel: year,
+    value: Math.round(value),
+    timestamp: firstTimestampByYear.get(year) ?? 0,
+  }));
+}
+
+function getBestMonth(series: MonthlyClosedCommissionPoint[]) {
+  return series.reduce<MonthlyClosedCommissionPoint | null>((best, point) => {
+    if (!best || point.value > best.value) return point;
+    return best;
+  }, null);
+}
+
+function getGrowthLabel(series: MonthlyClosedCommissionPoint[]) {
+  const current = series.at(-1)?.value ?? 0;
+  const previous = series.at(-2)?.value ?? 0;
+
+  if (previous <= 0 && current > 0) return "New";
+  if (previous <= 0) return "0%";
+
+  const growth = ((current - previous) / previous) * 100;
+  const sign = growth > 0 ? "+" : "";
+  return `${sign}${growth.toFixed(1)}%`;
 }
 
 function getMotivationStage(pct: number) {
@@ -436,6 +599,230 @@ function MotivationCardDialog({
   );
 }
 
+function MonthlyClosedCommissionTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ value?: number }>;
+  label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div className="rounded-2xl border border-border bg-card px-3 py-2 text-xs shadow-xl">
+      <div className="font-semibold">{label}</div>
+      <div className="mt-1 text-muted-foreground">
+        Closed commission{" "}
+        <span className="font-semibold text-foreground">
+          {formatMoney(Number(payload[0]?.value ?? 0))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function MonthlyClosedCommissionDialog({
+  member,
+  deals,
+  onClose,
+}: {
+  member: Teammate | null;
+  deals: Deal[];
+  onClose: () => void;
+}) {
+  const [view, setView] = useState<CommissionChartView>("month");
+
+  useEffect(() => {
+    if (!member) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const previousOverscrollBehavior = document.body.style.overscrollBehavior;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "contain";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscrollBehavior;
+    };
+  }, [member]);
+
+  const monthlySeries = useMemo(
+    () => (member ? buildMonthlyClosedCommissionSeries(member, deals) : []),
+    [member, deals],
+  );
+  const chartData = useMemo(
+    () => (view === "year" ? buildYearlyClosedCommissionSeries(monthlySeries) : monthlySeries),
+    [monthlySeries, view],
+  );
+
+  if (!member) return null;
+
+  const chartId = `monthly-closed-commission-${member.id.replace(/[^a-z0-9]/gi, "-")}`;
+  const totalClosedCommission = monthlySeries.reduce((sum, point) => sum + point.value, 0);
+  const averagePerMonth =
+    monthlySeries.length > 0 ? Math.round(totalClosedCommission / monthlySeries.length) : 0;
+  const bestMonth = getBestMonth(monthlySeries);
+  const growthLabel = getGrowthLabel(monthlySeries);
+  const hasClosedCommission = totalClosedCommission > 0;
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border">
+        <div className="shrink-0 border-b border-border p-5 md:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" />
+                <h4 className="text-xl font-bold">Monthly Closed Commission</h4>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">Progression since joining</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="tb-action rounded-full p-2 hover:bg-accent"
+              aria-label="Close monthly closed commission chart"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 md:p-6">
+          <div className="rounded-3xl bg-background/75 p-4 ring-1 ring-border md:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="text-sm font-semibold text-muted-foreground">{member.name}</div>
+                <div className="mt-3 inline-flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground">
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  {formatJoinedMonth(member.joinedMonth)}
+                </div>
+              </div>
+
+              <div className="inline-flex rounded-2xl bg-muted p-1 text-sm font-semibold">
+                {(["month", "year"] as CommissionChartView[]).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setView(option)}
+                    className={cn(
+                      "tb-action rounded-xl px-4 py-2 capitalize text-muted-foreground",
+                      view === option && "bg-card text-foreground shadow-sm ring-1 ring-border",
+                    )}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-6 h-[340px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 14, right: 12, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id={chartId} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--fun-lime)" stopOpacity={0.34} />
+                      <stop offset="95%" stopColor="var(--fun-lime)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    vertical={false}
+                    strokeDasharray="4 4"
+                    stroke="hsl(var(--border))"
+                  />
+                  <XAxis
+                    dataKey="shortLabel"
+                    interval="preserveStartEnd"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+                  />
+                  <YAxis
+                    width={58}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) => formatCompactMoney(Number(value))}
+                    tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+                  />
+                  <Tooltip content={<MonthlyClosedCommissionTooltip />} />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    name="Closed commission"
+                    stroke="var(--fun-lime)"
+                    strokeWidth={4}
+                    fill={`url(#${chartId})`}
+                    dot={{
+                      r: 5,
+                      fill: "var(--fun-lime)",
+                      stroke: "hsl(var(--card))",
+                      strokeWidth: 2,
+                    }}
+                    activeDot={{
+                      r: 7,
+                      fill: "var(--fun-lime)",
+                      stroke: "hsl(var(--card))",
+                      strokeWidth: 3,
+                    }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            {!hasClosedCommission && (
+              <div className="mt-4 rounded-2xl bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+                No closed commission has been recorded for this member since joining yet.
+              </div>
+            )}
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl bg-muted/50 p-4">
+                <div className="text-xs font-semibold text-muted-foreground">
+                  Total Closed Commission
+                </div>
+                <div className="mt-2 text-lg font-bold">{formatMoney(totalClosedCommission)}</div>
+              </div>
+              <div className="rounded-2xl bg-muted/50 p-4">
+                <div className="text-xs font-semibold text-muted-foreground">Average per Month</div>
+                <div className="mt-2 text-lg font-bold">{formatMoney(averagePerMonth)}</div>
+              </div>
+              <div className="rounded-2xl bg-muted/50 p-4">
+                <div className="text-xs font-semibold text-muted-foreground">Best Month</div>
+                <div className="mt-2 text-lg font-bold">
+                  {bestMonth && bestMonth.value > 0 ? bestMonth.label : "Not yet"}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-muted/50 p-4">
+                <div className="text-xs font-semibold text-muted-foreground">
+                  Growth vs Last Month
+                </div>
+                <div
+                  className={cn(
+                    "mt-2 text-lg font-bold",
+                    growthLabel.startsWith("+") || growthLabel === "New"
+                      ? "text-emerald-600"
+                      : "text-foreground",
+                  )}
+                >
+                  {growthLabel}
+                </div>
+              </div>
+            </div>
+
+            <p className="mt-5 text-center text-xs text-muted-foreground">
+              Uses the existing closed commission calculation. No analytics formulas were changed.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function NumberInput({
   label,
   value,
@@ -674,7 +1061,7 @@ function AdminGoalControls({
           title="Edit goals"
           description={
             isAdmin
-              ? "Change the targets below. Values save in this browser."
+              ? "Change the targets below. Values save to the shared dashboard sheet."
               : "Enter the admin password to unlock goal editing."
           }
           onClose={closeEditDialog}
@@ -732,7 +1119,7 @@ function AdminGoalControls({
                     Admin unlocked
                   </div>
                   <div className="text-xs font-medium text-muted-foreground">
-                    Footer stays fixed. Scroll inside this panel only.
+                    Shared goals update for every team member after their dashboard refreshes.
                   </div>
                 </div>
 
@@ -975,8 +1362,10 @@ function GoalsPage() {
   const { data } = useQuery(dashboardSheetQuery);
   const [settings, setSettings] = useGoalSettings();
   const [motivationCard, setMotivationCard] = useState<MotivationCardData | null>(null);
+  const [progressionChartMember, setProgressionChartMember] = useState<Teammate | null>(null);
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
   const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
+  const deals = data?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
   const totals = data?.totals ?? {
     totalPaid: canUseLocalFallback ? totalCommission : 0,
     totalPaidCommission: 0,
@@ -1003,7 +1392,6 @@ function GoalsPage() {
   );
   const teamExclusiveCreators = team.reduce((sum, member) => sum + member.exclusiveCreators, 0);
   const creators = data?.creators ?? [];
-  const deals = data?.deals ?? [];
 
   const getMonthlyTarget = (member: Teammate) => getMemberMonthlyGoal(settings, member);
   const getProgressionTarget = (member: Teammate) => getMemberProgressionGoal(settings, member);
@@ -1100,16 +1488,7 @@ function GoalsPage() {
                 target={getProgressionTarget(member)}
                 tone={(["lime", "orange", "blue", "purple"] as Tone[])[index % 4]}
                 icon={TrendingUp}
-                onMotivationOpen={() =>
-                  setMotivationCard(
-                    createMotivationCard(
-                      member.name,
-                      "Long-term progression goal",
-                      paidCommission,
-                      getProgressionTarget(member),
-                    ),
-                  )
-                }
+                onMotivationOpen={() => setProgressionChartMember(member)}
               />
             );
           })}
@@ -1172,6 +1551,11 @@ function GoalsPage() {
         authRole={auth.role}
       />
       <MotivationCardDialog card={motivationCard} onClose={() => setMotivationCard(null)} />
+      <MonthlyClosedCommissionDialog
+        member={progressionChartMember}
+        deals={deals}
+        onClose={() => setProgressionChartMember(null)}
+      />
     </div>
   );
 }
