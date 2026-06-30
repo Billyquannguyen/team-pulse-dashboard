@@ -1,10 +1,36 @@
 import { useEffect, useState } from "react";
-import { Award, ClipboardList, Target, TrendingUp, UserRound } from "lucide-react";
+import {
+  AlertCircle,
+  Award,
+  Check,
+  ClipboardList,
+  Copy,
+  Loader2,
+  Sparkles,
+  Target,
+  TrendingUp,
+  UserRound,
+} from "lucide-react";
 import { DashboardSelect } from "@/components/ui/dashboard-select";
 import type { Teammate } from "@/data/team";
 import type { GoalSettings } from "@/lib/goal-settings";
 import type { DashboardSheetData } from "@/lib/sheets-public";
-import { buildPersonalReport, formatMoney, roundedAverage } from "@/lib/personal-report-engine";
+import {
+  buildPersonalReport,
+  formatMoney,
+  roundedAverage,
+  type PersonalReport,
+} from "@/lib/personal-report-engine";
+
+type AIPersonalReport = {
+  summary: string;
+  wins: string[];
+  risks: string[];
+  nextActions: string[];
+  managerNote: string;
+  modelUsed: string;
+  warnings: string[];
+};
 
 function MetricPill({ label, value }: { label: string; value: string | number }) {
   return (
@@ -35,6 +61,130 @@ function InsightList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function getCurrentMonthLabel() {
+  return new Date().toLocaleDateString([], { month: "long", year: "numeric" });
+}
+
+function buildStructuredReportData(
+  report: PersonalReport,
+  member: Teammate,
+): Record<string, unknown> {
+  const pendingContentDeals = Math.max(0, report.metrics.dealCount - report.metrics.liveDeals);
+
+  return {
+    member: {
+      id: member.id,
+      name: report.memberName,
+    },
+    snapshotDate: report.snapshotDate,
+    dateRange: getCurrentMonthLabel(),
+    commission: {
+      currentMonthCommission: report.metrics.monthlyCurrent,
+      currentMonthTarget: report.metrics.monthlyTarget,
+      currentMonthProgressPercent: report.metrics.monthlyProgress,
+      paidCommission: report.metrics.progressionCurrent,
+      progressionTarget: report.metrics.progressionTarget,
+      progressionProgressPercent: report.metrics.progressionProgress,
+      totalClosedDealValue: report.metrics.totalDealValue,
+      averageDealValue: report.metrics.avgDealValue,
+      revenueEfficiencyPerExclusiveCreator: report.metrics.revenueEfficiency,
+    },
+    deals: {
+      closedDeals: report.metrics.dealCount,
+      postedDeals: report.metrics.liveDeals,
+      pendingContentDeals,
+      topBrands: report.metrics.topBrands,
+      platformMix: report.metrics.platformMix.slice(0, 5),
+    },
+    creators: {
+      exclusiveCreatorCount: report.metrics.exclusiveCreatorCount,
+      exclusiveCreatorTarget: report.metrics.exclusiveTarget,
+      exclusiveCreatorProgressPercent: report.metrics.exclusiveProgress,
+      activeCreatorCount: report.metrics.activeCreatorCount,
+      inactiveCreatorNames: report.metrics.inactiveCreators
+        .slice(0, 8)
+        .map((creator) => creator.displayName),
+      lowContributionCreatorNames: report.metrics.lowContributionCreators
+        .slice(0, 8)
+        .map((creator) => creator.displayName),
+    },
+    outreach: {
+      creatorsSourced: report.metrics.creatorsSourced,
+      contacted: report.metrics.contacted,
+      emailsSent: report.metrics.emailsSent,
+      igOutreach: report.metrics.igOutreach,
+      replies: report.metrics.replies,
+      bookedCalls: report.metrics.bookedCalls,
+      signed: report.metrics.signed,
+      replyRate: report.metrics.replyRate,
+      bookingRate: report.metrics.bookingRate,
+      callClosingRate: report.metrics.callClosingRate,
+      overallClosingRate: report.metrics.overallClosingRate,
+      topNiche: report.metrics.topNiche,
+    },
+    ranking: {
+      leaderboardPosition: report.metrics.teamRank,
+      teamBenchmarks: {
+        avgCreatorsSourced: roundedAverage(report.metrics.benchmarks.avgCreatorsSourced),
+        avgReplyRate: roundedAverage(report.metrics.benchmarks.avgReplyRate),
+        avgBookingRate: roundedAverage(report.metrics.benchmarks.avgBookingRate),
+        avgCallClosingRate: roundedAverage(report.metrics.benchmarks.avgCallClosingRate),
+        avgOverallClosingRate: roundedAverage(report.metrics.benchmarks.avgOverallClosingRate),
+        avgDealCount: roundedAverage(report.metrics.benchmarks.avgDealCount),
+        avgDealValue: roundedAverage(report.metrics.benchmarks.avgDealValue),
+      },
+    },
+    existingRuleBasedReport: {
+      bottleneck: report.bottleneck,
+      recommendation: report.recommendation,
+      positives: report.positives,
+      evidence: report.evidence,
+      observation: report.observation,
+      priorities: report.priorities,
+      extraInsights: report.extraInsights.slice(0, 10),
+      missingDataWarnings: report.diagnostics.missingDataWarnings,
+    },
+  };
+}
+
+function formatAIReportForClipboard(memberName: string, report: AIPersonalReport) {
+  return [
+    `Billy GPT Personal Report: ${memberName}`,
+    "",
+    "Short performance summary",
+    report.summary,
+    "",
+    "Key wins",
+    ...report.wins.map((item) => `- ${item}`),
+    "",
+    "Risks / weak spots",
+    ...report.risks.map((item) => `- ${item}`),
+    "",
+    "Suggested next actions",
+    ...report.nextActions.map((item) => `- ${item}`),
+    "",
+    "Manager note",
+    report.managerNote,
+  ].join("\n");
+}
+
+function AIReportList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <div className="text-xs font-black uppercase tracking-wide text-muted-foreground">
+        {title}
+      </div>
+      <div className="mt-2 space-y-2">
+        {items.map((item) => (
+          <div key={item} className="rounded-2xl bg-background/75 px-4 py-3 text-sm font-semibold">
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PersonalReportPanel({
   members,
   data,
@@ -53,6 +203,10 @@ export function PersonalReportPanel({
   const report = member ? buildPersonalReport(data, members, member, settings) : null;
   const hasMembers = members.length > 0;
   const pickerOpen = hasMembers && (!memberName || isPickerOpen);
+  const [aiReport, setAiReport] = useState<AIPersonalReport | null>(null);
+  const [aiError, setAiError] = useState("");
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [copiedAIReport, setCopiedAIReport] = useState(false);
 
   useEffect(() => {
     if (!members.some((item) => item.name === draftMemberName) && members[0]?.name) {
@@ -67,10 +221,66 @@ export function PersonalReportPanel({
     }
   }, [memberName, members]);
 
+  useEffect(() => {
+    setAiReport(null);
+    setAiError("");
+    setCopiedAIReport(false);
+  }, [memberName, report?.snapshotDate]);
+
   const showReportForDraftMember = () => {
     if (!draftMemberName) return;
     setMemberName(draftMemberName);
     setIsPickerOpen(false);
+  };
+
+  const generateAIReport = async () => {
+    if (!member || !report) return;
+
+    setIsGeneratingAI(true);
+    setAiError("");
+    setCopiedAIReport(false);
+
+    try {
+      const response = await fetch("/api/ai/personal-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          memberId: member.id,
+          memberName: member.name,
+          dateRange: getCurrentMonthLabel(),
+          structuredReportData: buildStructuredReportData(report, member),
+          tone: "practical, direct, manager-friendly",
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        report?: AIPersonalReport;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !payload?.ok || !payload.report) {
+        throw new Error(payload?.error || "AI report could not be generated.");
+      }
+
+      setAiReport(payload.report);
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : "AI report could not be generated.");
+    } finally {
+      setIsGeneratingAI(false);
+    }
+  };
+
+  const copyAIReport = async () => {
+    if (!aiReport || !memberName) return;
+
+    try {
+      await navigator.clipboard.writeText(formatAIReportForClipboard(memberName, aiReport));
+      setCopiedAIReport(true);
+      window.setTimeout(() => setCopiedAIReport(false), 1800);
+    } catch {
+      setCopiedAIReport(false);
+      setAiError("Could not copy the AI report. You can still select and copy it manually.");
+    }
   };
 
   const pickerCard = (
@@ -141,21 +351,121 @@ export function PersonalReportPanel({
             </div>
             <div className="mt-1 text-sm font-black">{memberName}</div>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setDraftMemberName(memberName);
-              setIsPickerOpen(true);
-            }}
-            className="tb-action inline-flex h-10 items-center justify-center rounded-2xl bg-muted px-4 text-sm font-bold hover:bg-accent"
-          >
-            Change member
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {report ? (
+              <button
+                type="button"
+                onClick={generateAIReport}
+                disabled={isGeneratingAI}
+                className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isGeneratingAI ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {isGeneratingAI
+                  ? "Generating..."
+                  : aiReport
+                    ? "Regenerate AI report"
+                    : "Improve with AI"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                setDraftMemberName(memberName);
+                setIsPickerOpen(true);
+              }}
+              className="tb-action inline-flex h-10 items-center justify-center rounded-2xl bg-muted px-4 text-sm font-bold hover:bg-accent"
+            >
+              Change member
+            </button>
+          </div>
         </div>
       )}
 
       {report ? (
         <div className="space-y-5">
+          {(aiReport || aiError || isGeneratingAI) && (
+            <section className="rounded-3xl border border-border bg-fun-blue/20 p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="tb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-fun-blue">
+                    <Sparkles className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black">AI Personal Report</h3>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      Written from the dashboard summary only. The original report below stays
+                      available as fallback.
+                    </p>
+                  </div>
+                </div>
+                {aiReport && (
+                  <button
+                    type="button"
+                    onClick={copyAIReport}
+                    className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-background px-4 text-sm font-bold hover:bg-accent"
+                  >
+                    {copiedAIReport ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    {copiedAIReport ? "Copied" : "Copy report"}
+                  </button>
+                )}
+              </div>
+
+              {isGeneratingAI && (
+                <div className="mt-4 flex items-center gap-3 rounded-2xl bg-background/70 px-4 py-3 text-sm font-bold text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Asking OpenRouter to rewrite this into a sharper manager report...
+                </div>
+              )}
+
+              {aiError && (
+                <div className="mt-4 flex items-start gap-3 rounded-2xl bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{aiError} The non-AI report below is still available.</span>
+                </div>
+              )}
+
+              {aiReport && (
+                <div className="mt-4 space-y-4">
+                  <div className="rounded-2xl bg-background/75 px-4 py-3">
+                    <div className="text-xs font-black uppercase tracking-wide text-muted-foreground">
+                      Short performance summary
+                    </div>
+                    <p className="mt-2 text-sm font-semibold leading-7">{aiReport.summary}</p>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <AIReportList title="Key wins" items={aiReport.wins} />
+                    <AIReportList title="Risks / weak spots" items={aiReport.risks} />
+                  </div>
+
+                  <AIReportList title="Suggested next actions" items={aiReport.nextActions} />
+
+                  <div className="rounded-2xl bg-background/75 px-4 py-3">
+                    <div className="text-xs font-black uppercase tracking-wide text-muted-foreground">
+                      Plain-English manager note
+                    </div>
+                    <p className="mt-2 text-sm font-semibold leading-7">{aiReport.managerNote}</p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 text-[11px] font-bold text-muted-foreground">
+                    <span className="rounded-full bg-background/75 px-3 py-1">
+                      Model: {aiReport.modelUsed}
+                    </span>
+                    {aiReport.warnings.map((warning) => (
+                      <span key={warning} className="rounded-full bg-background/75 px-3 py-1">
+                        {warning}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
           <section className="rounded-3xl border border-border bg-background/75 p-5">
             <div className="mb-4 flex items-center gap-2">
               <ClipboardList className="h-4 w-4 text-primary" />

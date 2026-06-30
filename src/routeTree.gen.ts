@@ -23,6 +23,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
 import { Route as ApiSlackDebugRouteImport } from './routes/api/slack-debug'
 import { Route as ApiCalendlyRemindersWebhookRouteImport } from './routes/api/calendly-reminders/webhook'
+import { Route as ApiAiPersonalReportRouteImport } from './routes/api/ai/personal-report'
 
 const TeamMembersRoute = TeamMembersRouteImport.update({
   id: '/team-members',
@@ -95,6 +96,11 @@ const ApiCalendlyRemindersWebhookRoute =
     path: '/api/calendly-reminders/webhook',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiAiPersonalReportRoute = ApiAiPersonalReportRouteImport.update({
+  id: '/api/ai/personal-report',
+  path: '/api/ai/personal-report',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -110,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/team-members': typeof TeamMembersRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
+  '/api/ai/personal-report': typeof ApiAiPersonalReportRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
 }
 export interface FileRoutesByTo {
@@ -126,6 +133,7 @@ export interface FileRoutesByTo {
   '/team-members': typeof TeamMembersRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
+  '/api/ai/personal-report': typeof ApiAiPersonalReportRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
 }
 export interface FileRoutesById {
@@ -143,6 +151,7 @@ export interface FileRoutesById {
   '/team-members': typeof TeamMembersRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
+  '/api/ai/personal-report': typeof ApiAiPersonalReportRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
 }
 export interface FileRouteTypes {
@@ -161,6 +170,7 @@ export interface FileRouteTypes {
     | '/team-members'
     | '/api/slack-debug'
     | '/api/slack-followups'
+    | '/api/ai/personal-report'
     | '/api/calendly-reminders/webhook'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -177,6 +187,7 @@ export interface FileRouteTypes {
     | '/team-members'
     | '/api/slack-debug'
     | '/api/slack-followups'
+    | '/api/ai/personal-report'
     | '/api/calendly-reminders/webhook'
   id:
     | '__root__'
@@ -193,6 +204,7 @@ export interface FileRouteTypes {
     | '/team-members'
     | '/api/slack-debug'
     | '/api/slack-followups'
+    | '/api/ai/personal-report'
     | '/api/calendly-reminders/webhook'
   fileRoutesById: FileRoutesById
 }
@@ -210,6 +222,7 @@ export interface RootRouteChildren {
   TeamMembersRoute: typeof TeamMembersRoute
   ApiSlackDebugRoute: typeof ApiSlackDebugRoute
   ApiSlackFollowupsRoute: typeof ApiSlackFollowupsRoute
+  ApiAiPersonalReportRoute: typeof ApiAiPersonalReportRoute
   ApiCalendlyRemindersWebhookRoute: typeof ApiCalendlyRemindersWebhookRoute
 }
 
@@ -313,6 +326,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCalendlyRemindersWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/ai/personal-report': {
+      id: '/api/ai/personal-report'
+      path: '/api/ai/personal-report'
+      fullPath: '/api/ai/personal-report'
+      preLoaderRoute: typeof ApiAiPersonalReportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -330,6 +350,7 @@ const rootRouteChildren: RootRouteChildren = {
   TeamMembersRoute: TeamMembersRoute,
   ApiSlackDebugRoute: ApiSlackDebugRoute,
   ApiSlackFollowupsRoute: ApiSlackFollowupsRoute,
+  ApiAiPersonalReportRoute: ApiAiPersonalReportRoute,
   ApiCalendlyRemindersWebhookRoute: ApiCalendlyRemindersWebhookRoute,
 }
 export const routeTree = rootRouteImport
