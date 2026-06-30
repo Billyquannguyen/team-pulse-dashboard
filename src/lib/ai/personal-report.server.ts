@@ -64,6 +64,7 @@ function buildSystemPrompt(tone?: string) {
     "Keep the tone practical, direct, manager-friendly, and specific.",
     "Avoid generic motivational fluff.",
     "Explain what the member is doing well, what needs attention, and what Billy should do next.",
+    "Return only valid JSON matching the requested schema. Do not add safety labels, markdown, or commentary outside the JSON object.",
     tone ? `Preferred tone: ${tone}.` : null,
   ]
     .filter(Boolean)

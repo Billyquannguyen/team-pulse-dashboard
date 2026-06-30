@@ -25,6 +25,10 @@ export function getOpenRouterFallbackModel() {
   return getEnv(OPENROUTER_FALLBACK_MODEL_ENV);
 }
 
+export function getOpenRouterSafeFallbackModel() {
+  return DEFAULT_MODEL;
+}
+
 export function getOpenRouterEnvDiagnostics() {
   return [
     { name: OPENROUTER_API_KEY_ENV, exists: Boolean(getEnv(OPENROUTER_API_KEY_ENV)) },
@@ -58,6 +62,49 @@ function extractMessageContent(payload: unknown) {
   return "";
 }
 
+function findJsonObjectText(content: string) {
+  const start = content.indexOf("{");
+
+  if (start === -1) return "";
+
+  let depth = 0;
+  let inString = false;
+  let isEscaped = false;
+
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+
+    if (inString) {
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (char === "\\") {
+        isEscaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return content.slice(start, index + 1);
+      }
+    }
+  }
+
+  return "";
+}
+
 function parseJsonContent<TOutput>(content: string): TOutput {
   const cleaned = content
     .replace(/^```json\s*/i, "")
@@ -65,7 +112,17 @@ function parseJsonContent<TOutput>(content: string): TOutput {
     .replace(/```$/i, "")
     .trim();
 
-  return JSON.parse(cleaned) as TOutput;
+  try {
+    return JSON.parse(cleaned) as TOutput;
+  } catch (error) {
+    const embeddedJson = findJsonObjectText(cleaned);
+
+    if (embeddedJson) {
+      return JSON.parse(embeddedJson) as TOutput;
+    }
+
+    throw new Error("OpenRouter returned text instead of the expected report format.");
+  }
 }
 
 export class OpenRouterProvider implements AIProvider {

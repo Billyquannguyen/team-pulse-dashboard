@@ -2,6 +2,7 @@ import {
   OpenRouterProvider,
   getOpenRouterDefaultModel,
   getOpenRouterFallbackModel,
+  getOpenRouterSafeFallbackModel,
 } from "@/lib/ai/openrouter-provider.server";
 import type { AIChatMessage, AIProvider } from "@/lib/ai/provider";
 
@@ -33,7 +34,8 @@ export class AIService {
   }: GenerateStructuredInput): Promise<AIServiceResult<TOutput>> {
     const defaultModel = getOpenRouterDefaultModel();
     const fallbackModel = getOpenRouterFallbackModel();
-    const models = [defaultModel, fallbackModel].filter(
+    const safeFallbackModel = getOpenRouterSafeFallbackModel();
+    const models = [defaultModel, fallbackModel, safeFallbackModel].filter(
       (model, index, allModels): model is string =>
         Boolean(model) && allModels.indexOf(model) === index,
     );
@@ -61,8 +63,8 @@ export class AIService {
         lastError = error instanceof Error ? error : new Error("Unknown AI provider error.");
         console.error(`[ai-service] ${model} failed: ${lastError.message}`);
 
-        if (model === defaultModel && fallbackModel && fallbackModel !== defaultModel) {
-          warnings.push(`Default model failed, so fallback model was used.`);
+        if (models.length > 1 && model === defaultModel) {
+          warnings.push("Default model failed, so a fallback model was used.");
         }
       }
     }
