@@ -1,16 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  AlertCircle,
-  Award,
-  Check,
-  ClipboardList,
-  Copy,
-  Loader2,
-  Sparkles,
-  Target,
-  TrendingUp,
-  UserRound,
-} from "lucide-react";
+import { AlertCircle, Check, Copy, Loader2, RefreshCw, Sparkles, UserRound } from "lucide-react";
+import Loader from "@/components/ui/loader";
 import { DashboardSelect } from "@/components/ui/dashboard-select";
 import type { Teammate } from "@/data/team";
 import type { GoalSettings } from "@/lib/goal-settings";
@@ -31,35 +21,6 @@ type AIPersonalReport = {
   modelUsed: string;
   warnings: string[];
 };
-
-function MetricPill({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-2xl bg-muted/50 px-4 py-3">
-      <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-1 text-sm font-black">{value}</div>
-    </div>
-  );
-}
-
-function InsightList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <section className="rounded-2xl bg-muted/35 p-4">
-      <h4 className="text-xs font-black uppercase tracking-wide text-muted-foreground">{title}</h4>
-      <div className="mt-3 space-y-2">
-        {items.map((item) => (
-          <div
-            key={item}
-            className="rounded-xl bg-background/75 px-3 py-2 text-sm font-semibold leading-6"
-          >
-            {item}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function getCurrentMonthLabel() {
   return new Date().toLocaleDateString([], { month: "long", year: "numeric" });
@@ -134,7 +95,7 @@ function buildStructuredReportData(
         avgDealValue: roundedAverage(report.metrics.benchmarks.avgDealValue),
       },
     },
-    existingRuleBasedReport: {
+    ruleBasedSignals: {
       bottleneck: report.bottleneck,
       recommendation: report.recommendation,
       positives: report.positives,
@@ -185,11 +146,105 @@ function AIReportList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function AnalysisFact({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-2xl bg-background/70 px-4 py-3 text-left">
+      <div className="text-[11px] font-black uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-black">{value}</div>
+    </div>
+  );
+}
+
+function AIReportLoadingState({
+  memberName,
+  report,
+}: {
+  memberName: string;
+  report: PersonalReport;
+}) {
+  return (
+    <section className="overflow-hidden rounded-3xl border border-border bg-background/75 p-6 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-muted-foreground">
+            <Sparkles className="h-4 w-4 text-primary" />
+            Billy GPT Personal Report
+          </div>
+          <h3 className="mt-2 text-2xl font-black">Analyzing {memberName}</h3>
+          <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-muted-foreground">
+            Reading the dashboard summary, checking progress, wins, risks, and next actions.
+          </p>
+        </div>
+        <div className="rounded-full bg-fun-blue/35 px-4 py-2 text-xs font-black text-foreground">
+          {getCurrentMonthLabel()}
+        </div>
+      </div>
+
+      <div className="relative my-4 min-h-[260px] rounded-3xl bg-muted/25">
+        <Loader />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <AnalysisFact
+          label="Current month closed"
+          value={formatMoney(report.metrics.monthlyCurrent)}
+        />
+        <AnalysisFact label="Closed deals" value={report.metrics.dealCount} />
+        <AnalysisFact label="Creators sourced" value={report.metrics.creatorsSourced} />
+        <AnalysisFact label="Replies" value={report.metrics.replies} />
+      </div>
+    </section>
+  );
+}
+
+function AIReportErrorState({
+  error,
+  onRetry,
+  isGenerating,
+}: {
+  error: string;
+  onRetry: () => void;
+  isGenerating: boolean;
+}) {
+  return (
+    <section className="rounded-3xl border border-destructive/25 bg-destructive/10 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-background/80">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+          </div>
+          <div>
+            <h3 className="text-sm font-black text-destructive">AI report could not generate</h3>
+            <p className="mt-2 text-sm font-semibold leading-6 text-destructive/85">{error}</p>
+            <p className="mt-2 text-sm font-semibold leading-6 text-muted-foreground">
+              The dashboard data is still safe. Fix the OpenRouter model or credits, then retry.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={isGenerating}
+          className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isGenerating ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          Retry AI report
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function PersonalReportPanel({
   members,
   data,
   settings,
-  isAdmin,
 }: {
   members: Teammate[];
   data: DashboardSheetData | undefined;
@@ -316,8 +371,7 @@ export function PersonalReportPanel({
         <div>
           <h3 className="text-base font-black">Choose report member</h3>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
-            Personal reports are private. Pick the member first, then Billy will show that report
-            only.
+            Pick the member first. Billy GPT will analyze their dashboard data automatically.
           </p>
         </div>
       </div>
@@ -351,7 +405,7 @@ export function PersonalReportPanel({
           disabled={!draftMemberName}
           className="tb-action inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Show report
+          Generate report
         </button>
       </div>
     </section>
@@ -376,7 +430,7 @@ export function PersonalReportPanel({
             <div className="mt-1 text-sm font-black">{memberName}</div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {report ? (
+            {report && aiReport ? (
               <button
                 type="button"
                 onClick={generateAIReport}
@@ -386,13 +440,9 @@ export function PersonalReportPanel({
                 {isGeneratingAI ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Sparkles className="h-4 w-4" />
+                  <RefreshCw className="h-4 w-4" />
                 )}
-                {isGeneratingAI
-                  ? "Generating..."
-                  : aiReport
-                    ? "Regenerate AI report"
-                    : "Generate AI report"}
+                Regenerate AI report
               </button>
             ) : null}
             <button
@@ -409,371 +459,83 @@ export function PersonalReportPanel({
         </div>
       )}
 
-      {report ? (
-        <div className="space-y-5">
-          {(aiReport || aiError || isGeneratingAI) && (
-            <section className="rounded-3xl border border-border bg-fun-blue/20 p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="tb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-fun-blue">
-                    <Sparkles className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black">AI Personal Report</h3>
-                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                      Generated from this member's dashboard summary only. The original report below
-                      stays available as fallback.
-                    </p>
-                  </div>
-                </div>
-                {aiReport && (
-                  <button
-                    type="button"
-                    onClick={copyAIReport}
-                    className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-background px-4 text-sm font-bold hover:bg-accent"
-                  >
-                    {copiedAIReport ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    {copiedAIReport ? "Copied" : "Copy report"}
-                  </button>
-                )}
+      {report && isGeneratingAI ? (
+        <AIReportLoadingState memberName={memberName} report={report} />
+      ) : null}
+
+      {report && !isGeneratingAI && aiError ? (
+        <AIReportErrorState
+          error={aiError}
+          onRetry={generateAIReport}
+          isGenerating={isGeneratingAI}
+        />
+      ) : null}
+
+      {report && !isGeneratingAI && aiReport ? (
+        <section className="rounded-3xl border border-border bg-fun-blue/20 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="tb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-fun-blue">
+                <Sparkles className="h-5 w-5" />
               </div>
-
-              {isGeneratingAI && (
-                <div className="mt-4 flex items-center gap-3 rounded-2xl bg-background/70 px-4 py-3 text-sm font-bold text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Generating a manager-ready report from the dashboard data...
-                </div>
-              )}
-
-              {aiError && (
-                <div className="mt-4 flex items-start gap-3 rounded-2xl bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{aiError} The non-AI report below is still available.</span>
-                </div>
-              )}
-
-              {aiReport && (
-                <div className="mt-4 space-y-4">
-                  <div className="rounded-2xl bg-background/75 px-4 py-3">
-                    <div className="text-xs font-black uppercase tracking-wide text-muted-foreground">
-                      Short performance summary
-                    </div>
-                    <p className="mt-2 text-sm font-semibold leading-7">{aiReport.summary}</p>
-                  </div>
-
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <AIReportList title="Key wins" items={aiReport.wins} />
-                    <AIReportList title="Risks / weak spots" items={aiReport.risks} />
-                  </div>
-
-                  <AIReportList title="Suggested next actions" items={aiReport.nextActions} />
-
-                  <div className="rounded-2xl bg-background/75 px-4 py-3">
-                    <div className="text-xs font-black uppercase tracking-wide text-muted-foreground">
-                      Plain-English manager note
-                    </div>
-                    <p className="mt-2 text-sm font-semibold leading-7">{aiReport.managerNote}</p>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 text-[11px] font-bold text-muted-foreground">
-                    <span className="rounded-full bg-background/75 px-3 py-1">
-                      Model: {aiReport.modelUsed}
-                    </span>
-                    {aiReport.warnings.map((warning) => (
-                      <span key={warning} className="rounded-full bg-background/75 px-3 py-1">
-                        {warning}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </section>
-          )}
-
-          <section className="rounded-3xl border border-border bg-background/75 p-5">
-            <div className="mb-4 flex items-center gap-2">
-              <ClipboardList className="h-4 w-4 text-primary" />
-              <h3 className="text-sm font-black">Performance Snapshot</h3>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <MetricPill
-                label="Monthly commission"
-                value={`${report.metrics.monthlyProgress}% · ${formatMoney(report.metrics.monthlyCurrent)} / ${formatMoney(report.metrics.monthlyTarget)}`}
-              />
-              <MetricPill
-                label="Long-term progression"
-                value={`${report.metrics.progressionProgress}% · ${formatMoney(report.metrics.progressionCurrent)} / ${formatMoney(report.metrics.progressionTarget)}`}
-              />
-              <MetricPill
-                label="Exclusive goal"
-                value={`${report.metrics.exclusiveProgress}% · ${report.metrics.exclusiveCreatorCount} / ${report.metrics.exclusiveTarget}`}
-              />
-              <MetricPill
-                label="Team rank"
-                value={report.metrics.teamRank ? `#${report.metrics.teamRank}` : "Not enough data"}
-              />
-              <MetricPill
-                label="Revenue efficiency"
-                value={
-                  report.metrics.revenueEfficiency === null
-                    ? "Not enough creator data yet"
-                    : `${formatMoney(report.metrics.revenueEfficiency)} / creator`
-                }
-              />
-            </div>
-            <div className="mt-3 text-xs font-semibold text-muted-foreground">
-              Snapshot date: {report.snapshotDate} · Member: {report.memberName}
-            </div>
-            <div className="mt-4 border-t border-border pt-4">
-              <div className="mb-3 text-xs font-black uppercase tracking-wide text-muted-foreground">
-                Outreach pipeline
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                <MetricPill label="Creators sourced" value={report.metrics.creatorsSourced} />
-                <MetricPill
-                  label="Reply rate"
-                  value={`${report.metrics.replyRate}% · avg ${Math.round(report.metrics.benchmarks.avgReplyRate)}%`}
-                />
-                <MetricPill
-                  label="Booking rate"
-                  value={`${report.metrics.bookingRate}% · avg ${Math.round(report.metrics.benchmarks.avgBookingRate)}%`}
-                />
-                <MetricPill
-                  label="Call closing"
-                  value={`${report.metrics.callClosingRate}% · avg ${Math.round(report.metrics.benchmarks.avgCallClosingRate)}%`}
-                />
-                <MetricPill label="Top niche" value={report.metrics.topNiche || "-"} />
+              <div>
+                <h3 className="text-sm font-black">AI Personal Report</h3>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Generated from this member's dashboard summary only.
+                </p>
               </div>
             </div>
-          </section>
-
-          <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-            <section className="rounded-3xl border border-border bg-fun-lime/30 p-5">
-              <h3 className="text-sm font-black">What You’re Doing Well</h3>
-              <div className="mt-3 space-y-2">
-                {report.positives.map((insight) => (
-                  <div
-                    key={insight}
-                    className="rounded-2xl bg-background/75 px-4 py-3 text-sm font-semibold"
-                  >
-                    {insight}
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-3xl border border-border bg-fun-yellow/30 p-5">
-              <div className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-primary" />
-                <h3 className="text-sm font-black">Main Bottleneck</h3>
-              </div>
-              <div className="mt-3 text-xl font-black">{report.bottleneck}</div>
-              <p className="mt-2 text-sm font-semibold text-muted-foreground">
-                Recommendation: {report.recommendation}
-              </p>
-            </section>
+            <button
+              type="button"
+              onClick={copyAIReport}
+              className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-background px-4 text-sm font-bold hover:bg-accent"
+            >
+              {copiedAIReport ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copiedAIReport ? "Copied" : "Copy report"}
+            </button>
           </div>
 
-          <section className="rounded-3xl border border-border bg-background/75 p-5">
-            <h3 className="text-sm font-black">Why Billy Thinks This</h3>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {report.evidence.map((item) => (
-                <div key={item} className="rounded-2xl bg-muted/45 px-4 py-3 text-sm font-semibold">
-                  {item}
-                </div>
+          <div className="mt-4 space-y-4">
+            <div className="rounded-2xl bg-background/75 px-4 py-3">
+              <div className="text-xs font-black uppercase tracking-wide text-muted-foreground">
+                Short performance summary
+              </div>
+              <p className="mt-2 text-sm font-semibold leading-7">{aiReport.summary}</p>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <AIReportList title="Key wins" items={aiReport.wins} />
+              <AIReportList title="Risks / weak spots" items={aiReport.risks} />
+            </div>
+
+            <AIReportList title="Suggested next actions" items={aiReport.nextActions} />
+
+            <div className="rounded-2xl bg-background/75 px-4 py-3">
+              <div className="text-xs font-black uppercase tracking-wide text-muted-foreground">
+                Plain-English manager note
+              </div>
+              <p className="mt-2 text-sm font-semibold leading-7">{aiReport.managerNote}</p>
+            </div>
+
+            <div className="flex flex-wrap gap-2 text-[11px] font-bold text-muted-foreground">
+              <span className="rounded-full bg-background/75 px-3 py-1">
+                Model: {aiReport.modelUsed}
+              </span>
+              {aiReport.warnings.map((warning) => (
+                <span key={warning} className="rounded-full bg-background/75 px-3 py-1">
+                  {warning}
+                </span>
               ))}
             </div>
-          </section>
+          </div>
+        </section>
+      ) : null}
 
-          <section className="rounded-3xl border border-border bg-fun-pink/25 p-5">
-            <div className="flex items-center gap-2">
-              <Award className="h-4 w-4 text-primary" />
-              <h3 className="text-sm font-black">Your Superpower</h3>
-            </div>
-            <div className="mt-3 text-xl font-black">{report.superpowerInsight.title}</div>
-            <p className="mt-2 text-sm leading-7 text-muted-foreground">
-              {report.superpowerInsight.observation}
-            </p>
-          </section>
-
-          <section className="rounded-3xl border border-border bg-background/75 p-5">
-            <h3 className="text-sm font-black">Billy’s Observation</h3>
-            <p className="mt-3 text-sm leading-7 text-muted-foreground">{report.observation}</p>
-          </section>
-
-          <section className="rounded-3xl border border-border bg-background/75 p-5">
-            <div className="mb-3 flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-primary" />
-              <h3 className="text-sm font-black">This Week’s Priorities</h3>
-            </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              {report.priorities.map((priority, index) => (
-                <div
-                  key={priority}
-                  className="rounded-2xl bg-muted/45 p-4 text-sm font-semibold leading-6"
-                >
-                  <span className="mb-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-black text-primary-foreground">
-                    {index + 1}
-                  </span>
-                  <div>{priority}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <details className="rounded-3xl border border-border bg-background/75 p-5">
-            <summary className="cursor-pointer text-sm font-black">See More Insights</summary>
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <InsightList title="Extra analysis" items={report.extraInsights} />
-              <InsightList
-                title="Selected supporting insight"
-                items={
-                  report.supportingInsight
-                    ? [
-                        `${report.supportingInsight.title}: ${report.supportingInsight.observation}`,
-                        `Recommended focus: ${report.supportingInsight.recommendation ?? report.supportingInsight.actions[0]}`,
-                      ]
-                    : ["No secondary issue is stronger than the main finding right now."]
-                }
-              />
-              <InsightList
-                title="Selected opportunity insight"
-                items={
-                  report.opportunityInsight
-                    ? [
-                        `${report.opportunityInsight.title}: ${report.opportunityInsight.observation}`,
-                        `Opportunity: ${report.opportunityInsight.recommendation ?? report.opportunityInsight.actions[0]}`,
-                      ]
-                    : ["No separate opportunity insight is strong enough yet."]
-                }
-              />
-              <InsightList
-                title="Top brands"
-                items={
-                  report.metrics.topBrands.length > 0
-                    ? report.metrics.topBrands.map(
-                        (brand) =>
-                          `${brand.brand}: ${formatMoney(brand.value)} from ${brand.deals} deal${brand.deals === 1 ? "" : "s"}`,
-                      )
-                    : ["No brand value data yet."]
-                }
-              />
-              <InsightList
-                title="Platform mix"
-                items={
-                  report.metrics.platformMix.length > 0
-                    ? report.metrics.platformMix.map(
-                        (platform) =>
-                          `${platform.platform}: ${formatMoney(platform.value)} from ${platform.count} deal${platform.count === 1 ? "" : "s"}`,
-                      )
-                    : ["No platform mix data yet."]
-                }
-              />
-              <InsightList
-                title="Outreach metrics"
-                items={[
-                  `Creators sourced: ${report.metrics.creatorsSourced} vs team average ${roundedAverage(report.metrics.benchmarks.avgCreatorsSourced)}.`,
-                  `Emails sent: ${report.metrics.emailsSent} and IG outreach: ${report.metrics.igOutreach}.`,
-                  `Replies: ${report.metrics.replies}, calls: ${report.metrics.bookedCalls}, signed/partnered: ${report.metrics.signed}.`,
-                  `Overall closing: ${report.metrics.overallClosingRate}% vs team average ${Math.round(report.metrics.benchmarks.avgOverallClosingRate)}%.`,
-                ]}
-              />
-              <InsightList
-                title="Underused creators"
-                items={
-                  report.metrics.inactiveCreators.length > 0
-                    ? report.metrics.inactiveCreators
-                        .slice(0, 6)
-                        .map(
-                          (creator) => `${creator.displayName}: no matched deal contribution yet.`,
-                        )
-                    : ["No inactive exclusive creators detected from the matched data."]
-                }
-              />
-            </div>
-          </details>
-
-          {isAdmin && (
-            <details className="rounded-3xl border border-dashed border-border bg-muted/30 p-5">
-              <summary className="cursor-pointer text-sm font-black">Admin diagnostics</summary>
-              <div className="mt-4 grid gap-3 text-xs font-semibold text-muted-foreground md:grid-cols-2">
-                <MetricPill label="Member selected" value={report.diagnostics.memberSelected} />
-                <MetricPill label="Deals matched" value={report.diagnostics.dealsMatchedToMember} />
-                <MetricPill
-                  label="Exclusive creators"
-                  value={report.diagnostics.exclusiveCreatorsMatchedToMember}
-                />
-                <MetricPill
-                  label="Fuzzy matches"
-                  value={report.diagnostics.fuzzyMatchesUsed.length}
-                />
-                <MetricPill label="Superpower" value={report.superpowerInsight.title} />
-              </div>
-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                <InsightList
-                  title="Creators with no deal match"
-                  items={
-                    report.diagnostics.creatorsWithNoDealMatch.length > 0
-                      ? report.diagnostics.creatorsWithNoDealMatch
-                      : ["None flagged."]
-                  }
-                />
-                <InsightList
-                  title="Missing data warnings"
-                  items={
-                    report.diagnostics.missingDataWarnings.length > 0
-                      ? report.diagnostics.missingDataWarnings
-                      : ["No missing data warnings."]
-                  }
-                />
-                <InsightList
-                  title="Fuzzy matches used"
-                  items={
-                    report.diagnostics.fuzzyMatchesUsed.length > 0
-                      ? report.diagnostics.fuzzyMatchesUsed.map(
-                          (match) =>
-                            `${match.dealCreator} → ${match.matchedCreator} · ${match.brand} · ${match.confidence}%`,
-                        )
-                      : ["No fuzzy matches used."]
-                  }
-                />
-                <InsightList
-                  title="Triggered rule scores"
-                  items={
-                    report.diagnostics.triggeredRules.length > 0
-                      ? report.diagnostics.triggeredRules
-                      : [
-                          "No scored rule was triggered, so Billy used the baseline activity fallback.",
-                        ]
-                  }
-                />
-                <InsightList
-                  title="Outreach parser metrics"
-                  items={[
-                    `Creators sourced: ${report.diagnostics.outreachMetrics.creatorsSourced}`,
-                    `Contacted: ${report.diagnostics.outreachMetrics.contacted}`,
-                    `Emails sent: ${report.diagnostics.outreachMetrics.emailsSent}`,
-                    `IG outreach: ${report.diagnostics.outreachMetrics.igOutreach}`,
-                    `Reply / booking / call closing: ${report.diagnostics.outreachMetrics.replyRate}% / ${report.diagnostics.outreachMetrics.bookingRate}% / ${report.diagnostics.outreachMetrics.callClosingRate}%`,
-                  ]}
-                />
-                <InsightList
-                  title="Unmatched exclusive creators"
-                  items={
-                    report.diagnostics.unmatchedCreators.length > 0
-                      ? report.diagnostics.unmatchedCreators.map((creator) => creator.creator)
-                      : ["None flagged."]
-                  }
-                />
-              </div>
-            </details>
-          )}
-        </div>
-      ) : (
+      {memberName && !report ? (
         <div className="rounded-3xl border border-border bg-background/75 p-6 text-sm font-bold text-muted-foreground">
           No member data available yet.
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
