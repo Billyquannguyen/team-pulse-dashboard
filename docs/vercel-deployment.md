@@ -41,7 +41,7 @@ OPENAI_API_KEY=your_openai_api_key
 OPENAI_CONTRACT_REVIEW_MODEL=gpt-5.4-mini
 OPENROUTER_API_KEY=your_openrouter_api_key
 OPENROUTER_DEFAULT_MODEL=your_preferred_openrouter_model
-OPENROUTER_FALLBACK_MODEL=your_backup_openrouter_model
+OPENROUTER_FALLBACK_MODEL=optional_backup_model
 SLACK_USER_TOKEN=xoxp-your-personal-user-token
 SLACK_OWNER_USER_ID=your_slack_user_id
 SLACK_BOT_TOKEN=xoxb-your-bot-token-if-used
@@ -63,7 +63,7 @@ Notion credentials are server-side only too. Billy GPT reads the handbook throug
 
 OpenAI credentials are server-side only. Billy GPT uses `OPENAI_API_KEY` for clean assistant responses and PDF contract review. `OPENAI_CONTRACT_REVIEW_MODEL` is optional and defaults to `gpt-5.4-mini`.
 
-OpenRouter credentials are server-side only. Billy GPT Personal Report uses `OPENROUTER_API_KEY` to rewrite the existing rule-based report into a clearer manager summary. `OPENROUTER_DEFAULT_MODEL` is the first model tried. `OPENROUTER_FALLBACK_MODEL` is optional and is used only if the default model fails. The browser never receives the OpenRouter key.
+OpenRouter credentials are server-side only. Billy GPT Personal Report uses `OPENROUTER_API_KEY` to rewrite the existing rule-based report into a clearer manager summary. `OPENROUTER_DEFAULT_MODEL` is required and is the first model tried. `OPENROUTER_FALLBACK_MODEL` is optional and is used only if the default model fails. If you want to use a free OpenRouter model, use a free model slug from OpenRouter, usually one ending in `:free`, and do not set a paid fallback model. The browser never receives the OpenRouter key.
 
 After adding or changing env vars in Vercel, redeploy the project.
 

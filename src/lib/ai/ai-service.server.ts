@@ -2,7 +2,6 @@ import {
   OpenRouterProvider,
   getOpenRouterDefaultModel,
   getOpenRouterFallbackModel,
-  getOpenRouterSafeFallbackModel,
 } from "@/lib/ai/openrouter-provider.server";
 import type { AIChatMessage, AIProvider } from "@/lib/ai/provider";
 
@@ -34,13 +33,16 @@ export class AIService {
   }: GenerateStructuredInput): Promise<AIServiceResult<TOutput>> {
     const defaultModel = getOpenRouterDefaultModel();
     const fallbackModel = getOpenRouterFallbackModel();
-    const safeFallbackModel = getOpenRouterSafeFallbackModel();
-    const models = [defaultModel, fallbackModel, safeFallbackModel].filter(
+    const models = [defaultModel, fallbackModel].filter(
       (model, index, allModels): model is string =>
         Boolean(model) && allModels.indexOf(model) === index,
     );
     const warnings: string[] = [];
     let lastError: Error | null = null;
+
+    if (models.length === 0) {
+      throw new Error("OPENROUTER_DEFAULT_MODEL is missing.");
+    }
 
     for (const model of models) {
       try {

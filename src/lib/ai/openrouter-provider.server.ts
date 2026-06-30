@@ -4,7 +4,6 @@ const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY";
 const OPENROUTER_DEFAULT_MODEL_ENV = "OPENROUTER_DEFAULT_MODEL";
 const OPENROUTER_FALLBACK_MODEL_ENV = "OPENROUTER_FALLBACK_MODEL";
-const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_TIMEOUT_MS = 25_000;
 
 type OpenRouterChoice = {
@@ -18,15 +17,11 @@ function getEnv(name: string) {
 }
 
 export function getOpenRouterDefaultModel() {
-  return getEnv(OPENROUTER_DEFAULT_MODEL_ENV) || DEFAULT_MODEL;
+  return getEnv(OPENROUTER_DEFAULT_MODEL_ENV);
 }
 
 export function getOpenRouterFallbackModel() {
   return getEnv(OPENROUTER_FALLBACK_MODEL_ENV);
-}
-
-export function getOpenRouterSafeFallbackModel() {
-  return DEFAULT_MODEL;
 }
 
 export function getOpenRouterEnvDiagnostics() {
