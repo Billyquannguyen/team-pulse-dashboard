@@ -1167,6 +1167,7 @@ async function readDashboardSheetData(
   };
   const teamMembersData = await getTeamMembersDataForServer();
   const activeMembers = teamMembersData.activeMembers;
+  const dealHistoryMembers = teamMembersData.members;
 
   if (debug) {
     debug.teamMembers = {
@@ -1184,7 +1185,7 @@ async function readDashboardSheetData(
   const sheets = await readConfiguredDealMemberSheets(
     config,
     config.teamSpreadsheetId,
-    activeMembers,
+    dealHistoryMembers,
     debug,
   );
   logDashboardDataFlow("deal sheet rows returned", {
@@ -1233,6 +1234,7 @@ async function readDashboardSheetData(
 
   logDashboardDataFlow("dashboard data loaded from google sheets", {
     teamMembers: team.length,
+    dealHistoryMembers: dealHistoryMembers.length,
     deals: deals.length,
     creators: creatorData.creators.length,
     outreachMembers: creatorData.outreach.members.length,

@@ -4,6 +4,7 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { team as fallbackTeam } from "@/data/team";
 import { deals as fallbackDeals, isActiveDashboardDeal } from "@/data/deals";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
+import { canonicalMemberName } from "@/lib/sheet-normalizer";
 import { BarChart3, Trophy } from "lucide-react";
 import { TeamAvatar } from "@/components/ui/team-avatar";
 import {
@@ -92,7 +93,11 @@ function LeaderboardPage() {
     currentMonth: member.monthCommission,
   }));
   const deals = data?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
-  const activeDeals = deals.filter(isActiveDashboardDeal);
+  const activeMemberNames = new Set(team.map((member) => canonicalMemberName(member.name)));
+  const activeDeals = deals.filter(
+    (deal) =>
+      isActiveDashboardDeal(deal) && activeMemberNames.has(canonicalMemberName(deal.manager)),
+  );
   const topDeals = [...activeDeals]
     .sort((a, b) => b.totalPricingGbp - a.totalPricingGbp)
     .slice(0, 5);

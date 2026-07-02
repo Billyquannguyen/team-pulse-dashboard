@@ -131,7 +131,11 @@ function TeamMembersPage() {
   const [adminError, setAdminError] = useState("");
   const [isUnlocking, setIsUnlocking] = useState(false);
   const members = useMemo(() => data?.members ?? [], [data?.members]);
-  const activeCount = members.filter((member) => member.status === "active").length;
+  const activeMembers = useMemo(
+    () => members.filter((member) => member.status === "active"),
+    [members],
+  );
+  const activeCount = activeMembers.length;
   const isAdmin = auth.role === "admin";
 
   const refresh = async () => {
@@ -433,15 +437,28 @@ function TeamMembersPage() {
             </button>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {members.map((member) => (
-              <MemberProfileCard
-                key={`${member.id}-${member.rowNumber ?? "profile"}`}
-                member={member}
-                onEdit={() => setProfileModal({ member })}
-              />
-            ))}
-          </div>
+          {activeMembers.length > 0 ? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {activeMembers.map((member) => (
+                <MemberProfileCard
+                  key={`${member.id}-${member.rowNumber ?? "profile"}`}
+                  member={member}
+                  onEdit={() => setProfileModal({ member })}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-3xl bg-card p-8 text-center ring-1 ring-border">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
+                <UserRound className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <h3 className="mt-4 text-base font-black">No active member profiles.</h3>
+              <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+                Offboarded members are still available in Manage members, but they stay hidden from
+                the profile cards.
+              </p>
+            </div>
+          )}
           <div className="rounded-3xl bg-card p-4 text-sm font-semibold text-muted-foreground ring-1 ring-border">
             <div className="flex gap-3">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-fun-yellow">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
 import {
   Bot,
   CalendarDays,
@@ -222,6 +223,7 @@ function buildMeetingMemberOptions(members: Teammate[]): MeetingMemberOption[] {
 }
 
 function MeetingMemoryPanel({ members }: { members: MeetingMemberOption[] }) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { data: topicsData, isLoading } = useQuery(meetingTopicsQuery);
   const [mode, setMode] = useState<MeetingMode>("menu");
@@ -264,7 +266,15 @@ function MeetingMemoryPanel({ members }: { members: MeetingMemberOption[] }) {
         ]);
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save the meeting topic.");
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      if (errorMessage.toLowerCase().includes("unauthorized")) {
+        setMessage("Your login session expired. Please log in again to save meeting notes.");
+        await router.invalidate();
+        return;
+      }
+
+      setMessage(errorMessage || "Could not save the meeting topic.");
     } finally {
       setSaving(false);
     }
@@ -575,9 +585,9 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
                       ? "Team Assets sheet"
                       : diagnostics.storageMode === "redis"
                         ? "Redis"
-                      : diagnostics.storageMode === "local-dev"
-                        ? "Local dev server memory"
-                        : "Not configured"
+                        : diagnostics.storageMode === "local-dev"
+                          ? "Local dev server memory"
+                          : "Not configured"
                     : "checking"}
                 </span>
               </div>
