@@ -5,17 +5,13 @@ import {
   Check,
   Copy,
   Database,
-  FileSpreadsheet,
-  Inbox,
   ListPlus,
   Loader2,
-  Mail,
   RotateCcw,
   Search,
   Send,
   Trash2,
   Upload,
-  UsersRound,
 } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { DashboardSelectField } from "@/components/ui/dashboard-select";
@@ -54,42 +50,22 @@ Would you be open to reviewing this?
 const TEMPLATE_FIELDS = ["contact_first_name", "brand_name"] as const;
 
 const DEFAULT_JOB_TITLES = [
-  "Influencer Marketing Manager",
-  "Creator Partnerships Manager",
-  "Brand Partnerships Manager",
-  "Affiliate Manager",
-  "PR Manager",
-  "Social Media Manager",
-  "Brand Manager",
-  "Growth Marketing Manager",
-  "Head of Marketing",
-  "Founder",
-];
-
-const DEFAULT_KEYWORDS = [
   "influencer marketing",
+  "account manager",
   "creator partnerships",
-  "brand partnerships",
-  "public relations",
-  "social media",
 ];
 
-const DEFAULT_SENIORITY = ["manager", "director", "head", "founder", "owner"];
+const DEFAULT_EXCLUDE_TITLES = ["SEO", "Digital Marketing", "Analyst", "performance marketing"];
+const DEFAULT_DEPARTMENTS = ["marketing"];
 const DEFAULT_EMAIL_STATUSES = ["verified", "likely to engage"];
-
-const WORKFLOW_STEPS = [
-  { label: "Upload", detail: "Dream sheet", icon: Upload },
-  { label: "Check", detail: "Saved contacts", icon: Database },
-  { label: "Search", detail: "Apollo", icon: Search },
-  { label: "Draft", detail: "Gmail", icon: Send },
-] as const;
 
 type TemplateTarget = "subject" | "body";
 type BrandStatus = "unknown" | "none" | "database";
 
 type ApolloFilterState = {
   jobTitlesText: string;
-  keywordsText: string;
+  excludeTitlesText: string;
+  departmentsText: string;
   seniorityText: string;
   emailStatusesText: string;
   includeSimilarTitles: boolean;
@@ -143,11 +119,12 @@ type SavedBrandFinderState = {
 
 const DEFAULT_FILTER_STATE: ApolloFilterState = {
   jobTitlesText: DEFAULT_JOB_TITLES.join("\n"),
-  keywordsText: DEFAULT_KEYWORDS.join("\n"),
-  seniorityText: DEFAULT_SENIORITY.join("\n"),
+  excludeTitlesText: DEFAULT_EXCLUDE_TITLES.join("\n"),
+  departmentsText: DEFAULT_DEPARTMENTS.join("\n"),
+  seniorityText: "",
   emailStatusesText: DEFAULT_EMAIL_STATUSES.join("\n"),
   includeSimilarTitles: true,
-  maxContactsPerBrand: 3,
+  maxContactsPerBrand: 2,
   requireEmail: true,
   enrichEmails: true,
 };
@@ -650,27 +627,27 @@ function BrandFinderPage() {
         left.contactName.localeCompare(right.contactName),
     );
   }, [databaseContacts, directSearchBrands, directSearchTerms]);
+  const approvalContacts = useMemo(
+    () => mergeContacts(mergeContacts(contacts, directSearchContacts), savedDraftContacts),
+    [contacts, directSearchContacts, savedDraftContacts],
+  );
   const brandOptions = useMemo(
     () => [
       ALL_BRANDS,
-      ...Array.from(new Set(contacts.map((contact) => contact.brandName)))
+      ...Array.from(new Set(approvalContacts.map((contact) => contact.brandName)))
         .filter(Boolean)
         .sort((a, b) => a.localeCompare(b)),
     ],
-    [contacts],
+    [approvalContacts],
   );
-  const filteredContacts = useMemo(() => {
-    return contacts.filter((contact) => {
+  const filteredApprovalContacts = useMemo(() => {
+    return approvalContacts.filter((contact) => {
       return brandFilter === ALL_BRANDS || contact.brandName === brandFilter;
     });
-  }, [brandFilter, contacts]);
+  }, [approvalContacts, brandFilter]);
   const selectedApolloContacts = useMemo(
     () => contacts.filter((contact) => selectedContactIds.has(contact.id)),
     [contacts, selectedContactIds],
-  );
-  const directSelectedContacts = useMemo(
-    () => directSearchContacts.filter((contact) => directSelectedContactIds.has(contact.id)),
-    [directSearchContacts, directSelectedContactIds],
   );
   const selectedDraftCandidates = useMemo(
     () => mergeContacts(selectedApolloContacts, savedDraftContacts),
@@ -684,17 +661,22 @@ function BrandFinderPage() {
   const duplicateContactCount = contacts.filter((contact) =>
     Boolean(contactDuplicateLabel(contact, databaseContacts)),
   ).length;
+  const savedDraftContactIds = useMemo(
+    () => new Set(savedDraftContacts.map((contact) => contact.id)),
+    [savedDraftContacts],
+  );
+  const estimatedApolloEmailReveals = selectedBrands.length * filters.maxContactsPerBrand;
 
   useEffect(() => {
     const saved = readSavedState();
+    const savedFilters = saved.filters ?? {};
+    const hasCurrentFilterShape =
+      "excludeTitlesText" in savedFilters && "departmentsText" in savedFilters;
     setSheetInput(saved.sheetInput ?? "");
     setSheetFileName(saved.sheetFileName ?? "");
     setSubjectTemplate(saved.subjectTemplate ?? DEFAULT_SUBJECT_TEMPLATE);
     setBodyTemplate(saved.bodyTemplate ?? DEFAULT_BODY_TEMPLATE);
-    setFilters({
-      ...DEFAULT_FILTER_STATE,
-      ...(saved.filters ?? {}),
-    });
+    setFilters(hasCurrentFilterShape ? { ...DEFAULT_FILTER_STATE, ...savedFilters } : DEFAULT_FILTER_STATE);
     setBrandOverrides(saved.brandOverrides ?? {});
     setBrandSearchOverrides(saved.brandSearchOverrides ?? {});
     setDirectSearchBrandIds(new Set(saved.directSearchBrandIds ?? []));
@@ -852,16 +834,6 @@ function BrandFinderPage() {
     });
   };
 
-  const addSelectedSavedContacts = () => {
-    const items = directSelectedContacts;
-    const withEmails = items.filter((contact) => contact.email);
-    if (withEmails.length === 0) return;
-
-    setSavedDraftContacts((current) => mergeContacts(current, withEmails));
-    setDraftMessage(`${withEmails.length} saved contact${withEmails.length === 1 ? "" : "s"} added for draft creation.`);
-    setDraftError("");
-  };
-
   const setDirectContactSelected = (contact: ContactRow, checked: boolean) => {
     setDirectSelectedContactIds((current) => {
       const next = new Set(current);
@@ -872,6 +844,29 @@ function BrandFinderPage() {
       }
       return next;
     });
+  };
+
+  const setApprovalContactSelected = (contact: ContactRow, checked: boolean) => {
+    if (contact.source === "Contact Database") {
+      setDirectContactSelected(contact, checked);
+      setSavedDraftContacts((current) => {
+        if (checked) return mergeContacts(current, [contact]);
+        return current.filter((item) => item.id !== contact.id);
+      });
+      setDraftError("");
+      return;
+    }
+
+    setContactSelected(contact.id, checked);
+  };
+
+  const isApprovalContactSelected = (contact: ContactRow) => {
+    if (contact.source === "Contact Database") return savedDraftContactIds.has(contact.id);
+    return selectedContactIds.has(contact.id);
+  };
+
+  const resetApolloRules = () => {
+    setFilters(DEFAULT_FILTER_STATE);
   };
 
   const runApolloSearch = async () => {
@@ -903,7 +898,8 @@ function BrandFinderPage() {
           })),
           filters: {
             jobTitles: splitList(filters.jobTitlesText),
-            keywords: splitList(filters.keywordsText),
+            excludeTitles: splitList(filters.excludeTitlesText),
+            departments: splitList(filters.departmentsText),
             seniority: splitList(filters.seniorityText),
             emailStatuses: splitList(filters.emailStatusesText),
             includeSimilarTitles: filters.includeSimilarTitles,
@@ -998,49 +994,30 @@ function BrandFinderPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <AppHeader
         title="Brand Finder"
         subtitle="Upload dream brands, run Apollo, select contacts, and create Gmail drafts."
       />
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <MetricTile
-          label="Brands parsed"
-          value={metricValue(brands.length)}
-          icon={FileSpreadsheet}
-        />
-        <MetricTile
-          label="Brands selected"
-          value={metricValue(selectedBrands.length)}
-          icon={Inbox}
-        />
-        <MetricTile label="Contacts found" value={metricValue(contacts.length)} icon={UsersRound} />
-        <MetricTile
-          label="Duplicate flags"
-          value={metricValue(duplicateContactCount)}
-          icon={Database}
-        />
-        <MetricTile
-          label="Selected contacts"
-          value={metricValue(selectedContacts.length)}
-          icon={Mail}
-        />
-      </section>
-
-      <WorkflowStrip
-        parsedCount={brands.length}
-        queuedCount={directSearchBrandIds.size}
-        apolloCount={contacts.length}
-        draftCount={selectedContacts.length}
+      <CompactStatusBar
+        items={[
+          ["Brands", brands.length],
+          ["Selected", selectedBrands.length],
+          ["Saved matches", directSearchContacts.length],
+          ["Apollo", contacts.length],
+          ["Drafts", selectedContacts.length],
+        ]}
       />
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.42fr)] 2xl:grid-cols-[minmax(0,1fr)_420px]">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_390px]">
         <div className="min-w-0 space-y-4">
           <Panel
-            title="Dream brand sheet"
+            title="Dream Brands"
             subtitle={
-              sheetFileName ? sheetFileName : "Upload CSV/TSV export or paste Google Sheet rows."
+              sheetFileName
+                ? sheetFileName
+                : `${brands.length} parsed. ${selectedBrands.length} selected for Apollo.`
             }
             action={
               <div className="flex flex-wrap gap-2">
@@ -1068,134 +1045,136 @@ function BrandFinderPage() {
               </div>
             }
           >
-            <Textarea
-              value={sheetInput}
-              onChange={(event) => {
-                setSheetInput(event.target.value);
-                setSheetFileName("");
-              }}
-              placeholder={
-                "Dream Brand\tWebsite\nRhode\trhodeskin.com\nGymshark\tgymshark.com\nPoppi\tdrinkpoppi.com"
-              }
-              className="min-h-36 rounded-2xl bg-background text-sm"
-            />
-          </Panel>
+            <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.72fr)_minmax(0,1.28fr)]">
+              <Textarea
+                value={sheetInput}
+                onChange={(event) => {
+                  setSheetInput(event.target.value);
+                  setSheetFileName("");
+                }}
+                placeholder={
+                  "Dream Brand\tWebsite\nRhode\trhodeskin.com\nGymshark\tgymshark.com\nPoppi\tdrinkpoppi.com"
+                }
+                className="min-h-32 rounded-2xl bg-background text-sm lg:min-h-full"
+              />
 
-          <Panel
-            title="Parsed brands"
-            subtitle={`${selectedBrands.length} selected for Apollo.`}
-            action={
-              <button
-                type="button"
-                disabled={selectedBrands.length === 0}
-                onClick={() => addBrandsToDirectSearch(selectedBrands)}
-                className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <ListPlus className="h-4 w-4" />
-                Add selected to Direct Brand Search Queue
-              </button>
-            }
-          >
-            <div className="max-w-full overflow-x-auto rounded-2xl border border-border">
-              <table className="w-full min-w-[880px] text-sm">
-                <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-                  <tr>
-                    <th className="w-12 px-3 py-2.5 text-left font-medium">Select</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Brand</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Website</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Database status</th>
-                    <th className="px-3 py-2.5 text-left font-medium">
-                      Add to Direct Brand Search
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {brands.length === 0 && (
-                    <tr className="border-t border-border/60">
-                      <td
-                        colSpan={5}
-                        className="px-3 py-8 text-center text-sm text-muted-foreground"
-                      >
-                        Upload a dream brand sheet to start.
-                      </td>
+              <div className="max-w-full overflow-x-auto rounded-2xl border border-border">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="w-12 px-3 py-2.5 text-left font-medium">Use</th>
+                      <th className="px-3 py-2.5 text-left font-medium">Brand</th>
+                      <th className="px-3 py-2.5 text-left font-medium">Website</th>
+                      <th className="px-3 py-2.5 text-left font-medium">Saved status</th>
+                      <th className="px-3 py-2.5 text-left font-medium">Saved search</th>
                     </tr>
-                  )}
-                  {brands.map((brand) => {
-                    const useInSearch = brandSearchOverrides[brand.id] ?? true;
-                    const inDirectQueue = directSearchBrandIds.has(brand.id);
-                    const status = getBrandDatabaseStatus(
-                      brand,
-                      databaseContacts,
-                      contactDatabaseChecked,
-                    );
-
-                    return (
-                      <tr key={brand.id} className="tb-row-hover border-t border-border/60">
-                        <td className="px-3 py-3">
-                          <Checkbox
-                            checked={useInSearch}
-                            onCheckedChange={(checked) => setBrandUse(brand.id, checked === true)}
-                            aria-label={`Search ${brand.brandName}`}
-                          />
-                        </td>
-                        <td className="min-w-[220px] px-3 py-3">
-                          <input
-                            value={brand.brandName}
-                            onChange={(event) =>
-                              updateBrandOverride(brand.id, { brandName: event.target.value })
-                            }
-                            className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
-                          />
-                        </td>
-                        <td className="min-w-[190px] px-3 py-3">
-                          <input
-                            value={brand.domain}
-                            onChange={(event) =>
-                              updateBrandOverride(brand.id, { domain: event.target.value })
-                            }
-                            placeholder="domain.com"
-                            className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                          />
-                        </td>
-                        <td className="min-w-[260px] px-3 py-3">
-                          <span
-                            className={cn(
-                              "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold",
-                              statusTone(status.status),
-                            )}
-                          >
-                            {status.label}
-                          </span>
-                          {status.count > 0 && (
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {status.count} stored contact{status.count === 1 ? "" : "s"}
-                            </div>
-                          )}
-                        </td>
-                        <td className="min-w-[190px] px-3 py-3">
-                          <button
-                            type="button"
-                            disabled={inDirectQueue}
-                            onClick={() => addBrandsToDirectSearch([brand])}
-                            className="tb-action inline-flex h-9 items-center gap-2 rounded-xl bg-muted px-3 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            <ListPlus className="h-3.5 w-3.5" />
-                            {inDirectQueue ? "Queued" : "Add to queue"}
-                          </button>
+                  </thead>
+                  <tbody>
+                    {brands.length === 0 && (
+                      <tr className="border-t border-border/60">
+                        <td
+                          colSpan={5}
+                          className="px-3 py-8 text-center text-sm text-muted-foreground"
+                        >
+                          Upload or paste a dream brand sheet.
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
+                    )}
+                    {brands.map((brand) => {
+                      const useInSearch = brandSearchOverrides[brand.id] ?? true;
+                      const inDirectQueue = directSearchBrandIds.has(brand.id);
+                      const status = getBrandDatabaseStatus(
+                        brand,
+                        databaseContacts,
+                        contactDatabaseChecked,
+                      );
 
-          <Panel
-            title="Direct brand search"
-            subtitle={`${directSearchBrandIds.size} queued. Search saved contacts before spending Apollo credits.`}
-            action={
-              <div className="flex flex-wrap gap-2">
+                      return (
+                        <tr key={brand.id} className="tb-row-hover border-t border-border/60">
+                          <td className="px-3 py-2.5">
+                            <Checkbox
+                              checked={useInSearch}
+                              onCheckedChange={(checked) =>
+                                setBrandUse(brand.id, checked === true)
+                              }
+                              aria-label={`Search ${brand.brandName}`}
+                            />
+                          </td>
+                          <td className="min-w-[180px] px-3 py-2.5">
+                            <input
+                              value={brand.brandName}
+                              onChange={(event) =>
+                                updateBrandOverride(brand.id, { brandName: event.target.value })
+                              }
+                              className="h-8 w-full rounded-xl border border-border bg-background px-2.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
+                            />
+                          </td>
+                          <td className="min-w-[170px] px-3 py-2.5">
+                            <input
+                              value={brand.domain}
+                              onChange={(event) =>
+                                updateBrandOverride(brand.id, { domain: event.target.value })
+                              }
+                              placeholder="domain.com"
+                              className="h-8 w-full rounded-xl border border-border bg-background px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                            />
+                          </td>
+                          <td className="min-w-[180px] px-3 py-2.5">
+                            <span
+                              className={cn(
+                                "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold",
+                                statusTone(status.status),
+                              )}
+                            >
+                              {status.label}
+                            </span>
+                            {status.count > 0 && (
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {status.count} stored
+                              </div>
+                            )}
+                          </td>
+                          <td className="min-w-[150px] px-3 py-2.5">
+                            <button
+                              type="button"
+                              disabled={inDirectQueue}
+                              onClick={() => addBrandsToDirectSearch([brand])}
+                              className="tb-action inline-flex h-8 items-center gap-1.5 rounded-xl bg-muted px-2.5 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <ListPlus className="h-3.5 w-3.5" />
+                              {inDirectQueue ? "Queued" : "Queue"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-border bg-background p-3">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={directSearchQuery}
+                    onChange={(event) => setDirectSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") runDirectSearch();
+                    }}
+                    placeholder="Search saved Contact Database by brand..."
+                    className="tb-search h-10 w-full rounded-2xl border border-border bg-card pl-9 pr-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => runDirectSearch()}
+                  className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                >
+                  <Search className="h-4 w-4" />
+                  Search saved
+                </button>
                 <button
                   type="button"
                   disabled={
@@ -1204,48 +1183,14 @@ function BrandFinderPage() {
                     !directActiveSearch.trim()
                   }
                   onClick={clearDirectSearch}
-                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Trash2 className="h-4 w-4" />
-                  Clear queue
-                </button>
-                <button
-                  type="button"
-                  disabled={directSelectedContacts.filter((contact) => contact.email).length === 0}
-                  onClick={addSelectedSavedContacts}
-                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Check className="h-4 w-4" />
-                  Add selected saved contacts
-                </button>
-              </div>
-            }
-          >
-            <div className="rounded-2xl border border-border bg-background p-3">
-              <div className="grid gap-2 md:grid-cols-[minmax(220px,1fr)_auto]">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    value={directSearchQuery}
-                    onChange={(event) => setDirectSearchQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") runDirectSearch();
-                    }}
-                    placeholder="Search saved contact database by brand name..."
-                    className="tb-search h-11 w-full rounded-2xl border border-border bg-card pl-9 pr-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => runDirectSearch()}
-                  className="tb-action inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"
-                >
-                  <Search className="h-4 w-4" />
-                  Search database
+                  Clear
                 </button>
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 {directSearchBrands.length === 0 && (
                   <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">
                     No queued brands yet
@@ -1282,87 +1227,11 @@ function BrandFinderPage() {
                 ))}
               </div>
             </div>
-
-            <div className="mt-4 max-w-full overflow-x-auto rounded-2xl border border-border">
-              <table className="w-full min-w-[920px] text-sm">
-                <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-                  <tr>
-                    <th className="w-12 px-3 py-2.5 text-left font-medium">Select</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Brand</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Contact</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Email</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Position</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Source</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {directSearchContacts.length === 0 && (
-                    <tr className="border-t border-border/60">
-                      <td
-                        colSpan={6}
-                        className="px-3 py-8 text-center text-sm text-muted-foreground"
-                      >
-                        Search a brand or add parsed brands to the queue.
-                      </td>
-                    </tr>
-                  )}
-                  {directSearchContacts.map((contact) => (
-                    <tr key={contact.id} className="tb-row-hover border-t border-border/60">
-                      <td className="px-3 py-3">
-                        <Checkbox
-                          checked={directSelectedContactIds.has(contact.id)}
-                          disabled={!contact.email}
-                          onCheckedChange={(checked) =>
-                            setDirectContactSelected(contact, checked === true)
-                          }
-                          aria-label={`Select ${contact.contactName}`}
-                        />
-                      </td>
-                      <td className="min-w-[170px] px-3 py-3 font-semibold">
-                        {contact.brandName}
-                      </td>
-                      <td className="min-w-[180px] px-3 py-3">{contact.contactName}</td>
-                      <td className="min-w-[240px] px-3 py-3">
-                        {contact.email ? (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              await navigator.clipboard.writeText(contact.email);
-                              flashCopied(`direct-email-${contact.id}`);
-                            }}
-                            className="tb-action inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-foreground hover:bg-accent"
-                          >
-                            {copiedKey === `direct-email-${contact.id}` ? (
-                              <Check className="h-3.5 w-3.5" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" />
-                            )}
-                            {contact.email}
-                          </button>
-                        ) : (
-                          <span className="text-xs font-semibold text-muted-foreground">
-                            No email
-                          </span>
-                        )}
-                      </td>
-                      <td className="min-w-[220px] px-3 py-3 text-muted-foreground">
-                        {contact.position || "-"}
-                      </td>
-                      <td className="min-w-[160px] px-3 py-3">
-                        <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
-                          {contact.source || "Contact Database"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </Panel>
 
           <Panel
-            title="Apollo contact approval"
-            subtitle={`${contacts.length} returned contacts. ${duplicateContactCount} already saved.`}
+            title="Contacts"
+            subtitle={`${approvalContacts.length} loaded. ${selectedContacts.length} selected for drafts.`}
             action={
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                 <DashboardSelectField
@@ -1385,6 +1254,19 @@ function BrandFinderPage() {
                   )}
                   Run Apollo
                 </button>
+                <button
+                  type="button"
+                  disabled={isCreatingDrafts || selectedContacts.length === 0}
+                  onClick={() => void createDrafts()}
+                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-4 text-sm font-semibold text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isCreatingDrafts ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  Create drafts
+                </button>
               </div>
             }
           >
@@ -1402,7 +1284,7 @@ function BrandFinderPage() {
             )}
 
             <div className="max-w-full overflow-x-auto rounded-2xl border border-border">
-              <table className="w-full min-w-[900px] text-sm">
+              <table className="w-full min-w-[980px] text-sm">
                 <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="w-12 px-3 py-2.5 text-left font-medium">Select</th>
@@ -1410,30 +1292,36 @@ function BrandFinderPage() {
                     <th className="px-3 py-2.5 text-left font-medium">Contact</th>
                     <th className="px-3 py-2.5 text-left font-medium">Email</th>
                     <th className="px-3 py-2.5 text-left font-medium">Position</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Email status</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Source</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredContacts.length === 0 && (
+                  {filteredApprovalContacts.length === 0 && (
                     <tr className="border-t border-border/60">
                       <td
-                        colSpan={6}
+                        colSpan={7}
                         className="px-3 py-8 text-center text-sm text-muted-foreground"
                       >
-                        Run Apollo to load contacts.
+                        Search saved contacts or run Apollo to load people.
                       </td>
                     </tr>
                   )}
-                  {filteredContacts.map((contact) => {
-                    const duplicateLabel = contactDuplicateLabel(contact, databaseContacts);
+                  {filteredApprovalContacts.map((contact) => {
+                    const duplicateLabel =
+                      contact.source === "Contact Database"
+                        ? ""
+                        : contactDuplicateLabel(contact, databaseContacts);
+                    const isSelected = isApprovalContactSelected(contact);
 
                     return (
                       <tr key={contact.id} className="tb-row-hover border-t border-border/60">
                         <td className="px-3 py-3">
                           <Checkbox
-                            checked={selectedContactIds.has(contact.id)}
+                            checked={isSelected}
+                            disabled={!contact.email}
                             onCheckedChange={(checked) =>
-                              setContactSelected(contact.id, checked === true)
+                              setApprovalContactSelected(contact, checked === true)
                             }
                             aria-label={`Select ${contact.contactName}`}
                           />
@@ -1471,10 +1359,20 @@ function BrandFinderPage() {
                           {contact.position || "-"}
                         </td>
                         <td className="min-w-[150px] px-3 py-3">
+                          <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
+                            {contact.source || "Apollo"}
+                          </span>
+                        </td>
+                        <td className="min-w-[190px] px-3 py-3">
                           <div className="flex flex-wrap gap-1.5">
                             <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
                               {contact.emailStatus || "Unknown"}
                             </span>
+                            {!contact.email && (
+                              <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-bold text-muted-foreground">
+                                No email
+                              </span>
+                            )}
                             {duplicateLabel && (
                               <span className="rounded-full border border-fun-blue/60 bg-fun-blue/20 px-2.5 py-1 text-xs font-bold text-foreground">
                                 {duplicateLabel}
@@ -1489,138 +1387,150 @@ function BrandFinderPage() {
               </table>
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-muted-foreground">
               <div className="text-xs font-semibold text-muted-foreground">
-                {selectedContacts.length} selected contact
-                {selectedContacts.length === 1 ? "" : "s"} with email
+                Apollo cap: up to {metricValue(estimatedApolloEmailReveals)} email reveals this run.
               </div>
-              <button
-                type="button"
-                disabled={isCreatingDrafts || selectedContacts.length === 0}
-                onClick={() => void createDrafts()}
-                className="tb-action inline-flex h-11 items-center gap-2 rounded-2xl bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isCreatingDrafts ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                Create Gmail drafts
-              </button>
+              <div>
+                {duplicateContactCount} Apollo duplicate{duplicateContactCount === 1 ? "" : "s"} flagged.
+              </div>
             </div>
           </Panel>
-
         </div>
 
         <div className="min-w-0 space-y-4 xl:sticky xl:top-6 xl:self-start">
-          <Panel title="Apollo filters" subtitle="Saved search settings for this browser.">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-xs font-semibold text-muted-foreground">
-                Max per brand
-                <input
-                  type="number"
-                  min={1}
-                  max={25}
-                  value={filters.maxContactsPerBrand}
-                  onChange={(event) =>
-                    setFilters((current) => ({
-                      ...current,
-                      maxContactsPerBrand: Math.max(
-                        1,
-                        Math.min(25, Number(event.target.value) || 1),
-                      ),
-                    }))
+          <Panel title="Apollo Search Rules" subtitle="Credit-safe default: 2 contacts per brand.">
+            <div className="flex flex-wrap gap-2">
+              <RuleChip label="Include" value={splitList(filters.jobTitlesText).join(", ")} />
+              <RuleChip label="Exclude" value={splitList(filters.excludeTitlesText).join(", ")} />
+              <RuleChip label="Function" value={splitList(filters.departmentsText).join(", ")} />
+              <RuleChip label="Max" value={`${filters.maxContactsPerBrand} per brand`} />
+            </div>
+
+            <details className="mt-3 rounded-2xl border border-border bg-background p-3">
+              <summary className="cursor-pointer text-sm font-bold text-foreground">
+                Edit search rules
+              </summary>
+              <div className="mt-3 grid gap-3">
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Max per brand
+                  <input
+                    type="number"
+                    min={1}
+                    max={25}
+                    value={filters.maxContactsPerBrand}
+                    onChange={(event) =>
+                      setFilters((current) => ({
+                        ...current,
+                        maxContactsPerBrand: Math.max(
+                          1,
+                          Math.min(25, Number(event.target.value) || 1),
+                        ),
+                      }))
+                    }
+                    className="mt-1 h-9 w-full rounded-2xl border border-border bg-card px-3 text-sm font-semibold text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </label>
+                <FilterTextarea
+                  label="Include titles"
+                  value={filters.jobTitlesText}
+                  onChange={(value) =>
+                    setFilters((current) => ({ ...current, jobTitlesText: value }))
                   }
-                  className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm font-semibold text-foreground outline-none focus:ring-2 focus:ring-primary/30"
                 />
-              </label>
-            </div>
-
-            <FilterTextarea
-              label="Job titles"
-              value={filters.jobTitlesText}
-              onChange={(value) => setFilters((current) => ({ ...current, jobTitlesText: value }))}
-            />
-            <FilterTextarea
-              label="Keywords"
-              value={filters.keywordsText}
-              onChange={(value) =>
-                setFilters((current) => ({ ...current, keywordsText: value }))
-              }
-            />
-            <FilterTextarea
-              label="Seniority"
-              value={filters.seniorityText}
-              onChange={(value) => setFilters((current) => ({ ...current, seniorityText: value }))}
-            />
-            <FilterTextarea
-              label="Email statuses"
-              value={filters.emailStatusesText}
-              onChange={(value) =>
-                setFilters((current) => ({ ...current, emailStatusesText: value }))
-              }
-            />
-
-            <div className="mt-4 grid gap-2">
-              <ToggleRow
-                label="Include similar job titles"
-                checked={filters.includeSimilarTitles}
-                onCheckedChange={(checked) =>
-                  setFilters((current) => ({ ...current, includeSimilarTitles: checked }))
-                }
-              />
-              <ToggleRow
-                label="Only return contacts with emails"
-                checked={filters.requireEmail}
-                onCheckedChange={(checked) =>
-                  setFilters((current) => ({ ...current, requireEmail: checked }))
-                }
-              />
-              <ToggleRow
-                label="Enrich emails after search"
-                checked={filters.enrichEmails}
-                onCheckedChange={(checked) =>
-                  setFilters((current) => ({ ...current, enrichEmails: checked }))
-                }
-              />
-            </div>
+                <FilterTextarea
+                  label="Exclude titles"
+                  value={filters.excludeTitlesText}
+                  onChange={(value) =>
+                    setFilters((current) => ({ ...current, excludeTitlesText: value }))
+                  }
+                />
+                <FilterTextarea
+                  label="Department / job function"
+                  value={filters.departmentsText}
+                  onChange={(value) =>
+                    setFilters((current) => ({ ...current, departmentsText: value }))
+                  }
+                />
+                <ToggleRow
+                  label="Include similar job titles"
+                  checked={filters.includeSimilarTitles}
+                  onCheckedChange={(checked) =>
+                    setFilters((current) => ({ ...current, includeSimilarTitles: checked }))
+                  }
+                />
+                <ToggleRow
+                  label="Only return contacts with emails"
+                  checked={filters.requireEmail}
+                  onCheckedChange={(checked) =>
+                    setFilters((current) => ({ ...current, requireEmail: checked }))
+                  }
+                />
+                <ToggleRow
+                  label="Enrich emails after search"
+                  checked={filters.enrichEmails}
+                  onCheckedChange={(checked) =>
+                    setFilters((current) => ({ ...current, enrichEmails: checked }))
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={resetApolloRules}
+                  className="tb-action inline-flex h-9 items-center justify-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Reset rules
+                </button>
+              </div>
+            </details>
           </Panel>
 
-          <Panel title="Email template" subtitle="Only brand and contact first name are filled.">
-            <div className="mb-3 flex flex-wrap gap-2">
-              {TEMPLATE_FIELDS.map((field) => (
-                <button
-                  key={field}
-                  type="button"
-                  onClick={() => insertTemplateField(field)}
-                  className="tb-action h-10 rounded-2xl bg-muted px-3 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  {`{{${field}}}`}
-                </button>
-              ))}
+          <Panel title="Email Template" subtitle={subjectTemplate || "No subject set"}>
+            <div className="rounded-2xl border border-border bg-background p-3 text-sm font-semibold">
+              {bodyTemplate.split(/\r?\n/).filter(Boolean)[0] || "Template body empty"}
             </div>
 
-            <label className="block text-sm font-semibold">
-              Subject
-              <input
-                ref={subjectRef}
-                value={subjectTemplate}
-                onFocus={() => setTemplateTarget("subject")}
-                onChange={(event) => setSubjectTemplate(event.target.value)}
-                className="mt-1 h-10 w-full rounded-2xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </label>
+            <details className="mt-3 rounded-2xl border border-border bg-background p-3">
+              <summary className="cursor-pointer text-sm font-bold text-foreground">
+                Edit template
+              </summary>
+              <div className="mt-3">
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {TEMPLATE_FIELDS.map((field) => (
+                    <button
+                      key={field}
+                      type="button"
+                      onClick={() => insertTemplateField(field)}
+                      className="tb-action h-9 rounded-2xl bg-muted px-3 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      {`{{${field}}}`}
+                    </button>
+                  ))}
+                </div>
 
-            <label className="mt-4 block text-sm font-semibold">
-              Body
-              <Textarea
-                ref={bodyRef}
-                value={bodyTemplate}
-                onFocus={() => setTemplateTarget("body")}
-                onChange={(event) => setBodyTemplate(event.target.value)}
-                className="mt-1 min-h-56 rounded-2xl bg-background text-sm"
-              />
-            </label>
+                <label className="block text-sm font-semibold">
+                  Subject
+                  <input
+                    ref={subjectRef}
+                    value={subjectTemplate}
+                    onFocus={() => setTemplateTarget("subject")}
+                    onChange={(event) => setSubjectTemplate(event.target.value)}
+                    className="mt-1 h-10 w-full rounded-2xl border border-border bg-card px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </label>
+
+                <label className="mt-3 block text-sm font-semibold">
+                  Body
+                  <Textarea
+                    ref={bodyRef}
+                    value={bodyTemplate}
+                    onFocus={() => setTemplateTarget("body")}
+                    onChange={(event) => setBodyTemplate(event.target.value)}
+                    className="mt-1 min-h-44 rounded-2xl bg-card text-sm"
+                  />
+                </label>
+              </div>
+            </details>
           </Panel>
 
           <Panel title="Contact Database" subtitle="Used for duplicate flags.">
@@ -1642,47 +1552,28 @@ function BrandFinderPage() {
   );
 }
 
-function WorkflowStrip({
-  parsedCount,
-  queuedCount,
-  apolloCount,
-  draftCount,
-}: {
-  parsedCount: number;
-  queuedCount: number;
-  apolloCount: number;
-  draftCount: number;
-}) {
-  const counts = [parsedCount, queuedCount, apolloCount, draftCount];
-
+function CompactStatusBar({ items }: { items: Array<[string, number]> }) {
   return (
-    <section className="grid gap-3 rounded-3xl bg-card p-3 ring-1 ring-border sm:grid-cols-2 xl:grid-cols-4">
-      {WORKFLOW_STEPS.map((step, index) => {
-        const Icon = step.icon;
-
-        return (
-          <div
-            key={step.label}
-            className="flex min-h-20 items-center justify-between gap-3 rounded-2xl bg-background px-4 py-3"
-          >
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary">
-                <Icon className="h-4 w-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-sm font-bold">{step.label}</div>
-                <div className="truncate text-xs font-semibold text-muted-foreground">
-                  {step.detail}
-                </div>
-              </div>
-            </div>
-            <div className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold tabular-nums text-muted-foreground">
-              {metricValue(counts[index] ?? 0)}
-            </div>
-          </div>
-        );
-      })}
+    <section className="flex flex-wrap items-center gap-2 rounded-3xl bg-card p-3 ring-1 ring-border">
+      {items.map(([label, value]) => (
+        <div
+          key={label}
+          className="flex min-h-10 items-center gap-2 rounded-2xl bg-background px-3"
+        >
+          <span className="text-xs font-semibold text-muted-foreground">{label}</span>
+          <span className="text-sm font-bold tabular-nums">{metricValue(value)}</span>
+        </div>
+      ))}
     </section>
+  );
+}
+
+function RuleChip({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">
+      <span className="text-foreground">{label}</span>
+      <span className="truncate">{value || "None"}</span>
+    </span>
   );
 }
 
@@ -1711,30 +1602,6 @@ function Panel({
   );
 }
 
-function MetricTile({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string;
-  value: string;
-  icon: typeof Inbox;
-}) {
-  return (
-    <div className="tb-hover-lift rounded-3xl bg-card p-5 ring-1 ring-border">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-xs font-semibold text-muted-foreground">{label}</div>
-          <div className="mt-2 text-2xl font-bold tabular-nums">{value}</div>
-        </div>
-        <div className="tb-hover-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/15 text-primary">
-          <Icon className="h-5 w-5" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function FilterTextarea({
   label,
   value,
@@ -1745,12 +1612,12 @@ function FilterTextarea({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="mt-4 block text-sm font-semibold">
+    <label className="block text-sm font-semibold">
       {label}
       <Textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 min-h-24 rounded-2xl bg-background text-sm"
+        className="mt-1 min-h-16 rounded-2xl bg-card text-sm"
       />
     </label>
   );

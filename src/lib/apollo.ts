@@ -9,9 +9,11 @@ const brandInputSchema = z.object({
 
 const apolloFiltersSchema = z.object({
   jobTitles: z.array(z.string().min(1).max(120)).max(40),
-  keywords: z.array(z.string().min(1).max(120)).max(25),
-  seniority: z.array(z.string().min(1).max(120)).max(20),
-  emailStatuses: z.array(z.string().min(1).max(80)).max(10),
+  excludeTitles: z.array(z.string().min(1).max(120)).max(40).optional().default([]),
+  departments: z.array(z.string().min(1).max(120)).max(25).optional().default([]),
+  keywords: z.array(z.string().min(1).max(120)).max(25).optional().default([]),
+  seniority: z.array(z.string().min(1).max(120)).max(20).optional().default([]),
+  emailStatuses: z.array(z.string().min(1).max(80)).max(10).optional().default([]),
   includeSimilarTitles: z.boolean(),
   maxContactsPerBrand: z.number().int().min(1).max(25),
   requireEmail: z.boolean(),
@@ -96,12 +98,27 @@ function normalizeDomain(value: string) {
   }
 }
 
-function compactKey(value: string) {
+function normalizeText(value: string) {
   return value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9 .@:/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactKey(value: string) {
+  return normalizeText(value).replace(/[^a-z0-9]+/g, "");
+}
+
+function titleContainsBlockedTerm(title: string, blockedTerms: string[]) {
+  const normalizedTitle = normalizeText(title);
+  return blockedTerms.some((term) => {
+    const normalizedTerm = normalizeText(term);
+    return normalizedTerm && normalizedTitle.includes(normalizedTerm);
+  });
 }
 
 function getPathValue(source: unknown, path: string[]) {
@@ -367,7 +384,7 @@ function normalizeContact(result: unknown, fallbackBrand: BrandInput): ApolloCon
 
 function buildSearchParams(brand: BrandInput, filters: ApolloFilters): ApolloParams {
   const domain = normalizeDomain(brand.domain ?? "");
-  const keywords = uniqueStrings(filters.keywords);
+  const keywords = uniqueStrings([...filters.departments, ...filters.keywords]);
   const params: ApolloParams = {
     "person_titles[]": uniqueStrings(filters.jobTitles),
     "person_seniorities[]": uniqueStrings(filters.seniority.map((item) => item.toLowerCase())),
@@ -385,6 +402,12 @@ function buildSearchParams(brand: BrandInput, filters: ApolloFilters): ApolloPar
   }
 
   return params;
+}
+
+function removeExcludedTitles(contacts: ApolloContactResult[], filters: ApolloFilters) {
+  const excluded = uniqueStrings(filters.excludeTitles);
+  if (excluded.length === 0) return contacts;
+  return contacts.filter((contact) => !titleContainsBlockedTerm(contact.title, excluded));
 }
 
 async function searchBrandContacts(brand: BrandInput, filters: ApolloFilters) {
@@ -497,7 +520,10 @@ export const searchApolloContacts = createServerFn({ method: "POST" })
       if (result.totalCount === null) return current;
       return (current ?? 0) + result.totalCount;
     }, null);
-    const normalized = searchResults.flatMap((result) => result.contacts);
+    const normalized = removeExcludedTitles(
+      searchResults.flatMap((result) => result.contacts),
+      data.filters,
+    );
     const unique = Array.from(new Map(normalized.map((contact) => [contact.id, contact])).values());
     const limited = limitPerBrand(unique, data.filters.maxContactsPerBrand);
     const enrichedResult = data.filters.enrichEmails
