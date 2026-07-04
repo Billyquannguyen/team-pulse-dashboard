@@ -10,14 +10,14 @@ import {
   RotateCcw,
   Search,
   Send,
-  Trash2,
+  Sparkles,
   Upload,
+  X,
 } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
-import { DashboardSelectField } from "@/components/ui/dashboard-select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { searchApolloContacts, type ApolloContactResult } from "@/lib/apollo";
+import { enrichApolloContacts, searchApolloContacts, type ApolloContactResult } from "@/lib/apollo";
 import { contactDatabaseQuery, upsertContactDatabaseContacts } from "@/lib/contact-database";
 import type { ContactDatabaseContact } from "@/lib/contact-database";
 import { createGmailDrafts } from "@/lib/gmail-drafts";
@@ -37,8 +37,6 @@ export const Route = createFileRoute("/brand-finder")({
 });
 
 const STORAGE_KEY = "team-billion-brand-finder-apollo-v1";
-const ALL_BRANDS = "All brands";
-
 const DEFAULT_SUBJECT_TEMPLATE = "Creator partnership for {{brand_name}}";
 const DEFAULT_BODY_TEMPLATE = `Hi {{contact_first_name}},
 
@@ -49,11 +47,7 @@ Would you be open to reviewing this?
 
 const TEMPLATE_FIELDS = ["contact_first_name", "brand_name"] as const;
 
-const DEFAULT_JOB_TITLES = [
-  "influencer marketing",
-  "account manager",
-  "creator partnerships",
-];
+const DEFAULT_JOB_TITLES = ["influencer marketing", "account manager", "creator partnerships"];
 
 const DEFAULT_EXCLUDE_TITLES = ["SEO", "Digital Marketing", "Analyst", "performance marketing"];
 const DEFAULT_DEPARTMENTS = ["marketing"];
@@ -97,6 +91,10 @@ type ContactRow = {
   position: string;
   emailStatus?: string;
   source?: string;
+  domain?: string;
+  apolloPersonId?: string;
+  apolloOrganizationId?: string;
+  linkedin?: string;
 };
 
 type SavedBrandFinderState = {
@@ -108,9 +106,9 @@ type SavedBrandFinderState = {
   brandOverrides?: Record<string, BrandOverride>;
   brandSearchOverrides?: Record<string, boolean>;
   directSearchBrandIds?: string[];
-  directSearchQuery?: string;
-  directActiveSearch?: string;
-  directSelectedContactIds?: string[];
+  manualDirectBrands?: BrandRow[];
+  manualApolloBrands?: BrandRow[];
+  directSearchResultBrands?: BrandRow[];
   savedDraftContacts?: ContactRow[];
   contacts?: ContactRow[];
   selectedContactIds?: string[];
@@ -125,8 +123,8 @@ const DEFAULT_FILTER_STATE: ApolloFilterState = {
   emailStatusesText: DEFAULT_EMAIL_STATUSES.join("\n"),
   includeSimilarTitles: true,
   maxContactsPerBrand: 2,
-  requireEmail: true,
-  enrichEmails: true,
+  requireEmail: false,
+  enrichEmails: false,
 };
 
 function normalizeText(value: string) {
@@ -382,6 +380,36 @@ function applyBrandOverrides(brands: BrandRow[], overrides: Record<string, Brand
   });
 }
 
+function manualBrandFromInput(value: string): BrandRow | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const domain = extractDomain(trimmed);
+  const rawName = trimmed.replace(domain, "").replace(/[|,]+/g, " ").trim();
+  const brandName = titleCase(rawName || domainToName(domain) || trimmed);
+
+  if (!brandName) return null;
+
+  return {
+    id: `manual-${compactKey(domain || brandName)}`,
+    rowNumber: 0,
+    rawName: trimmed,
+    brandName,
+    domain,
+  };
+}
+
+function mergeBrandRows(rows: BrandRow[]) {
+  const map = new Map<string, BrandRow>();
+  rows.forEach((row) => {
+    const key = compactKey(row.domain || row.brandName);
+    if (key) map.set(key, row);
+  });
+  return Array.from(map.values()).sort((left, right) =>
+    left.brandName.localeCompare(right.brandName),
+  );
+}
+
 function splitList(value: string) {
   return Array.from(
     new Set(
@@ -473,6 +501,10 @@ function apiContactToRow(contact: ApolloContactResult, brands: BrandRow[]): Cont
     position: contact.title,
     emailStatus: contact.emailStatus,
     source: "Apollo",
+    domain: contact.domain,
+    apolloPersonId: contact.apolloPersonId,
+    apolloOrganizationId: contact.apolloOrganizationId,
+    linkedin: contact.linkedin,
   };
 
   return {
@@ -498,6 +530,28 @@ function databaseContactToRow(contact: ContactDatabaseContact, brands: BrandRow[
   return {
     ...row,
     id: contactId(row),
+  };
+}
+
+function contactRowToApolloContact(contact: ContactRow): ApolloContactResult {
+  const [firstNameFromName = "", ...lastNameParts] = contact.contactName.split(/\s+/);
+
+  return {
+    id: contact.id,
+    brandId: contact.brandId,
+    brandName: contact.brandName,
+    domain: contact.domain ?? "",
+    apolloPersonId: contact.apolloPersonId ?? "",
+    apolloOrganizationId: contact.apolloOrganizationId ?? "",
+    name: contact.contactName,
+    firstName: contact.contactFirstName || firstNameFromName,
+    lastName: lastNameParts.join(" "),
+    title: contact.position,
+    company: contact.brandName,
+    email: contact.email,
+    linkedin: contact.linkedin ?? "",
+    emailStatus: contact.emailStatus ?? "",
+    source: "Apollo API",
   };
 }
 
@@ -544,7 +598,7 @@ function readSavedState(): SavedBrandFinderState {
 }
 
 function statusTone(status: BrandStatus) {
-  if (status === "database") return "border-fun-blue/60 bg-fun-blue/20 text-foreground";
+  if (status === "database") return "border-destructive/30 bg-destructive/10 text-destructive";
   if (status === "unknown") return "border-border bg-muted text-muted-foreground";
   return "border-fun-lime/50 bg-fun-lime/20 text-foreground";
 }
@@ -570,22 +624,20 @@ function BrandFinderPage() {
   });
   const [brandOverrides, setBrandOverrides] = useState<Record<string, BrandOverride>>({});
   const [brandSearchOverrides, setBrandSearchOverrides] = useState<Record<string, boolean>>({});
-  const [directSearchBrandIds, setDirectSearchBrandIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [directSearchQuery, setDirectSearchQuery] = useState("");
-  const [directActiveSearch, setDirectActiveSearch] = useState("");
-  const [directSelectedContactIds, setDirectSelectedContactIds] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [directSearchBrandIds, setDirectSearchBrandIds] = useState<Set<string>>(() => new Set());
+  const [manualDirectBrands, setManualDirectBrands] = useState<BrandRow[]>([]);
+  const [manualApolloBrands, setManualApolloBrands] = useState<BrandRow[]>([]);
+  const [directSearchResultBrands, setDirectSearchResultBrands] = useState<BrandRow[]>([]);
+  const [directQueueInput, setDirectQueueInput] = useState("");
+  const [apolloQueueInput, setApolloQueueInput] = useState("");
   const [savedDraftContacts, setSavedDraftContacts] = useState<ContactRow[]>([]);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
-  const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [brandFilter, setBrandFilter] = useState(ALL_BRANDS);
+  const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(() => new Set());
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [isSheetEditorOpen, setIsSheetEditorOpen] = useState(false);
+  const [enrichingContactIds, setEnrichingContactIds] = useState<Set<string>>(() => new Set());
   const [isSearching, setIsSearching] = useState(false);
+  const [isDirectSearching, setIsDirectSearching] = useState(false);
   const [isCreatingDrafts, setIsCreatingDrafts] = useState(false);
   const [searchMessage, setSearchMessage] = useState("");
   const [searchError, setSearchError] = useState("");
@@ -599,18 +651,25 @@ function BrandFinderPage() {
     [brandOverrides, parsedBrands],
   );
   const selectedBrands = useMemo(
-    () => brands.filter((brand) => brandSearchOverrides[brand.id] ?? true),
-    [brandSearchOverrides, brands],
+    () =>
+      mergeBrandRows([
+        ...brands.filter((brand) => brandSearchOverrides[brand.id] === true),
+        ...manualApolloBrands,
+      ]),
+    [brandSearchOverrides, brands, manualApolloBrands],
   );
   const directSearchBrands = useMemo(
-    () => brands.filter((brand) => directSearchBrandIds.has(brand.id)),
-    [brands, directSearchBrandIds],
+    () =>
+      mergeBrandRows([
+        ...brands.filter((brand) => directSearchBrandIds.has(brand.id)),
+        ...manualDirectBrands,
+      ]),
+    [brands, directSearchBrandIds, manualDirectBrands],
   );
-  const directSearchTerms = useMemo(() => {
-    const activeSearch = directActiveSearch.trim();
-    if (activeSearch) return [activeSearch];
-    return directSearchBrands.map((brand) => brand.brandName);
-  }, [directActiveSearch, directSearchBrands]);
+  const directSearchTerms = useMemo(
+    () => directSearchResultBrands.map((brand) => brand.brandName),
+    [directSearchResultBrands],
+  );
   const directSearchContacts = useMemo(() => {
     if (directSearchTerms.length === 0) return [];
 
@@ -618,7 +677,7 @@ function BrandFinderPage() {
       directSearchTerms.some((term) => contactMatchesBrandSearch(contact, term)),
     );
     const contactRows = matched.map((contact) =>
-      databaseContactToRow(contact, directSearchBrands),
+      databaseContactToRow(contact, directSearchResultBrands),
     );
 
     return Array.from(new Map(contactRows.map((contact) => [contact.id, contact])).values()).sort(
@@ -626,25 +685,11 @@ function BrandFinderPage() {
         left.brandName.localeCompare(right.brandName) ||
         left.contactName.localeCompare(right.contactName),
     );
-  }, [databaseContacts, directSearchBrands, directSearchTerms]);
+  }, [databaseContacts, directSearchResultBrands, directSearchTerms]);
   const approvalContacts = useMemo(
     () => mergeContacts(mergeContacts(contacts, directSearchContacts), savedDraftContacts),
     [contacts, directSearchContacts, savedDraftContacts],
   );
-  const brandOptions = useMemo(
-    () => [
-      ALL_BRANDS,
-      ...Array.from(new Set(approvalContacts.map((contact) => contact.brandName)))
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b)),
-    ],
-    [approvalContacts],
-  );
-  const filteredApprovalContacts = useMemo(() => {
-    return approvalContacts.filter((contact) => {
-      return brandFilter === ALL_BRANDS || contact.brandName === brandFilter;
-    });
-  }, [approvalContacts, brandFilter]);
   const selectedApolloContacts = useMemo(
     () => contacts.filter((contact) => selectedContactIds.has(contact.id)),
     [contacts, selectedContactIds],
@@ -665,7 +710,7 @@ function BrandFinderPage() {
     () => new Set(savedDraftContacts.map((contact) => contact.id)),
     [savedDraftContacts],
   );
-  const estimatedApolloEmailReveals = selectedBrands.length * filters.maxContactsPerBrand;
+  const estimatedApolloPeople = selectedBrands.length * filters.maxContactsPerBrand;
 
   useEffect(() => {
     const saved = readSavedState();
@@ -676,13 +721,22 @@ function BrandFinderPage() {
     setSheetFileName(saved.sheetFileName ?? "");
     setSubjectTemplate(saved.subjectTemplate ?? DEFAULT_SUBJECT_TEMPLATE);
     setBodyTemplate(saved.bodyTemplate ?? DEFAULT_BODY_TEMPLATE);
-    setFilters(hasCurrentFilterShape ? { ...DEFAULT_FILTER_STATE, ...savedFilters } : DEFAULT_FILTER_STATE);
+    setFilters(
+      hasCurrentFilterShape
+        ? {
+            ...DEFAULT_FILTER_STATE,
+            ...savedFilters,
+            requireEmail: false,
+            enrichEmails: false,
+          }
+        : DEFAULT_FILTER_STATE,
+    );
     setBrandOverrides(saved.brandOverrides ?? {});
     setBrandSearchOverrides(saved.brandSearchOverrides ?? {});
     setDirectSearchBrandIds(new Set(saved.directSearchBrandIds ?? []));
-    setDirectSearchQuery(saved.directSearchQuery ?? "");
-    setDirectActiveSearch(saved.directActiveSearch ?? "");
-    setDirectSelectedContactIds(new Set(saved.directSelectedContactIds ?? []));
+    setManualDirectBrands(saved.manualDirectBrands ?? []);
+    setManualApolloBrands(saved.manualApolloBrands ?? []);
+    setDirectSearchResultBrands(saved.directSearchResultBrands ?? []);
     setSavedDraftContacts(saved.savedDraftContacts ?? []);
     setContacts(saved.contacts ?? []);
     setSelectedContactIds(new Set(saved.selectedContactIds ?? []));
@@ -703,9 +757,9 @@ function BrandFinderPage() {
       brandOverrides,
       brandSearchOverrides,
       directSearchBrandIds: Array.from(directSearchBrandIds),
-      directSearchQuery,
-      directActiveSearch,
-      directSelectedContactIds: Array.from(directSelectedContactIds),
+      manualDirectBrands,
+      manualApolloBrands,
+      directSearchResultBrands,
       savedDraftContacts,
       contacts,
       selectedContactIds: Array.from(selectedContactIds),
@@ -717,13 +771,13 @@ function BrandFinderPage() {
     brandOverrides,
     brandSearchOverrides,
     contacts,
-    directActiveSearch,
-    directSearchQuery,
     directSearchBrandIds,
-    directSelectedContactIds,
+    directSearchResultBrands,
     draftMessage,
     filters,
     hasLoadedSavedState,
+    manualApolloBrands,
+    manualDirectBrands,
     savedDraftContacts,
     selectedContactIds,
     sheetFileName,
@@ -764,6 +818,7 @@ function BrandFinderPage() {
     const text = await file.text();
     setSheetInput(text);
     setSheetFileName(file.name);
+    setIsSheetEditorOpen(false);
     setSearchMessage("");
     setSearchError("");
   };
@@ -778,13 +833,6 @@ function BrandFinderPage() {
     }));
   };
 
-  const setBrandUse = (brandId: string, checked: boolean) => {
-    setBrandSearchOverrides((current) => ({
-      ...current,
-      [brandId]: checked,
-    }));
-  };
-
   const addBrandsToDirectSearch = (items: BrandRow[]) => {
     setDirectSearchBrandIds((current) => {
       const next = new Set(current);
@@ -793,33 +841,51 @@ function BrandFinderPage() {
     });
   };
 
+  const queueBrandForDirect = (brand: BrandRow) => {
+    addBrandsToDirectSearch([brand]);
+    setBrandSearchOverrides((current) => ({
+      ...current,
+      [brand.id]: false,
+    }));
+  };
+
+  const queueBrandForApollo = (brand: BrandRow) => {
+    removeBrandFromDirectSearch(brand.id);
+    setBrandSearchOverrides((current) => ({
+      ...current,
+      [brand.id]: true,
+    }));
+  };
+
+  const addManualDirectBrand = () => {
+    const brand = manualBrandFromInput(directQueueInput);
+    if (!brand) return;
+    setManualDirectBrands((current) => mergeBrandRows([...current, brand]));
+    setDirectQueueInput("");
+  };
+
+  const addManualApolloBrand = () => {
+    const brand = manualBrandFromInput(apolloQueueInput);
+    if (!brand) return;
+    setManualApolloBrands((current) => mergeBrandRows([...current, brand]));
+    setApolloQueueInput("");
+  };
+
   const removeBrandFromDirectSearch = (brandId: string) => {
     setDirectSearchBrandIds((current) => {
       const next = new Set(current);
       next.delete(brandId);
       return next;
     });
+    setManualDirectBrands((current) => current.filter((brand) => brand.id !== brandId));
   };
 
-  const clearDirectSearch = () => {
-    setDirectSearchBrandIds(new Set());
-    setDirectActiveSearch("");
-    setDirectSearchQuery("");
-    setDirectSelectedContactIds(new Set());
-  };
-
-  const runDirectSearch = (search = directSearchQuery) => {
-    setDirectActiveSearch(search.trim());
-    setDirectSelectedContactIds(new Set());
-  };
-
-  const moveBrandToDirectSearchBar = (brand: BrandRow) => {
-    setDirectSearchQuery(brand.brandName);
-  };
-
-  const searchQueuedBrand = (brand: BrandRow) => {
-    setDirectSearchQuery(brand.brandName);
-    runDirectSearch(brand.brandName);
+  const removeBrandFromApolloQueue = (brandId: string) => {
+    setBrandSearchOverrides((current) => ({
+      ...current,
+      [brandId]: false,
+    }));
+    setManualApolloBrands((current) => current.filter((brand) => brand.id !== brandId));
   };
 
   const setContactSelected = (contactId: string, checked: boolean) => {
@@ -834,21 +900,8 @@ function BrandFinderPage() {
     });
   };
 
-  const setDirectContactSelected = (contact: ContactRow, checked: boolean) => {
-    setDirectSelectedContactIds((current) => {
-      const next = new Set(current);
-      if (checked) {
-        next.add(contact.id);
-      } else {
-        next.delete(contact.id);
-      }
-      return next;
-    });
-  };
-
   const setApprovalContactSelected = (contact: ContactRow, checked: boolean) => {
     if (contact.source === "Contact Database") {
-      setDirectContactSelected(contact, checked);
       setSavedDraftContacts((current) => {
         if (checked) return mergeContacts(current, [contact]);
         return current.filter((item) => item.id !== contact.id);
@@ -869,21 +922,34 @@ function BrandFinderPage() {
     setFilters(DEFAULT_FILTER_STATE);
   };
 
-  const runApolloSearch = async () => {
+  const runDirectSearch = () => {
     setSearchError("");
     setSearchMessage("");
     setDraftMessage("");
     setDraftError("");
 
-    if (selectedBrands.length === 0) {
-      setSearchError("Select at least one brand first.");
+    if (directSearchBrands.length === 0) {
+      setSearchError("Add at least one brand to the direct search queue first.");
       return;
     }
 
-    if (filters.requireEmail && !filters.enrichEmails) {
-      setSearchError(
-        "Apollo search does not return emails by itself. Turn on email enrichment or turn off the email-only filter.",
-      );
+    setIsDirectSearching(true);
+    const matches = databaseContacts.filter((contact) =>
+      directSearchBrands.some((brand) => contactMatchesBrandSearch(contact, brand.brandName)),
+    );
+    setDirectSearchResultBrands(directSearchBrands);
+    setSearchMessage(`Direct search returned ${matches.length} saved contacts.`);
+    window.setTimeout(() => setIsDirectSearching(false), 250);
+  };
+
+  const runApolloSearch = async (brandsToSearch = selectedBrands) => {
+    setSearchError("");
+    setSearchMessage("");
+    setDraftMessage("");
+    setDraftError("");
+
+    if (brandsToSearch.length === 0) {
+      setSearchError("Add at least one brand to the Apollo queue first.");
       return;
     }
 
@@ -891,7 +957,7 @@ function BrandFinderPage() {
     try {
       const result = await searchApolloContacts({
         data: {
-          brands: selectedBrands.map((brand) => ({
+          brands: brandsToSearch.map((brand) => ({
             id: brand.id,
             name: brand.brandName,
             domain: brand.domain,
@@ -904,13 +970,13 @@ function BrandFinderPage() {
             emailStatuses: splitList(filters.emailStatusesText),
             includeSimilarTitles: filters.includeSimilarTitles,
             maxContactsPerBrand: filters.maxContactsPerBrand,
-            requireEmail: filters.requireEmail,
-            enrichEmails: filters.enrichEmails,
+            requireEmail: false,
+            enrichEmails: false,
           },
         },
       });
       const incoming = result.contacts
-        .map((contact) => apiContactToRow(contact, selectedBrands))
+        .map((contact) => apiContactToRow(contact, brandsToSearch))
         .filter((contact) => !filters.requireEmail || contact.email);
 
       setContacts((current) => mergeContacts(current, incoming));
@@ -919,6 +985,56 @@ function BrandFinderPage() {
       setSearchError(error instanceof Error ? error.message : "Apollo search failed.");
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  const enrichContact = async (contact: ContactRow) => {
+    if (contact.source !== "Apollo") return;
+
+    setSearchError("");
+    setSearchMessage("");
+    setDraftError("");
+    setDraftMessage("");
+    setEnrichingContactIds((current) => new Set(current).add(contact.id));
+
+    try {
+      const result = await enrichApolloContacts({
+        data: {
+          contacts: [contactRowToApolloContact(contact)],
+        },
+      });
+      const [enriched] = result.contacts.map((item) => apiContactToRow(item, selectedBrands));
+      if (!enriched) {
+        setSearchError("Apollo did not return an enriched contact.");
+        return;
+      }
+
+      setContacts((current) =>
+        mergeContacts(
+          current.filter((item) => item.id !== contact.id),
+          [enriched],
+        ),
+      );
+      setSelectedContactIds((current) => {
+        if (!current.has(contact.id)) return current;
+        const next = new Set(current);
+        next.delete(contact.id);
+        next.add(enriched.id);
+        return next;
+      });
+      setSearchMessage(
+        enriched.email
+          ? `Apollo enriched ${enriched.contactName}.`
+          : `Apollo checked ${enriched.contactName}, but no email was returned.`,
+      );
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : "Apollo enrichment failed.");
+    } finally {
+      setEnrichingContactIds((current) => {
+        const next = new Set(current);
+        next.delete(contact.id);
+        return next;
+      });
     }
   };
 
@@ -932,7 +1048,9 @@ function BrandFinderPage() {
     }
 
     if (selectedContacts.length === 0) {
-      setDraftError(`${skippedNoEmailCount} skipped because no email. Select at least one contact with an email.`);
+      setDraftError(
+        `${skippedNoEmailCount} skipped because no email. Select at least one contact with an email.`,
+      );
       return;
     }
 
@@ -979,13 +1097,14 @@ function BrandFinderPage() {
     setBrandOverrides({});
     setBrandSearchOverrides({});
     setDirectSearchBrandIds(new Set());
-    setDirectSearchQuery("");
-    setDirectActiveSearch("");
-    setDirectSelectedContactIds(new Set());
+    setManualDirectBrands([]);
+    setManualApolloBrands([]);
+    setDirectSearchResultBrands([]);
+    setDirectQueueInput("");
+    setApolloQueueInput("");
     setSavedDraftContacts([]);
     setContacts([]);
     setSelectedContactIds(new Set());
-    setBrandFilter(ALL_BRANDS);
     setSearchMessage("");
     setSearchError("");
     setDraftMessage("");
@@ -1003,9 +1122,9 @@ function BrandFinderPage() {
       <CompactStatusBar
         items={[
           ["Brands", brands.length],
-          ["Selected", selectedBrands.length],
-          ["Saved matches", directSearchContacts.length],
-          ["Apollo", contacts.length],
+          ["Direct queue", directSearchBrands.length],
+          ["Apollo queue", selectedBrands.length],
+          ["Contacts", approvalContacts.length],
           ["Drafts", selectedContacts.length],
         ]}
       />
@@ -1017,10 +1136,18 @@ function BrandFinderPage() {
             subtitle={
               sheetFileName
                 ? sheetFileName
-                : `${brands.length} parsed. ${selectedBrands.length} selected for Apollo.`
+                : `${brands.length} brands ready. X sends brands to direct search, V sends brands to Apollo.`
             }
             action={
               <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSheetEditorOpen((current) => !current)}
+                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <ListPlus className="h-4 w-4" />
+                  {isSheetEditorOpen ? "Hide rows" : brands.length > 0 ? "Edit rows" : "Paste rows"}
+                </button>
                 <label className="tb-action inline-flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90">
                   <Upload className="h-4 w-4" />
                   Upload sheet
@@ -1045,7 +1172,7 @@ function BrandFinderPage() {
               </div>
             }
           >
-            <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.72fr)_minmax(0,1.28fr)]">
+            {(isSheetEditorOpen || brands.length === 0) && (
               <Textarea
                 value={sheetInput}
                 onChange={(event) => {
@@ -1055,220 +1182,170 @@ function BrandFinderPage() {
                 placeholder={
                   "Dream Brand\tWebsite\nRhode\trhodeskin.com\nGymshark\tgymshark.com\nPoppi\tdrinkpoppi.com"
                 }
-                className="min-h-32 rounded-2xl bg-background text-sm lg:min-h-full"
+                className="mb-3 min-h-28 rounded-2xl bg-background text-sm"
               />
+            )}
 
-              <div className="max-w-full overflow-x-auto rounded-2xl border border-border">
-                <table className="w-full min-w-[760px] text-sm">
-                  <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-                    <tr>
-                      <th className="w-12 px-3 py-2.5 text-left font-medium">Use</th>
-                      <th className="px-3 py-2.5 text-left font-medium">Brand</th>
-                      <th className="px-3 py-2.5 text-left font-medium">Website</th>
-                      <th className="px-3 py-2.5 text-left font-medium">Saved status</th>
-                      <th className="px-3 py-2.5 text-left font-medium">Saved search</th>
+            <div className="max-w-full overflow-x-auto rounded-2xl border border-border">
+              <table className="w-full min-w-[680px] text-sm">
+                <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="w-[28%] px-3 py-2.5 text-left font-medium">Brand</th>
+                    <th className="w-[26%] px-3 py-2.5 text-left font-medium">Website</th>
+                    <th className="w-[26%] px-3 py-2.5 text-left font-medium">Saved status</th>
+                    <th className="w-28 px-3 py-2.5 text-left font-medium">Decision</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {brands.length === 0 && (
+                    <tr className="border-t border-border/60">
+                      <td
+                        colSpan={4}
+                        className="px-3 py-8 text-center text-sm text-muted-foreground"
+                      >
+                        Upload or paste a dream brand sheet.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {brands.length === 0 && (
-                      <tr className="border-t border-border/60">
-                        <td
-                          colSpan={5}
-                          className="px-3 py-8 text-center text-sm text-muted-foreground"
-                        >
-                          Upload or paste a dream brand sheet.
+                  )}
+                  {brands.map((brand) => {
+                    const inDirectQueue = directSearchBrandIds.has(brand.id);
+                    const inApolloQueue = brandSearchOverrides[brand.id] === true;
+                    const status = getBrandDatabaseStatus(
+                      brand,
+                      databaseContacts,
+                      contactDatabaseChecked,
+                    );
+
+                    return (
+                      <tr
+                        key={brand.id}
+                        className={cn(
+                          "tb-row-hover border-t border-border/60",
+                          status.status === "database" && "bg-destructive/10",
+                          status.status === "none" && "bg-fun-lime/10",
+                        )}
+                      >
+                        <td className="px-3 py-2.5">
+                          <input
+                            value={brand.brandName}
+                            onChange={(event) =>
+                              updateBrandOverride(brand.id, { brandName: event.target.value })
+                            }
+                            className="h-9 w-full rounded-xl border border-border bg-background px-2.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <input
+                            value={brand.domain}
+                            onChange={(event) =>
+                              updateBrandOverride(brand.id, { domain: event.target.value })
+                            }
+                            placeholder="website.com"
+                            className="h-9 w-full rounded-xl border border-border bg-background px-2.5 text-sm font-semibold text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span
+                            className={cn(
+                              "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold",
+                              statusTone(status.status),
+                            )}
+                          >
+                            {status.label}
+                          </span>
+                          {status.count > 0 && (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {status.count} stored
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <DecisionButtons
+                            rejectLabel={`Send ${brand.brandName} to direct search`}
+                            approveLabel={`Send ${brand.brandName} to Apollo`}
+                            rejectActive={inDirectQueue}
+                            approveActive={inApolloQueue}
+                            onReject={() => queueBrandForDirect(brand)}
+                            onApprove={() => queueBrandForApollo(brand)}
+                          />
                         </td>
                       </tr>
-                    )}
-                    {brands.map((brand) => {
-                      const useInSearch = brandSearchOverrides[brand.id] ?? true;
-                      const inDirectQueue = directSearchBrandIds.has(brand.id);
-                      const status = getBrandDatabaseStatus(
-                        brand,
-                        databaseContacts,
-                        contactDatabaseChecked,
-                      );
-
-                      return (
-                        <tr key={brand.id} className="tb-row-hover border-t border-border/60">
-                          <td className="px-3 py-2.5">
-                            <Checkbox
-                              checked={useInSearch}
-                              onCheckedChange={(checked) =>
-                                setBrandUse(brand.id, checked === true)
-                              }
-                              aria-label={`Search ${brand.brandName}`}
-                            />
-                          </td>
-                          <td className="min-w-[180px] px-3 py-2.5">
-                            <input
-                              value={brand.brandName}
-                              onChange={(event) =>
-                                updateBrandOverride(brand.id, { brandName: event.target.value })
-                              }
-                              className="h-8 w-full rounded-xl border border-border bg-background px-2.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
-                            />
-                          </td>
-                          <td className="min-w-[170px] px-3 py-2.5">
-                            <input
-                              value={brand.domain}
-                              onChange={(event) =>
-                                updateBrandOverride(brand.id, { domain: event.target.value })
-                              }
-                              placeholder="domain.com"
-                              className="h-8 w-full rounded-xl border border-border bg-background px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                            />
-                          </td>
-                          <td className="min-w-[180px] px-3 py-2.5">
-                            <span
-                              className={cn(
-                                "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold",
-                                statusTone(status.status),
-                              )}
-                            >
-                              {status.label}
-                            </span>
-                            {status.count > 0 && (
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {status.count} stored
-                              </div>
-                            )}
-                          </td>
-                          <td className="min-w-[150px] px-3 py-2.5">
-                            <button
-                              type="button"
-                              disabled={inDirectQueue}
-                              onClick={() => addBrandsToDirectSearch([brand])}
-                              className="tb-action inline-flex h-8 items-center gap-1.5 rounded-xl bg-muted px-2.5 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              <ListPlus className="h-3.5 w-3.5" />
-                              {inDirectQueue ? "Queued" : "Queue"}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
 
-            <div className="mt-4 rounded-2xl border border-border bg-background p-3">
-              <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-                <div className="relative min-w-0 flex-1">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    value={directSearchQuery}
-                    onChange={(event) => setDirectSearchQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") runDirectSearch();
-                    }}
-                    placeholder="Search saved Contact Database by brand..."
-                    className="tb-search h-10 w-full rounded-2xl border border-border bg-card pl-9 pr-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              <QueueBox
+                title="Direct search queue"
+                subtitle="Internal database search"
+                value={directQueueInput}
+                placeholder="Add brand to internal queue..."
+                onChange={setDirectQueueInput}
+                onAdd={addManualDirectBrand}
+                action={
+                  <QueueActions
+                    runLabel="Run Search"
+                    runDisabled={isDirectSearching || directSearchBrands.length === 0}
+                    createDisabled={isCreatingDrafts || selectedContacts.length === 0}
+                    isRunning={isDirectSearching}
+                    isCreating={isCreatingDrafts}
+                    onRun={runDirectSearch}
+                    onCreate={() => void createDrafts()}
                   />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => runDirectSearch()}
-                  className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"
-                >
-                  <Search className="h-4 w-4" />
-                  Search saved
-                </button>
-                <button
-                  type="button"
-                  disabled={
-                    directSearchBrandIds.size === 0 &&
-                    !directSearchQuery.trim() &&
-                    !directActiveSearch.trim()
-                  }
-                  onClick={clearDirectSearch}
-                  className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Clear
-                </button>
-              </div>
-
-              <div className="mt-2 flex flex-wrap gap-2">
-                {directSearchBrands.length === 0 && (
-                  <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">
-                    No queued brands yet
-                  </span>
+                }
+              >
+                {directSearchBrands.length === 0 ? (
+                  <QueueEmpty />
+                ) : (
+                  directSearchBrands.map((brand) => (
+                    <QueueChip
+                      key={brand.id}
+                      brand={brand}
+                      onRemove={() => removeBrandFromDirectSearch(brand.id)}
+                    />
+                  ))
                 )}
-                {directSearchBrands.map((brand) => (
-                  <div
-                    key={brand.id}
-                    className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2"
-                  >
-                    <span className="text-sm font-bold">{brand.brandName}</span>
-                    <button
-                      type="button"
-                      onClick={() => searchQueuedBrand(brand)}
-                      className="tb-action rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground hover:opacity-90"
-                    >
-                      Search
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveBrandToDirectSearchBar(brand)}
-                      className="tb-action rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      Move to search bar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeBrandFromDirectSearch(brand.id)}
-                      className="tb-action rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
+              </QueueBox>
+
+              <QueueBox
+                title="Apollo queue"
+                subtitle="Run Apollo first. Enrich after reviewing people."
+                value={apolloQueueInput}
+                placeholder="Add brand to Apollo queue..."
+                onChange={setApolloQueueInput}
+                onAdd={addManualApolloBrand}
+                action={
+                  <QueueActions
+                    runLabel="Run Apollo"
+                    runDisabled={isSearching || selectedBrands.length === 0}
+                    createDisabled={isCreatingDrafts || selectedContacts.length === 0}
+                    isRunning={isSearching}
+                    isCreating={isCreatingDrafts}
+                    onRun={() => void runApolloSearch()}
+                    onCreate={() => void createDrafts()}
+                  />
+                }
+              >
+                {selectedBrands.length === 0 ? (
+                  <QueueEmpty />
+                ) : (
+                  selectedBrands.map((brand) => (
+                    <QueueChip
+                      key={brand.id}
+                      brand={brand}
+                      onRemove={() => removeBrandFromApolloQueue(brand.id)}
+                    />
+                  ))
+                )}
+              </QueueBox>
             </div>
           </Panel>
 
           <Panel
-            title="Contacts"
+            title="Contact Approval"
             subtitle={`${approvalContacts.length} loaded. ${selectedContacts.length} selected for drafts.`}
-            action={
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                <DashboardSelectField
-                  label="Brand filter"
-                  value={brandFilter}
-                  options={brandOptions}
-                  onChange={setBrandFilter}
-                  className="min-w-[190px] sm:w-[210px]"
-                />
-                <button
-                  type="button"
-                  disabled={isSearching || selectedBrands.length === 0}
-                  onClick={() => void runApolloSearch()}
-                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isSearching ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Search className="h-4 w-4" />
-                  )}
-                  Run Apollo
-                </button>
-                <button
-                  type="button"
-                  disabled={isCreatingDrafts || selectedContacts.length === 0}
-                  onClick={() => void createDrafts()}
-                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-4 text-sm font-semibold text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isCreatingDrafts ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                  Create drafts
-                </button>
-              </div>
-            }
           >
             {(searchError || searchMessage || draftError || draftMessage) && (
               <div
@@ -1284,50 +1361,63 @@ function BrandFinderPage() {
             )}
 
             <div className="max-w-full overflow-x-auto rounded-2xl border border-border">
-              <table className="w-full min-w-[980px] text-sm">
+              <table className="w-full min-w-[760px] text-sm">
                 <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
-                    <th className="w-12 px-3 py-2.5 text-left font-medium">Select</th>
+                    <th className="w-28 px-3 py-2.5 text-left font-medium">Decision</th>
                     <th className="px-3 py-2.5 text-left font-medium">Brand</th>
                     <th className="px-3 py-2.5 text-left font-medium">Contact</th>
                     <th className="px-3 py-2.5 text-left font-medium">Email</th>
                     <th className="px-3 py-2.5 text-left font-medium">Position</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Source</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredApprovalContacts.length === 0 && (
+                  {approvalContacts.length === 0 && (
                     <tr className="border-t border-border/60">
                       <td
-                        colSpan={7}
+                        colSpan={5}
                         className="px-3 py-8 text-center text-sm text-muted-foreground"
                       >
                         Search saved contacts or run Apollo to load people.
                       </td>
                     </tr>
                   )}
-                  {filteredApprovalContacts.map((contact) => {
-                    const duplicateLabel =
-                      contact.source === "Contact Database"
-                        ? ""
-                        : contactDuplicateLabel(contact, databaseContacts);
+                  {approvalContacts.map((contact) => {
                     const isSelected = isApprovalContactSelected(contact);
+                    const canEnrich = contact.source === "Apollo";
+                    const isEnriching = enrichingContactIds.has(contact.id);
 
                     return (
                       <tr key={contact.id} className="tb-row-hover border-t border-border/60">
                         <td className="px-3 py-3">
-                          <Checkbox
-                            checked={isSelected}
-                            disabled={!contact.email}
-                            onCheckedChange={(checked) =>
-                              setApprovalContactSelected(contact, checked === true)
-                            }
-                            aria-label={`Select ${contact.contactName}`}
+                          <DecisionButtons
+                            rejectLabel={`Skip ${contact.contactName}`}
+                            approveLabel={`Use ${contact.contactName}`}
+                            approveActive={isSelected}
+                            onReject={() => setApprovalContactSelected(contact, false)}
+                            onApprove={() => setApprovalContactSelected(contact, true)}
+                            approveDisabled={!contact.email}
                           />
                         </td>
-                        <td className="min-w-[170px] px-3 py-3 font-semibold">
-                          {contact.brandName}
+                        <td className="min-w-[190px] px-3 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold">{contact.brandName}</span>
+                            {canEnrich && (
+                              <button
+                                type="button"
+                                disabled={isEnriching}
+                                onClick={() => void enrichContact(contact)}
+                                className="tb-action inline-flex h-7 items-center gap-1.5 rounded-full bg-primary px-2.5 text-xs font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {isEnriching ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Sparkles className="h-3.5 w-3.5" />
+                                )}
+                                Enrich
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="min-w-[180px] px-3 py-3">{contact.contactName}</td>
                         <td className="min-w-[240px] px-3 py-3">
@@ -1350,35 +1440,13 @@ function BrandFinderPage() {
                               </button>
                             ) : (
                               <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
-                                No email
+                                Needs enrich
                               </span>
                             )}
                           </div>
                         </td>
                         <td className="min-w-[220px] px-3 py-3 text-muted-foreground">
                           {contact.position || "-"}
-                        </td>
-                        <td className="min-w-[150px] px-3 py-3">
-                          <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
-                            {contact.source || "Apollo"}
-                          </span>
-                        </td>
-                        <td className="min-w-[190px] px-3 py-3">
-                          <div className="flex flex-wrap gap-1.5">
-                            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
-                              {contact.emailStatus || "Unknown"}
-                            </span>
-                            {!contact.email && (
-                              <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-bold text-muted-foreground">
-                                No email
-                              </span>
-                            )}
-                            {duplicateLabel && (
-                              <span className="rounded-full border border-fun-blue/60 bg-fun-blue/20 px-2.5 py-1 text-xs font-bold text-foreground">
-                                {duplicateLabel}
-                              </span>
-                            )}
-                          </div>
                         </td>
                       </tr>
                     );
@@ -1389,10 +1457,12 @@ function BrandFinderPage() {
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-muted-foreground">
               <div className="text-xs font-semibold text-muted-foreground">
-                Apollo cap: up to {metricValue(estimatedApolloEmailReveals)} email reveals this run.
+                Apollo cap: up to {metricValue(estimatedApolloPeople)} people this run. Email reveal
+                happens with Enrich.
               </div>
               <div>
-                {duplicateContactCount} Apollo duplicate{duplicateContactCount === 1 ? "" : "s"} flagged.
+                {duplicateContactCount} Apollo duplicate{duplicateContactCount === 1 ? "" : "s"}{" "}
+                flagged.
               </div>
             </div>
           </Panel>
@@ -1457,20 +1527,6 @@ function BrandFinderPage() {
                   checked={filters.includeSimilarTitles}
                   onCheckedChange={(checked) =>
                     setFilters((current) => ({ ...current, includeSimilarTitles: checked }))
-                  }
-                />
-                <ToggleRow
-                  label="Only return contacts with emails"
-                  checked={filters.requireEmail}
-                  onCheckedChange={(checked) =>
-                    setFilters((current) => ({ ...current, requireEmail: checked }))
-                  }
-                />
-                <ToggleRow
-                  label="Enrich emails after search"
-                  checked={filters.enrichEmails}
-                  onCheckedChange={(checked) =>
-                    setFilters((current) => ({ ...current, enrichEmails: checked }))
                   }
                 />
                 <button
@@ -1573,6 +1629,200 @@ function RuleChip({ label, value }: { label: string; value: string }) {
     <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">
       <span className="text-foreground">{label}</span>
       <span className="truncate">{value || "None"}</span>
+    </span>
+  );
+}
+
+function DecisionButtons({
+  rejectLabel,
+  approveLabel,
+  rejectActive = false,
+  approveActive = false,
+  approveDisabled = false,
+  onReject,
+  onApprove,
+}: {
+  rejectLabel: string;
+  approveLabel: string;
+  rejectActive?: boolean;
+  approveActive?: boolean;
+  approveDisabled?: boolean;
+  onReject: () => void;
+  onApprove: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        aria-label={rejectLabel}
+        onClick={onReject}
+        className={cn(
+          "tb-action flex h-8 w-8 items-center justify-center rounded-full border text-xs font-black",
+          rejectActive
+            ? "border-destructive/40 bg-destructive/15 text-destructive"
+            : "border-border bg-background text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
+        )}
+      >
+        <X className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        aria-label={approveLabel}
+        disabled={approveDisabled}
+        onClick={onApprove}
+        className={cn(
+          "tb-action flex h-8 w-8 items-center justify-center rounded-full border text-xs font-black disabled:cursor-not-allowed disabled:opacity-45",
+          approveActive
+            ? "border-fun-lime/60 bg-fun-lime/30 text-foreground"
+            : "border-border bg-background text-muted-foreground hover:bg-fun-lime/20 hover:text-foreground",
+        )}
+      >
+        V
+      </button>
+    </div>
+  );
+}
+
+function QueueActions({
+  runLabel,
+  runDisabled,
+  createDisabled,
+  isRunning,
+  isCreating,
+  onRun,
+  onCreate,
+}: {
+  runLabel: string;
+  runDisabled: boolean;
+  createDisabled: boolean;
+  isRunning: boolean;
+  isCreating: boolean;
+  onRun: () => void;
+  onCreate: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button
+        type="button"
+        disabled={runDisabled}
+        onClick={onRun}
+        className="tb-action inline-flex h-9 items-center gap-2 rounded-2xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {isRunning ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Search className="h-3.5 w-3.5" />
+        )}
+        {runLabel}
+      </button>
+      <button
+        type="button"
+        disabled={createDisabled}
+        onClick={onCreate}
+        className="tb-action inline-flex h-9 items-center gap-2 rounded-2xl bg-muted px-3 text-xs font-bold text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {isCreating ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Send className="h-3.5 w-3.5" />
+        )}
+        Create drafts
+      </button>
+    </div>
+  );
+}
+
+function QueueBox({
+  title,
+  subtitle,
+  value,
+  placeholder,
+  onChange,
+  onAdd,
+  action,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+  onAdd: () => void;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-background p-3">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="text-sm font-bold">{title}</div>
+          <div className="text-xs font-semibold text-muted-foreground">{subtitle}</div>
+        </div>
+        {action}
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onAdd();
+          }}
+          placeholder={placeholder}
+          className="tb-search h-9 min-w-0 flex-1 rounded-2xl border border-border bg-card px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
+        />
+        <button
+          type="button"
+          onClick={onAdd}
+          className="tb-action inline-flex h-9 items-center justify-center gap-2 rounded-2xl bg-muted px-3 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <ListPlus className="h-3.5 w-3.5" />
+          Add to queue
+        </button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">{children}</div>
+    </div>
+  );
+}
+
+function QueueChip({
+  brand,
+  primaryLabel,
+  onPrimary,
+  onRemove,
+}: {
+  brand: BrandRow;
+  primaryLabel?: string;
+  onPrimary?: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2">
+      <span className="max-w-[170px] truncate text-sm font-bold">{brand.brandName}</span>
+      {primaryLabel && onPrimary && (
+        <button
+          type="button"
+          onClick={onPrimary}
+          className="tb-action rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground hover:opacity-90"
+        >
+          {primaryLabel}
+        </button>
+      )}
+      <button
+        type="button"
+        aria-label={`Remove ${brand.brandName}`}
+        onClick={onRemove}
+        className="tb-action flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function QueueEmpty() {
+  return (
+    <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">
+      No queued brands yet
     </span>
   );
 }

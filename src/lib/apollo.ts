@@ -25,6 +25,28 @@ const searchApolloInput = z.object({
   filters: apolloFiltersSchema,
 });
 
+const apolloContactInputSchema = z.object({
+  id: z.string().min(1).max(240),
+  brandId: z.string().min(1).max(160),
+  brandName: z.string().min(1).max(160),
+  domain: z.string().max(180).optional().default(""),
+  apolloPersonId: z.string().max(180).optional().default(""),
+  apolloOrganizationId: z.string().max(180).optional().default(""),
+  name: z.string().max(180).optional().default(""),
+  firstName: z.string().max(120).optional().default(""),
+  lastName: z.string().max(120).optional().default(""),
+  title: z.string().max(180).optional().default(""),
+  company: z.string().max(180).optional().default(""),
+  email: z.string().max(240).optional().default(""),
+  linkedin: z.string().max(300).optional().default(""),
+  emailStatus: z.string().max(80).optional().default(""),
+  source: z.literal("Apollo API").optional().default("Apollo API"),
+});
+
+const enrichApolloInput = z.object({
+  contacts: z.array(apolloContactInputSchema).min(1).max(10),
+});
+
 type BrandInput = z.infer<typeof brandInputSchema>;
 type ApolloFilters = z.infer<typeof apolloFiltersSchema>;
 
@@ -539,6 +561,27 @@ export const searchApolloContacts = createServerFn({ method: "POST" })
       meta: {
         totalCount,
         enrichedCount: enrichedResult.enrichedCount,
+      },
+    };
+  });
+
+export const enrichApolloContacts = createServerFn({ method: "POST" })
+  .inputValidator(enrichApolloInput)
+  .handler(async ({ data }) => {
+    const { requireDashboardAuth } = await import("@/lib/auth.server");
+    await requireDashboardAuth();
+
+    const result = await enrichContacts(
+      data.contacts.map((contact) => ({
+        ...contact,
+        source: "Apollo API" as const,
+      })),
+    );
+
+    return {
+      contacts: result.contacts,
+      meta: {
+        enrichedCount: result.enrichedCount,
       },
     };
   });
