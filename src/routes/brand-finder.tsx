@@ -1364,11 +1364,11 @@ function BrandFinderPage() {
               <table className="w-full min-w-[760px] text-sm">
                 <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
-                    <th className="w-28 px-3 py-2.5 text-left font-medium">Decision</th>
                     <th className="px-3 py-2.5 text-left font-medium">Brand</th>
                     <th className="px-3 py-2.5 text-left font-medium">Contact</th>
                     <th className="px-3 py-2.5 text-left font-medium">Email</th>
                     <th className="px-3 py-2.5 text-left font-medium">Position</th>
+                    <th className="w-28 px-3 py-2.5 text-left font-medium">Decision</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1389,16 +1389,6 @@ function BrandFinderPage() {
 
                     return (
                       <tr key={contact.id} className="tb-row-hover border-t border-border/60">
-                        <td className="px-3 py-3">
-                          <DecisionButtons
-                            rejectLabel={`Skip ${contact.contactName}`}
-                            approveLabel={`Use ${contact.contactName}`}
-                            approveActive={isSelected}
-                            onReject={() => setApprovalContactSelected(contact, false)}
-                            onApprove={() => setApprovalContactSelected(contact, true)}
-                            approveDisabled={!contact.email}
-                          />
-                        </td>
                         <td className="min-w-[190px] px-3 py-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-semibold">{contact.brandName}</span>
@@ -1447,6 +1437,16 @@ function BrandFinderPage() {
                         </td>
                         <td className="min-w-[220px] px-3 py-3 text-muted-foreground">
                           {contact.position || "-"}
+                        </td>
+                        <td className="px-3 py-3">
+                          <DecisionButtons
+                            rejectLabel={`Skip ${contact.contactName}`}
+                            approveLabel={`Use ${contact.contactName}`}
+                            approveActive={isSelected}
+                            onReject={() => setApprovalContactSelected(contact, false)}
+                            onApprove={() => setApprovalContactSelected(contact, true)}
+                            approveDisabled={!contact.email}
+                          />
                         </td>
                       </tr>
                     );
