@@ -5,7 +5,6 @@ import {
   Check,
   Copy,
   Database,
-  ListPlus,
   Loader2,
   RotateCcw,
   Search,
@@ -106,8 +105,6 @@ type SavedBrandFinderState = {
   brandOverrides?: Record<string, BrandOverride>;
   brandSearchOverrides?: Record<string, boolean>;
   directSearchBrandIds?: string[];
-  manualDirectBrands?: BrandRow[];
-  manualApolloBrands?: BrandRow[];
   directSearchResultBrands?: BrandRow[];
   savedDraftContacts?: ContactRow[];
   contacts?: ContactRow[];
@@ -380,25 +377,6 @@ function applyBrandOverrides(brands: BrandRow[], overrides: Record<string, Brand
   });
 }
 
-function manualBrandFromInput(value: string): BrandRow | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  const domain = extractDomain(trimmed);
-  const rawName = trimmed.replace(domain, "").replace(/[|,]+/g, " ").trim();
-  const brandName = titleCase(rawName || domainToName(domain) || trimmed);
-
-  if (!brandName) return null;
-
-  return {
-    id: `manual-${compactKey(domain || brandName)}`,
-    rowNumber: 0,
-    rawName: trimmed,
-    brandName,
-    domain,
-  };
-}
-
 function mergeBrandRows(rows: BrandRow[]) {
   const map = new Map<string, BrandRow>();
   rows.forEach((row) => {
@@ -625,16 +603,11 @@ function BrandFinderPage() {
   const [brandOverrides, setBrandOverrides] = useState<Record<string, BrandOverride>>({});
   const [brandSearchOverrides, setBrandSearchOverrides] = useState<Record<string, boolean>>({});
   const [directSearchBrandIds, setDirectSearchBrandIds] = useState<Set<string>>(() => new Set());
-  const [manualDirectBrands, setManualDirectBrands] = useState<BrandRow[]>([]);
-  const [manualApolloBrands, setManualApolloBrands] = useState<BrandRow[]>([]);
   const [directSearchResultBrands, setDirectSearchResultBrands] = useState<BrandRow[]>([]);
-  const [directQueueInput, setDirectQueueInput] = useState("");
-  const [apolloQueueInput, setApolloQueueInput] = useState("");
   const [savedDraftContacts, setSavedDraftContacts] = useState<ContactRow[]>([]);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(() => new Set());
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [isSheetEditorOpen, setIsSheetEditorOpen] = useState(false);
   const [enrichingContactIds, setEnrichingContactIds] = useState<Set<string>>(() => new Set());
   const [isSearching, setIsSearching] = useState(false);
   const [isDirectSearching, setIsDirectSearching] = useState(false);
@@ -651,20 +624,12 @@ function BrandFinderPage() {
     [brandOverrides, parsedBrands],
   );
   const selectedBrands = useMemo(
-    () =>
-      mergeBrandRows([
-        ...brands.filter((brand) => brandSearchOverrides[brand.id] === true),
-        ...manualApolloBrands,
-      ]),
-    [brandSearchOverrides, brands, manualApolloBrands],
+    () => mergeBrandRows(brands.filter((brand) => brandSearchOverrides[brand.id] === true)),
+    [brandSearchOverrides, brands],
   );
   const directSearchBrands = useMemo(
-    () =>
-      mergeBrandRows([
-        ...brands.filter((brand) => directSearchBrandIds.has(brand.id)),
-        ...manualDirectBrands,
-      ]),
-    [brands, directSearchBrandIds, manualDirectBrands],
+    () => mergeBrandRows(brands.filter((brand) => directSearchBrandIds.has(brand.id))),
+    [brands, directSearchBrandIds],
   );
   const directSearchTerms = useMemo(
     () => directSearchResultBrands.map((brand) => brand.brandName),
@@ -734,8 +699,6 @@ function BrandFinderPage() {
     setBrandOverrides(saved.brandOverrides ?? {});
     setBrandSearchOverrides(saved.brandSearchOverrides ?? {});
     setDirectSearchBrandIds(new Set(saved.directSearchBrandIds ?? []));
-    setManualDirectBrands(saved.manualDirectBrands ?? []);
-    setManualApolloBrands(saved.manualApolloBrands ?? []);
     setDirectSearchResultBrands(saved.directSearchResultBrands ?? []);
     setSavedDraftContacts(saved.savedDraftContacts ?? []);
     setContacts(saved.contacts ?? []);
@@ -757,8 +720,6 @@ function BrandFinderPage() {
       brandOverrides,
       brandSearchOverrides,
       directSearchBrandIds: Array.from(directSearchBrandIds),
-      manualDirectBrands,
-      manualApolloBrands,
       directSearchResultBrands,
       savedDraftContacts,
       contacts,
@@ -776,8 +737,6 @@ function BrandFinderPage() {
     draftMessage,
     filters,
     hasLoadedSavedState,
-    manualApolloBrands,
-    manualDirectBrands,
     savedDraftContacts,
     selectedContactIds,
     sheetFileName,
@@ -818,19 +777,8 @@ function BrandFinderPage() {
     const text = await file.text();
     setSheetInput(text);
     setSheetFileName(file.name);
-    setIsSheetEditorOpen(false);
     setSearchMessage("");
     setSearchError("");
-  };
-
-  const updateBrandOverride = (brandId: string, patch: BrandOverride) => {
-    setBrandOverrides((current) => ({
-      ...current,
-      [brandId]: {
-        ...(current[brandId] ?? {}),
-        ...patch,
-      },
-    }));
   };
 
   const addBrandsToDirectSearch = (items: BrandRow[]) => {
@@ -857,27 +805,12 @@ function BrandFinderPage() {
     }));
   };
 
-  const addManualDirectBrand = () => {
-    const brand = manualBrandFromInput(directQueueInput);
-    if (!brand) return;
-    setManualDirectBrands((current) => mergeBrandRows([...current, brand]));
-    setDirectQueueInput("");
-  };
-
-  const addManualApolloBrand = () => {
-    const brand = manualBrandFromInput(apolloQueueInput);
-    if (!brand) return;
-    setManualApolloBrands((current) => mergeBrandRows([...current, brand]));
-    setApolloQueueInput("");
-  };
-
   const removeBrandFromDirectSearch = (brandId: string) => {
     setDirectSearchBrandIds((current) => {
       const next = new Set(current);
       next.delete(brandId);
       return next;
     });
-    setManualDirectBrands((current) => current.filter((brand) => brand.id !== brandId));
   };
 
   const removeBrandFromApolloQueue = (brandId: string) => {
@@ -885,7 +818,6 @@ function BrandFinderPage() {
       ...current,
       [brandId]: false,
     }));
-    setManualApolloBrands((current) => current.filter((brand) => brand.id !== brandId));
   };
 
   const setContactSelected = (contactId: string, checked: boolean) => {
@@ -1097,11 +1029,7 @@ function BrandFinderPage() {
     setBrandOverrides({});
     setBrandSearchOverrides({});
     setDirectSearchBrandIds(new Set());
-    setManualDirectBrands([]);
-    setManualApolloBrands([]);
     setDirectSearchResultBrands([]);
-    setDirectQueueInput("");
-    setApolloQueueInput("");
     setSavedDraftContacts([]);
     setContacts([]);
     setSelectedContactIds(new Set());
@@ -1140,14 +1068,6 @@ function BrandFinderPage() {
             }
             action={
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsSheetEditorOpen((current) => !current)}
-                  className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-3 text-sm font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  <ListPlus className="h-4 w-4" />
-                  {isSheetEditorOpen ? "Hide rows" : brands.length > 0 ? "Edit rows" : "Paste rows"}
-                </button>
                 <label className="tb-action inline-flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90">
                   <Upload className="h-4 w-4" />
                   Upload sheet
@@ -1172,27 +1092,12 @@ function BrandFinderPage() {
               </div>
             }
           >
-            {(isSheetEditorOpen || brands.length === 0) && (
-              <Textarea
-                value={sheetInput}
-                onChange={(event) => {
-                  setSheetInput(event.target.value);
-                  setSheetFileName("");
-                }}
-                placeholder={
-                  "Dream Brand\tWebsite\nRhode\trhodeskin.com\nGymshark\tgymshark.com\nPoppi\tdrinkpoppi.com"
-                }
-                className="mb-3 min-h-28 rounded-2xl bg-background text-sm"
-              />
-            )}
-
             <div className="max-w-full overflow-x-auto rounded-2xl border border-border">
-              <table className="w-full min-w-[680px] text-sm">
+              <table className="w-full min-w-[560px] text-sm">
                 <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
-                    <th className="w-[28%] px-3 py-2.5 text-left font-medium">Brand</th>
-                    <th className="w-[26%] px-3 py-2.5 text-left font-medium">Website</th>
-                    <th className="w-[26%] px-3 py-2.5 text-left font-medium">Saved status</th>
+                    <th className="w-[46%] px-3 py-2.5 text-left font-medium">Brand</th>
+                    <th className="w-[34%] px-3 py-2.5 text-left font-medium">Saved status</th>
                     <th className="w-28 px-3 py-2.5 text-left font-medium">Decision</th>
                   </tr>
                 </thead>
@@ -1200,10 +1105,10 @@ function BrandFinderPage() {
                   {brands.length === 0 && (
                     <tr className="border-t border-border/60">
                       <td
-                        colSpan={4}
+                        colSpan={3}
                         className="px-3 py-8 text-center text-sm text-muted-foreground"
                       >
-                        Upload or paste a dream brand sheet.
+                        Upload a dream brand sheet to start.
                       </td>
                     </tr>
                   )}
@@ -1226,23 +1131,7 @@ function BrandFinderPage() {
                         )}
                       >
                         <td className="px-3 py-2.5">
-                          <input
-                            value={brand.brandName}
-                            onChange={(event) =>
-                              updateBrandOverride(brand.id, { brandName: event.target.value })
-                            }
-                            className="h-9 w-full rounded-xl border border-border bg-background px-2.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
-                          />
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <input
-                            value={brand.domain}
-                            onChange={(event) =>
-                              updateBrandOverride(brand.id, { domain: event.target.value })
-                            }
-                            placeholder="website.com"
-                            className="h-9 w-full rounded-xl border border-border bg-background px-2.5 text-sm font-semibold text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                          />
+                          <div className="font-semibold">{brand.brandName}</div>
                         </td>
                         <td className="px-3 py-2.5">
                           <span
@@ -1280,10 +1169,6 @@ function BrandFinderPage() {
               <QueueBox
                 title="Direct search queue"
                 subtitle="Internal database search"
-                value={directQueueInput}
-                placeholder="Add brand to internal queue..."
-                onChange={setDirectQueueInput}
-                onAdd={addManualDirectBrand}
                 action={
                   <QueueActions
                     runLabel="Run Search"
@@ -1312,10 +1197,6 @@ function BrandFinderPage() {
               <QueueBox
                 title="Apollo queue"
                 subtitle="Run Apollo first. Enrich after reviewing people."
-                value={apolloQueueInput}
-                placeholder="Add brand to Apollo queue..."
-                onChange={setApolloQueueInput}
-                onAdd={addManualApolloBrand}
                 action={
                   <QueueActions
                     runLabel="Run Apollo"
@@ -1735,19 +1616,11 @@ function QueueActions({
 function QueueBox({
   title,
   subtitle,
-  value,
-  placeholder,
-  onChange,
-  onAdd,
   action,
   children,
 }: {
   title: string;
   subtitle: string;
-  value: string;
-  placeholder: string;
-  onChange: (value: string) => void;
-  onAdd: () => void;
   action?: ReactNode;
   children: ReactNode;
 }) {
@@ -1760,26 +1633,7 @@ function QueueBox({
         </div>
         {action}
       </div>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") onAdd();
-          }}
-          placeholder={placeholder}
-          className="tb-search h-9 min-w-0 flex-1 rounded-2xl border border-border bg-card px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
-        />
-        <button
-          type="button"
-          onClick={onAdd}
-          className="tb-action inline-flex h-9 items-center justify-center gap-2 rounded-2xl bg-muted px-3 text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <ListPlus className="h-3.5 w-3.5" />
-          Add to queue
-        </button>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">{children}</div>
+      <div className="flex flex-wrap gap-2">{children}</div>
     </div>
   );
 }
