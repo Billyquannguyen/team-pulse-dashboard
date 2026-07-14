@@ -95,10 +95,16 @@ Required columns:
 - `ID`
 - `Joined Month`
 - `Status`
+- `Gmail Label`
+- `Discord User ID`
+- `Weekly Report Enabled`
+- `Team or Department`
 
 `Status` can be `Active` or `Offboarded`. Current dashboard views use active members by default. Offboarded members can stay in the sheet for historical reporting later.
 
 `ID` is the stable internal ID and the member worksheet/tab name. If that worksheet is missing, the dashboard shows a warning instead of replacing them with another tab.
+
+The Weekly Gmail Outreach Report includes only members where `Status` is `Active`, `Weekly Report Enabled` is `TRUE`, and `Team or Department` is `Creator` or `Outreach`.
 
 System tabs are never treated as members, including `Comm Tracking`, `Goals`, `Analytics`, `Contact Database`, `Active Brands`, `Brand Finder`, `Team Assets`, `Calendly Reminders`, and `Settings`.
 

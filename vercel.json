@@ -5,6 +5,10 @@
     {
       "path": "/api/slack-followups",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/weekly-gmail-outreach-report",
+      "schedule": "0 17 * * 4"
     }
   ]
 }

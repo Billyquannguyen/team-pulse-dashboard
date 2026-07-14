@@ -29,6 +29,10 @@ export type TeamMemberConfig = {
   tiktokUrl: string;
   youtubeUrl: string;
   websiteUrl: string;
+  gmailLabel: string;
+  discordUserId: string;
+  weeklyReportEnabled: boolean;
+  teamDepartment: string;
   rowNumber?: number;
 };
 
@@ -41,7 +45,11 @@ type TeamMemberField =
   | "instagramUrl"
   | "tiktokUrl"
   | "youtubeUrl"
-  | "websiteUrl";
+  | "websiteUrl"
+  | "gmailLabel"
+  | "discordUserId"
+  | "weeklyReportEnabled"
+  | "teamDepartment";
 
 type TeamMembersCacheEntry = {
   data: TeamMembersSheetData;
@@ -92,6 +100,10 @@ export const TEAM_MEMBERS_HEADERS = [
   "TikTok",
   "YouTube",
   "Website",
+  "Gmail Label",
+  "Discord User ID",
+  "Weekly Report Enabled",
+  "Team or Department",
 ] as const;
 
 const TEAM_MEMBER_FIELDS: TeamMemberField[] = [
@@ -104,6 +116,10 @@ const TEAM_MEMBER_FIELDS: TeamMemberField[] = [
   "tiktokUrl",
   "youtubeUrl",
   "websiteUrl",
+  "gmailLabel",
+  "discordUserId",
+  "weeklyReportEnabled",
+  "teamDepartment",
 ];
 
 export const SYSTEM_MEMBER_TAB_NAMES = [
@@ -175,6 +191,24 @@ const TEAM_MEMBER_COLUMN_ALIASES: Record<TeamMemberField, string[]> = {
   tiktokUrl: ["tiktok", "tiktok url", "tik tok", "tik tok url"],
   youtubeUrl: ["youtube", "youtube url", "yt", "yt url"],
   websiteUrl: ["website", "website url", "site", "link"],
+  gmailLabel: ["gmail label", "gmail", "email label", "mail label"],
+  discordUserId: ["discord user id", "discord id", "discord", "discord snowflake"],
+  weeklyReportEnabled: [
+    "weekly report enabled",
+    "include in weekly report",
+    "weekly report",
+    "report enabled",
+    "include weekly",
+  ],
+  teamDepartment: [
+    "team or department",
+    "team / department",
+    "team department",
+    "team",
+    "department",
+    "dept",
+    "role",
+  ],
 };
 
 const teamMemberInput = z.object({
@@ -187,6 +221,10 @@ const teamMemberInput = z.object({
   tiktokUrl: z.string().trim().max(500).optional(),
   youtubeUrl: z.string().trim().max(500).optional(),
   websiteUrl: z.string().trim().max(500).optional(),
+  gmailLabel: z.string().trim().max(200).optional(),
+  discordUserId: z.string().trim().max(80).optional(),
+  weeklyReportEnabled: z.boolean().optional(),
+  teamDepartment: z.string().trim().max(80).optional(),
 });
 
 const updateTeamMemberInput = teamMemberInput.extend({
@@ -284,6 +322,20 @@ function formatStatus(status: TeamMemberStatus) {
   return status === "offboarded" ? "Offboarded" : "Active";
 }
 
+function parseBoolean(value: string) {
+  const normalized = normalizeKey(value);
+  return ["true", "yes", "y", "1", "enabled", "include", "included", "on"].includes(normalized);
+}
+
+function formatBoolean(value: boolean) {
+  return value ? "TRUE" : "FALSE";
+}
+
+function isWeeklyOutreachDepartment(value: string) {
+  const normalized = normalizeKey(value);
+  return normalized === "creator" || normalized === "outreach";
+}
+
 function buildColumnLookup(headers: string[]): HeaderLookup<TeamMemberField> {
   return createHeaderLookup(headers, TEAM_MEMBER_COLUMN_ALIASES);
 }
@@ -376,6 +428,10 @@ function normalizeTeamMemberRows(headers: string[], rows: string[][]) {
         tiktokUrl: getCell(row, lookup, "tiktokUrl").trim(),
         youtubeUrl: getCell(row, lookup, "youtubeUrl").trim(),
         websiteUrl: getCell(row, lookup, "websiteUrl").trim(),
+        gmailLabel: getCell(row, lookup, "gmailLabel").trim(),
+        discordUserId: getCell(row, lookup, "discordUserId").trim(),
+        weeklyReportEnabled: parseBoolean(getCell(row, lookup, "weeklyReportEnabled")),
+        teamDepartment: cleanValue(getCell(row, lookup, "teamDepartment")),
         rowNumber: index + 2,
       };
     })
@@ -469,23 +525,27 @@ async function loadTeamMembersWorksheet(
       ? normalizeTeamMemberRows(currentHeaders, currentRows)
       : [];
 
-    await googleSheets.updateSheetRow(config, spreadsheetId, sheet, 1, [...TEAM_MEMBERS_HEADERS]);
+    if (!hasCanonicalTeamMemberHeaders(currentHeaders)) {
+      await googleSheets.updateSheetRow(config, spreadsheetId, sheet, 1, [...TEAM_MEMBERS_HEADERS]);
 
-    for (const member of migratedRows) {
-      if (!member.rowNumber) continue;
-      await googleSheets.updateSheetRow(
-        config,
-        spreadsheetId,
-        sheet,
-        member.rowNumber,
-        buildTeamMemberWriteRow(member),
-      );
+      for (const member of migratedRows) {
+        if (!member.rowNumber) continue;
+        await googleSheets.updateSheetRow(
+          config,
+          spreadsheetId,
+          sheet,
+          member.rowNumber,
+          buildTeamMemberWriteRow(member),
+        );
+      }
+
+      sheetRows = {
+        headers: [...TEAM_MEMBERS_HEADERS],
+        rows: shouldMigrateRows
+          ? migratedRows.map((member) => buildTeamMemberWriteRow(member))
+          : currentRows,
+      };
     }
-
-    sheetRows = {
-      headers: [...TEAM_MEMBERS_HEADERS],
-      rows: shouldMigrateRows ? migratedRows.map(buildTeamMemberWriteRow) : currentRows,
-    };
   }
 
   return {
@@ -503,7 +563,15 @@ async function readTeamMembersSheetData(config: GoogleSheetsConfig): Promise<Tea
   const warnings: string[] = [];
 
   try {
-    const worksheet = await loadTeamMembersWorksheet(config);
+    let worksheet: TeamMembersWorksheet;
+
+    try {
+      worksheet = await loadTeamMembersWorksheet(config, { ensureHeaders: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      warnings.push(`Could not add missing TeamMembers reporting columns: ${message}`);
+      worksheet = await loadTeamMembersWorksheet(config);
+    }
 
     if (!hasMinimumTeamMemberHeaders(worksheet.headers)) {
       warnings.push(
@@ -625,12 +693,28 @@ export async function getActiveTeammatesForServer() {
   return members.map(teamMemberConfigToTeammate);
 }
 
+export async function getWeeklyOutreachReportMembers() {
+  const data = await getTeamMembersDataForServer();
+
+  return data.activeMembers.filter(
+    (member) => member.weeklyReportEnabled && isWeeklyOutreachDepartment(member.teamDepartment),
+  );
+}
+
 function buildTeamMemberWriteRow(
   input: z.infer<typeof teamMemberInput> &
     Partial<
       Pick<
         TeamMemberConfig,
-        "avatarUrl" | "instagramUrl" | "tiktokUrl" | "youtubeUrl" | "websiteUrl"
+        | "avatarUrl"
+        | "instagramUrl"
+        | "tiktokUrl"
+        | "youtubeUrl"
+        | "websiteUrl"
+        | "gmailLabel"
+        | "discordUserId"
+        | "weeklyReportEnabled"
+        | "teamDepartment"
       >
     >,
   existingRow?: string[],
@@ -638,6 +722,8 @@ function buildTeamMemberWriteRow(
 ) {
   const existing = (field: TeamMemberField) =>
     existingRow && existingLookup ? getCell(existingRow, existingLookup, field).trim() : "";
+  const weeklyReportEnabled =
+    input.weeklyReportEnabled ?? parseBoolean(existing("weeklyReportEnabled"));
 
   return [
     cleanValue(input.displayName),
@@ -649,6 +735,10 @@ function buildTeamMemberWriteRow(
     input.tiktokUrl ?? existing("tiktokUrl"),
     input.youtubeUrl ?? existing("youtubeUrl"),
     input.websiteUrl ?? existing("websiteUrl"),
+    input.gmailLabel ?? existing("gmailLabel"),
+    input.discordUserId ?? existing("discordUserId"),
+    formatBoolean(weeklyReportEnabled),
+    cleanValue(input.teamDepartment ?? existing("teamDepartment")),
   ];
 }
 

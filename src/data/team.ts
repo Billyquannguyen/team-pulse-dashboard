@@ -12,6 +12,7 @@ export type Teammate = {
   instagramUrl?: string;
   tiktokUrl?: string;
   youtubeUrl?: string;
+  websiteUrl?: string;
   // Parsed from the member summary label/value cells in the deal worksheet.
   commission: number;
   // Sum of Manager Total rows where Manager Total Paid is checked.

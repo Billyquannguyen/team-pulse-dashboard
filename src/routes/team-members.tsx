@@ -60,6 +60,10 @@ type MemberDraft = {
   tiktokUrl: string;
   youtubeUrl: string;
   websiteUrl: string;
+  gmailLabel: string;
+  discordUserId: string;
+  weeklyReportEnabled: boolean;
+  teamDepartment: string;
 };
 
 type MemberModalState = {
@@ -97,6 +101,10 @@ function emptyDraft(): MemberDraft {
     tiktokUrl: "",
     youtubeUrl: "",
     websiteUrl: "",
+    gmailLabel: "",
+    discordUserId: "",
+    weeklyReportEnabled: false,
+    teamDepartment: "",
   };
 }
 
@@ -113,6 +121,10 @@ function draftFromMember(member: TeamMemberConfig): MemberDraft {
     tiktokUrl: member.tiktokUrl,
     youtubeUrl: member.youtubeUrl,
     websiteUrl: member.websiteUrl,
+    gmailLabel: member.gmailLabel,
+    discordUserId: member.discordUserId,
+    weeklyReportEnabled: member.weeklyReportEnabled,
+    teamDepartment: member.teamDepartment,
   };
 }
 
@@ -311,6 +323,10 @@ function TeamMembersPage() {
           id: member.id,
           joinedMonth: member.joinedMonth,
           status: nextStatus,
+          gmailLabel: member.gmailLabel,
+          discordUserId: member.discordUserId,
+          weeklyReportEnabled: member.weeklyReportEnabled,
+          teamDepartment: member.teamDepartment,
         },
       });
       setMessage(
@@ -547,7 +563,7 @@ function ManageMembersModal({
 }) {
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
-      <section className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border">
+      <section className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
           <div>
             <h2 className="text-base font-black">Manage team members</h2>
@@ -576,11 +592,14 @@ function ManageMembersModal({
         </div>
 
         <div className="max-h-[64vh] overflow-auto">
-          <table className="w-full min-w-[860px] text-left text-sm">
+          <table className="w-full min-w-[1180px] text-left text-sm">
             <thead className="sticky top-0 z-10 bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground backdrop-blur">
               <tr>
                 <th className="px-5 py-4 font-black">Name</th>
                 <th className="px-5 py-4 font-black">ID</th>
+                <th className="px-5 py-4 font-black">Team</th>
+                <th className="px-5 py-4 font-black">Gmail Label</th>
+                <th className="px-5 py-4 font-black">Weekly</th>
                 <th className="px-5 py-4 font-black">Joined Month</th>
                 <th className="px-5 py-4 font-black">Status</th>
                 <th className="px-5 py-4 text-right font-black">Actions</th>
@@ -589,13 +608,13 @@ function ManageMembersModal({
             <tbody className="divide-y divide-border">
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center font-bold text-muted-foreground">
+                  <td colSpan={8} className="px-5 py-8 text-center font-bold text-muted-foreground">
                     Loading TeamMembers...
                   </td>
                 </tr>
               ) : members.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center font-bold text-muted-foreground">
+                  <td colSpan={8} className="px-5 py-8 text-center font-bold text-muted-foreground">
                     No members yet.
                   </td>
                 </tr>
@@ -618,6 +637,15 @@ function ManageMembersModal({
                       </div>
                     </td>
                     <td className="px-5 py-4 font-semibold text-muted-foreground">{member.id}</td>
+                    <td className="px-5 py-4 font-semibold">
+                      {member.teamDepartment || "Not set"}
+                    </td>
+                    <td className="px-5 py-4 font-semibold text-muted-foreground">
+                      {member.gmailLabel || "Not set"}
+                    </td>
+                    <td className="px-5 py-4">
+                      <ReportBadge enabled={member.weeklyReportEnabled} />
+                    </td>
                     <td className="px-5 py-4 font-semibold">{member.joinedMonth || "Not set"}</td>
                     <td className="px-5 py-4">
                       <StatusBadge status={member.status} />
@@ -793,6 +821,49 @@ function MemberModal({
           </div>
 
           <div className="mt-5">
+            <h3 className="text-sm font-black">Weekly Gmail report</h3>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              <MemberInput
+                label="Gmail Label"
+                value={draft.gmailLabel}
+                onChange={(value) => onChange({ gmailLabel: value })}
+              />
+              <MemberInput
+                label="Discord User ID"
+                value={draft.discordUserId}
+                onChange={(value) => onChange({ discordUserId: value })}
+              />
+              <label>
+                <span className="text-xs font-bold text-muted-foreground">Team or Department</span>
+                <DashboardSelect
+                  value={draft.teamDepartment}
+                  onChange={(value) =>
+                    onChange({ teamDepartment: value === "__none__" ? "" : value })
+                  }
+                  options={[
+                    { value: "__none__", label: "Not set" },
+                    { value: "Creator", label: "Creator" },
+                    { value: "Outreach", label: "Outreach" },
+                    { value: "Brand", label: "Brand" },
+                    { value: "Operations", label: "Operations" },
+                    { value: "HR", label: "HR" },
+                  ]}
+                  triggerClassName="mt-1 h-11"
+                />
+              </label>
+              <label className="flex h-[66px] items-center justify-between gap-3 rounded-2xl border border-border bg-background px-4">
+                <span className="text-sm font-bold text-foreground">Weekly Report Enabled</span>
+                <input
+                  type="checkbox"
+                  checked={draft.weeklyReportEnabled}
+                  onChange={(event) => onChange({ weeklyReportEnabled: event.target.checked })}
+                  className="h-5 w-5 accent-primary"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-5">
             <h3 className="text-sm font-black">Social links</h3>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <MemberInput
@@ -929,6 +1000,19 @@ function StatusBadge({ status }: { status: TeamMemberStatus }) {
       )}
     >
       {status === "active" ? "Active" : "Offboarded"}
+    </span>
+  );
+}
+
+function ReportBadge({ enabled }: { enabled: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex rounded-full px-3 py-1 text-xs font-black",
+        enabled ? "bg-fun-lime text-emerald-950" : "bg-muted text-muted-foreground",
+      )}
+    >
+      {enabled ? "Enabled" : "Disabled"}
     </span>
   );
 }
