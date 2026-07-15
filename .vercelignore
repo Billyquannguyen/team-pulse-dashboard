@@ -1,0 +1,10 @@
+node_modules
+dist
+.output
+.vercel
+.opportunity-ingestion/backups
+.env
+.env.*
+!.env.example
+playwright-report
+test-results

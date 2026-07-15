@@ -46,6 +46,8 @@ SLACK_USER_TOKEN=xoxp-your-personal-user-token
 SLACK_OWNER_USER_ID=your_slack_user_id
 SLACK_BOT_TOKEN=xoxb-your-bot-token-if-used
 SLACK_SIGNING_SECRET=your_slack_signing_secret
+SLACK_LINK_ALERT_MEMBER_NAMES=Holly Jerrim,Fenya Lavrson,Alex Hendy
+SLACK_LINK_ALERT_DISCORD_WEBHOOK_URL=your_discord_channel_webhook_url
 CRON_SECRET=long_random_secret_for_vercel_cron
 GMAIL_CLIENT_ID=your_google_oauth_client_id
 GMAIL_CLIENT_SECRET=your_google_oauth_client_secret
@@ -96,5 +98,11 @@ The weekly Vercel Cron job calls `/api/weekly-gmail-outreach-report` at 00:00 ev
 The three Gmail category label variables default to the values shown above, so they only need changing if the mailbox labels are renamed. `WEEKLY_GMAIL_REPORT_DAYS` defaults to `7`, and `WEEKLY_GMAIL_SEQUENCE_LOOKBACK_DAYS` defaults to `90`. Creator follow-up completion uses the fixed 3, 7, and 14 day schedule and does not compare names across weekly snapshots.
 
 The Slack user token needs permission to list IM conversations and read IM history. In Slack terms, expect scopes like `im:read`, `im:history`, and `users:read`. Private DM text is checked server-side only. The dashboard only receives a small reminder record with the person name, timestamp, overdue age, Slack open link, and a short safe snippet.
+
+Slack link alerts resolve the comma-separated names in `SLACK_LINK_ALERT_MEMBER_NAMES` to Slack users at runtime. They monitor every public channel visible to the connected Slack account, every private channel that account has joined, and one-to-one direct messages with the configured members. When one of those members posts an `http://` or `https://` link, the server posts the member name, Slack location, a quoted copy of the Slack message, and a link to the original Slack message through `SLACK_LINK_ALERT_DISCORD_WEBHOOK_URL`. Quotes are shortened to 1,000 characters so they fit safely inside Discord's message limit.
+
+The link-alert route is checked at the UTC hours that cover both GMT and BST. It only scans Slack when the current `Europe/London` hour is 10:00, 12:00, 13:00, or 17:00. This keeps the intended UK schedule when daylight saving changes. On the first successful check, each channel stores its current timestamp and sends nothing, preventing old Slack links from flooding Discord. Later checks process only newer channel messages and update their Upstash Redis checkpoints as they go.
+
+The Slack token used for link alerts must be able to read the configured channels, look up users and channel names, and create message permalinks. Public channels normally need `channels:history` and `channels:read`; private channels normally need `groups:history` and `groups:read`; names need `users:read`. The Slack user connected by `SLACK_USER_TOKEN` must already belong to every private channel being monitored.
 
 For local testing only, you can set `SLACK_FOLLOWUP_THRESHOLD_MINUTES=1` before starting the dev server. Production ignores this and keeps the real 24-hour threshold.

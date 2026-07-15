@@ -21,8 +21,10 @@ import { Route as AssetsRouteImport } from './routes/assets'
 import { Route as ActiveBrandsRouteImport } from './routes/active-brands'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiWeeklyGmailOutreachReportRouteImport } from './routes/api/weekly-gmail-outreach-report'
+import { Route as ApiSlackLinkAlertsRouteImport } from './routes/api/slack-link-alerts'
 import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
 import { Route as ApiSlackDebugRouteImport } from './routes/api/slack-debug'
+import { Route as ApiSlackLinkAlertsSlotRouteImport } from './routes/api/slack-link-alerts.$slot'
 import { Route as ApiCalendlyRemindersWebhookRouteImport } from './routes/api/calendly-reminders/webhook'
 import { Route as ApiAiPersonalReportRouteImport } from './routes/api/ai/personal-report'
 
@@ -87,6 +89,11 @@ const ApiWeeklyGmailOutreachReportRoute =
     path: '/api/weekly-gmail-outreach-report',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiSlackLinkAlertsRoute = ApiSlackLinkAlertsRouteImport.update({
+  id: '/api/slack-link-alerts',
+  path: '/api/slack-link-alerts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSlackFollowupsRoute = ApiSlackFollowupsRouteImport.update({
   id: '/api/slack-followups',
   path: '/api/slack-followups',
@@ -96,6 +103,11 @@ const ApiSlackDebugRoute = ApiSlackDebugRouteImport.update({
   id: '/api/slack-debug',
   path: '/api/slack-debug',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSlackLinkAlertsSlotRoute = ApiSlackLinkAlertsSlotRouteImport.update({
+  id: '/$slot',
+  path: '/$slot',
+  getParentRoute: () => ApiSlackLinkAlertsRoute,
 } as any)
 const ApiCalendlyRemindersWebhookRoute =
   ApiCalendlyRemindersWebhookRouteImport.update({
@@ -123,9 +135,11 @@ export interface FileRoutesByFullPath {
   '/team-members': typeof TeamMembersRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
+  '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
   '/api/ai/personal-report': typeof ApiAiPersonalReportRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
+  '/api/slack-link-alerts/$slot': typeof ApiSlackLinkAlertsSlotRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -141,9 +155,11 @@ export interface FileRoutesByTo {
   '/team-members': typeof TeamMembersRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
+  '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
   '/api/ai/personal-report': typeof ApiAiPersonalReportRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
+  '/api/slack-link-alerts/$slot': typeof ApiSlackLinkAlertsSlotRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -160,9 +176,11 @@ export interface FileRoutesById {
   '/team-members': typeof TeamMembersRoute
   '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
+  '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
   '/api/ai/personal-report': typeof ApiAiPersonalReportRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
+  '/api/slack-link-alerts/$slot': typeof ApiSlackLinkAlertsSlotRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -180,9 +198,11 @@ export interface FileRouteTypes {
     | '/team-members'
     | '/api/slack-debug'
     | '/api/slack-followups'
+    | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
     | '/api/ai/personal-report'
     | '/api/calendly-reminders/webhook'
+    | '/api/slack-link-alerts/$slot'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -198,9 +218,11 @@ export interface FileRouteTypes {
     | '/team-members'
     | '/api/slack-debug'
     | '/api/slack-followups'
+    | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
     | '/api/ai/personal-report'
     | '/api/calendly-reminders/webhook'
+    | '/api/slack-link-alerts/$slot'
   id:
     | '__root__'
     | '/'
@@ -216,9 +238,11 @@ export interface FileRouteTypes {
     | '/team-members'
     | '/api/slack-debug'
     | '/api/slack-followups'
+    | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
     | '/api/ai/personal-report'
     | '/api/calendly-reminders/webhook'
+    | '/api/slack-link-alerts/$slot'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -235,6 +259,7 @@ export interface RootRouteChildren {
   TeamMembersRoute: typeof TeamMembersRoute
   ApiSlackDebugRoute: typeof ApiSlackDebugRoute
   ApiSlackFollowupsRoute: typeof ApiSlackFollowupsRoute
+  ApiSlackLinkAlertsRoute: typeof ApiSlackLinkAlertsRouteWithChildren
   ApiWeeklyGmailOutreachReportRoute: typeof ApiWeeklyGmailOutreachReportRoute
   ApiAiPersonalReportRoute: typeof ApiAiPersonalReportRoute
   ApiCalendlyRemindersWebhookRoute: typeof ApiCalendlyRemindersWebhookRoute
@@ -326,6 +351,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiWeeklyGmailOutreachReportRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/slack-link-alerts': {
+      id: '/api/slack-link-alerts'
+      path: '/api/slack-link-alerts'
+      fullPath: '/api/slack-link-alerts'
+      preLoaderRoute: typeof ApiSlackLinkAlertsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/slack-followups': {
       id: '/api/slack-followups'
       path: '/api/slack-followups'
@@ -339,6 +371,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/slack-debug'
       preLoaderRoute: typeof ApiSlackDebugRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/api/slack-link-alerts/$slot': {
+      id: '/api/slack-link-alerts/$slot'
+      path: '/$slot'
+      fullPath: '/api/slack-link-alerts/$slot'
+      preLoaderRoute: typeof ApiSlackLinkAlertsSlotRouteImport
+      parentRoute: typeof ApiSlackLinkAlertsRoute
     }
     '/api/calendly-reminders/webhook': {
       id: '/api/calendly-reminders/webhook'
@@ -357,6 +396,17 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ApiSlackLinkAlertsRouteChildren {
+  ApiSlackLinkAlertsSlotRoute: typeof ApiSlackLinkAlertsSlotRoute
+}
+
+const ApiSlackLinkAlertsRouteChildren: ApiSlackLinkAlertsRouteChildren = {
+  ApiSlackLinkAlertsSlotRoute: ApiSlackLinkAlertsSlotRoute,
+}
+
+const ApiSlackLinkAlertsRouteWithChildren =
+  ApiSlackLinkAlertsRoute._addFileChildren(ApiSlackLinkAlertsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActiveBrandsRoute: ActiveBrandsRoute,
@@ -371,6 +421,7 @@ const rootRouteChildren: RootRouteChildren = {
   TeamMembersRoute: TeamMembersRoute,
   ApiSlackDebugRoute: ApiSlackDebugRoute,
   ApiSlackFollowupsRoute: ApiSlackFollowupsRoute,
+  ApiSlackLinkAlertsRoute: ApiSlackLinkAlertsRouteWithChildren,
   ApiWeeklyGmailOutreachReportRoute: ApiWeeklyGmailOutreachReportRoute,
   ApiAiPersonalReportRoute: ApiAiPersonalReportRoute,
   ApiCalendlyRemindersWebhookRoute: ApiCalendlyRemindersWebhookRoute,

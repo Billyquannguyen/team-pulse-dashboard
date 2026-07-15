@@ -7,6 +7,34 @@
       "schedule": "0 9 * * *"
     },
     {
+      "path": "/api/slack-link-alerts/09",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/slack-link-alerts/10",
+      "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/slack-link-alerts/11",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/slack-link-alerts/12",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/slack-link-alerts/13",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/slack-link-alerts/16",
+      "schedule": "0 16 * * *"
+    },
+    {
+      "path": "/api/slack-link-alerts/17",
+      "schedule": "0 17 * * *"
+    },
+    {
       "path": "/api/weekly-gmail-outreach-report",
       "schedule": "0 17 * * 4"
     }
