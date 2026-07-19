@@ -60,7 +60,7 @@ export async function generateWeeklyOutreachNarrative(
     schema: weeklyOutreachNarrativeSchema,
     maxTokens: 420,
     temperature: 0.15,
-    timeoutMs: 20_000,
+    timeoutMs: 35_000,
     messages: [
       {
         role: "system",

@@ -677,7 +677,9 @@ async function getReportNarrative(
       summary: buildFallbackSummary(totals),
       verdict: buildFallbackVerdict(totals),
       modelUsed: null,
-      warnings: ["OpenRouter không khả dụng, report đã dùng nhận định mẫu cố định."],
+      warnings: [
+        "Gmail scan đã hoàn tất; OpenRouter không khả dụng nên chỉ phần Nhận định dùng mẫu cố định.",
+      ],
     };
   }
 }
@@ -724,7 +726,7 @@ function buildVietnameseReport(
     narrative.verdict,
     narrative.modelUsed
       ? `OpenRouter model: ${narrative.modelUsed}`
-      : "OpenRouter: fallback mẫu cố định",
+      : "OpenRouter: fallback mẫu cố định (Gmail scan vẫn hoàn tất)",
     `Phạm vi kiểm tra sequence: ${formatNumber(lookbackDays)} ngày gần nhất.`,
     "",
     "**Theo member**",

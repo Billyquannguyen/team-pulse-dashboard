@@ -12,6 +12,16 @@ type OpenRouterChoice = {
   };
 };
 
+class OpenRouterRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly detail: string,
+  ) {
+    super(`OpenRouter request failed (${status}): ${detail}`);
+    this.name = "OpenRouterRequestError";
+  }
+}
+
 function getEnv(name: string) {
   return process.env[name]?.trim() ?? "";
 }
@@ -120,6 +130,22 @@ function parseJsonContent<TOutput>(content: string): TOutput {
   }
 }
 
+function isStructuredOutputCompatibilityError(error: unknown) {
+  if (!(error instanceof OpenRouterRequestError)) return false;
+  if (![400, 404, 422].includes(error.status)) return false;
+
+  const detail = error.detail.toLowerCase();
+  return [
+    "response_format",
+    "response format",
+    "json_schema",
+    "json schema",
+    "structured output",
+    "requested parameters",
+    "unsupported parameter",
+  ].some((phrase) => detail.includes(phrase));
+}
+
 export class OpenRouterProvider implements AIProvider {
   async generateJson<TOutput>({
     messages,
@@ -136,68 +162,86 @@ export class OpenRouterProvider implements AIProvider {
       throw new Error("OPENROUTER_API_KEY is missing.");
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const request = async (strictSchema: boolean) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const body: Record<string, unknown> = {
+        model,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+      };
 
-    try {
-      const response = await fetch(OPENROUTER_API_URL, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://team-billion-dashboard.vercel.app",
-          "X-Title": "Team Billion Dashboard",
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature,
-          max_tokens: maxTokens,
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: schemaName,
-              strict: true,
-              schema,
-            },
+      if (strictSchema) {
+        body.response_format = {
+          type: "json_schema",
+          json_schema: {
+            name: schemaName,
+            strict: true,
+            schema,
           },
-        }),
-      });
+        };
+        body.provider = { require_parameters: true };
+      }
 
-      if (!response.ok) {
-        let detail = response.statusText;
+      try {
+        const response = await fetch(OPENROUTER_API_URL, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://team-billion-dashboard.vercel.app",
+            "X-Title": "Team Billion Dashboard",
+          },
+          body: JSON.stringify(body),
+        });
 
-        try {
-          const payload = (await response.json()) as Record<string, unknown>;
-          const error = payload.error as Record<string, unknown> | undefined;
-          detail = typeof error?.message === "string" ? error.message : detail;
-        } catch {
-          detail = await response.text();
+        if (!response.ok) {
+          let detail = response.statusText;
+
+          try {
+            const payload = (await response.json()) as Record<string, unknown>;
+            const responseError = payload.error as Record<string, unknown> | undefined;
+            detail = typeof responseError?.message === "string" ? responseError.message : detail;
+          } catch {
+            detail = await response.text();
+          }
+
+          throw new OpenRouterRequestError(response.status, detail);
         }
 
-        throw new Error(`OpenRouter request failed (${response.status}): ${detail}`);
+        const payload = await response.json();
+        const content = extractMessageContent(payload);
+
+        if (!content) {
+          throw new Error("OpenRouter returned an empty response.");
+        }
+
+        return {
+          output: parseJsonContent<TOutput>(content),
+          modelUsed: model,
+        };
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          throw new Error(`OpenRouter request timed out after ${Math.round(timeoutMs / 1000)}s.`);
+        }
+
+        throw error;
+      } finally {
+        clearTimeout(timeout);
       }
+    };
 
-      const payload = await response.json();
-      const content = extractMessageContent(payload);
-
-      if (!content) {
-        throw new Error("OpenRouter returned an empty response.");
-      }
-
-      return {
-        output: parseJsonContent<TOutput>(content),
-        modelUsed: model,
-      };
+    try {
+      return await request(true);
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error(`OpenRouter request timed out after ${Math.round(timeoutMs / 1000)}s.`);
-      }
+      if (!isStructuredOutputCompatibilityError(error)) throw error;
 
-      throw error;
-    } finally {
-      clearTimeout(timeout);
+      console.warn(
+        `[openrouter] ${model} does not support strict JSON schema; retrying with prompt-enforced JSON.`,
+      );
+      return request(false);
     }
   }
 }
