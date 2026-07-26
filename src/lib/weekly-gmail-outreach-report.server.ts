@@ -56,6 +56,8 @@ type MemberReportMetrics = {
   creatorOutreachSent: number;
   brandOutreachSent: number;
   calendlyBooked: number;
+  bookedCalls: number;
+  invalidTaggingThreads: number;
   missedInbound: number;
   followUpsDue: number;
   completedDueFollowUps: number;
@@ -99,6 +101,7 @@ const THREAD_FETCH_CONCURRENCY = 12;
 const REPORT_TIME_ZONE = "Asia/Ho_Chi_Minh";
 const DEFAULT_CALENDLY_BOOKED_QUERY =
   '{"calendly" "calendly.com" "scheduled event" "booked" "confirmed"}';
+const DEFAULT_BOOKED_CALL_LABEL_NAME = "For Quân";
 const DEFAULT_CATEGORY_LABEL_NAMES: ReportCategoryLabelNames = {
   brandInbound: "Brand inbound",
   brandOutreach: "Brand outreach",
@@ -110,6 +113,8 @@ function emptyTotals(): WeeklyReportTotals {
     creatorOutreachSent: 0,
     brandOutreachSent: 0,
     calendlyBooked: 0,
+    bookedCalls: 0,
+    invalidTaggingThreads: 0,
     missedInbound: 0,
     followUpsDue: 0,
     completedDueFollowUps: 0,
@@ -190,6 +195,10 @@ function getCategoryLabelNames(): ReportCategoryLabelNames {
   };
 }
 
+function getBookedCallLabelName() {
+  return process.env.WEEKLY_GMAIL_BOOKED_CALL_LABEL?.trim() || DEFAULT_BOOKED_CALL_LABEL_NAME;
+}
+
 function withReportWindow(query: string, days: number) {
   return `${query} newer_than:${days}d -in:spam -in:trash`.replace(/\s+/g, " ").trim();
 }
@@ -231,7 +240,8 @@ function formatDate(value: Date) {
 
 function getWindowLabel(days: number, now: Date) {
   const start = new Date(now.getTime() - days * DAY_IN_MS);
-  return `${formatDate(start)} - ${formatDate(now)}`;
+  const lastCompletedDay = new Date(now.getTime() - DAY_IN_MS);
+  return `${formatDate(start)} - ${formatDate(lastCompletedDay)}`;
 }
 
 async function getGmailReadonlyAccessToken() {
@@ -440,14 +450,48 @@ function getThreadLabelIds(thread: GmailThread) {
   return labelIds;
 }
 
+function getCustomThreadLabelIds(threadLabelIds: Set<string>, customUserLabelIds: Set<string>) {
+  return Array.from(threadLabelIds).filter((labelId) => customUserLabelIds.has(labelId));
+}
+
+function hasExactCustomLabels(customLabelIds: string[], expectedLabelIds: string[]) {
+  return (
+    customLabelIds.length === expectedLabelIds.length &&
+    expectedLabelIds.every((labelId) => customLabelIds.includes(labelId))
+  );
+}
+
+function hasValidOutreachLabels(
+  customLabelIds: string[],
+  memberLabelId: string,
+  categoryLabels: ReportCategoryLabels,
+  bookedCallLabel: GmailLabel | null,
+) {
+  if (hasExactCustomLabels(customLabelIds, [memberLabelId])) return true;
+
+  const validSecondaryLabelIds = [
+    ...Object.values(categoryLabels).flatMap((label) => (label ? [label.id] : [])),
+    ...(bookedCallLabel ? [bookedCallLabel.id] : []),
+  ];
+
+  return validSecondaryLabelIds.some((labelId) =>
+    hasExactCustomLabels(customLabelIds, [memberLabelId, labelId]),
+  );
+}
+
+function formatCustomLabels(customLabelIds: string[], labelIndex: Map<string, GmailLabel>) {
+  return customLabelIds
+    .map((labelId) => labelIndex.get(labelId)?.name || labelId)
+    .sort((left, right) => left.localeCompare(right))
+    .join(" + ");
+}
+
 function isCreatorOutreachThread(
   threadLabelIds: Set<string>,
   memberLabelId: string,
   customUserLabelIds: Set<string>,
 ) {
-  const customLabels = Array.from(threadLabelIds).filter((labelId) =>
-    customUserLabelIds.has(labelId),
-  );
+  const customLabels = getCustomThreadLabelIds(threadLabelIds, customUserLabelIds);
   return customLabels.length === 1 && customLabels[0] === memberLabelId;
 }
 
@@ -477,6 +521,7 @@ async function collectMemberMetrics(
   customUserLabelIds: Set<string>,
   categoryLabels: ReportCategoryLabels,
   categoryLabelNames: ReportCategoryLabelNames,
+  bookedCallLabel: GmailLabel | null,
   days: number,
   lookbackDays: number,
   now: Date,
@@ -533,9 +578,14 @@ async function collectMemberMetrics(
     getConfiguredQuery("WEEKLY_GMAIL_CALENDLY_BOOKED_QUERY", DEFAULT_CALENDLY_BOOKED_QUERY),
     days,
   );
+  const recentMemberThreadsQuery = withReportWindow("", days);
 
   try {
-    const [[brandOutreachSent, missedInbound, calendlyBooked], threadIds] = await Promise.all([
+    const [
+      [brandOutreachSent, missedInbound, calendlyBooked],
+      creatorThreadIds,
+      recentMemberThreadIds,
+    ] = await Promise.all([
       Promise.all([
         categoryLabels.brandOutreach
           ? countGmailMessages(
@@ -554,14 +604,18 @@ async function collectMemberMetrics(
         countGmailThreads(accessToken, [label.id], calendlyQuery),
       ]),
       listGmailThreadIds(accessToken, [label.id], creatorThreadQuery),
+      listGmailThreadIds(accessToken, [label.id], recentMemberThreadsQuery),
     ]);
-    const threads = await loadGmailThreads(accessToken, threadIds, threadCache);
+    const [creatorThreads, recentMemberThreads] = await Promise.all([
+      loadGmailThreads(accessToken, creatorThreadIds, threadCache),
+      loadGmailThreads(accessToken, recentMemberThreadIds, threadCache),
+    ]);
 
     metrics.brandOutreachSent = brandOutreachSent;
     metrics.missedInbound = missedInbound;
     metrics.calendlyBooked = calendlyBooked;
 
-    for (const thread of threads) {
+    for (const thread of creatorThreads) {
       const threadLabelIds = getThreadLabelIds(thread);
       if (!isCreatorOutreachThread(threadLabelIds, label.id, customUserLabelIds)) continue;
 
@@ -583,6 +637,39 @@ async function collectMemberMetrics(
       }
     }
 
+    let invalidTaggingCount = 0;
+    const invalidTaggingExamples = new Set<string>();
+
+    for (const thread of recentMemberThreads) {
+      const threadLabelIds = getThreadLabelIds(thread);
+      const customLabelIds = getCustomThreadLabelIds(threadLabelIds, customUserLabelIds);
+
+      if (bookedCallLabel && hasExactCustomLabels(customLabelIds, [label.id, bookedCallLabel.id])) {
+        metrics.bookedCalls += 1;
+      }
+
+      const sequence = analyzeOutreachSequence(toSequenceMessages(thread), nowMs);
+      if (!sequence || sequence.hasReply) continue;
+      if (hasValidOutreachLabels(customLabelIds, label.id, categoryLabels, bookedCallLabel)) {
+        continue;
+      }
+
+      invalidTaggingCount += 1;
+      if (invalidTaggingExamples.size < 2) {
+        invalidTaggingExamples.add(formatCustomLabels(customLabelIds, labelIndex));
+      }
+    }
+
+    if (invalidTaggingCount > 0) {
+      metrics.invalidTaggingThreads = invalidTaggingCount;
+      const examples = Array.from(invalidTaggingExamples).filter(Boolean).join("; ");
+      issues.push(
+        `${member.displayName}: ${formatNumber(
+          invalidTaggingCount,
+        )} conversation chưa nhận reply có tag ngoài quy tắc${examples ? ` (${examples})` : ""}.`,
+      );
+    }
+
     return metrics;
   } catch (error) {
     if (error instanceof GmailAuthError) throw error;
@@ -601,6 +688,8 @@ function addMetrics(left: WeeklyReportTotals, right: MemberReportMetrics): Weekl
     creatorOutreachSent: left.creatorOutreachSent + right.creatorOutreachSent,
     brandOutreachSent: left.brandOutreachSent + right.brandOutreachSent,
     calendlyBooked: left.calendlyBooked + right.calendlyBooked,
+    bookedCalls: left.bookedCalls + right.bookedCalls,
+    invalidTaggingThreads: left.invalidTaggingThreads + right.invalidTaggingThreads,
     missedInbound: left.missedInbound + right.missedInbound,
     followUpsDue: left.followUpsDue + right.followUpsDue,
     completedDueFollowUps: left.completedDueFollowUps + right.completedDueFollowUps,
@@ -707,7 +796,9 @@ function buildVietnameseReport(
     `Creator outreach đã gửi: ${formatNumber(totals.creatorOutreachSent)}`,
     `Brand outreach đã gửi: ${formatNumber(totals.brandOutreachSent)}`,
     `Calendly booked: ${formatNumber(totals.calendlyBooked)}`,
+    `Booked call (tag For Quân): ${formatNumber(totals.bookedCalls)}`,
     `Brand inbound chưa xử lý: ${formatNumber(totals.missedInbound)}`,
+    `Tagging sai quy tắc (chưa reply): ${formatNumber(totals.invalidTaggingThreads)}`,
     "",
     "**Tần suất follow up**",
     followUpRate === null
@@ -743,7 +834,9 @@ function buildVietnameseReport(
           item.completedDueFollowUps,
         )}/${formatNumber(item.followUpsDue)} | Trễ ${formatNumber(
           item.overdueCreatorThreads,
-        )} | Missed inbound ${formatNumber(item.missedInbound)}`,
+        )} | Booked ${formatNumber(item.bookedCalls)} | Missed inbound ${formatNumber(
+          item.missedInbound,
+        )}`,
       );
     }
   }
@@ -829,6 +922,8 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
     );
     const categoryLabelNames = getCategoryLabelNames();
     const categoryLabelResult = resolveCategoryLabels(labelIndex, categoryLabelNames);
+    const bookedCallLabelName = getBookedCallLabelName();
+    const bookedCallLabel = resolveLabel(labelIndex, bookedCallLabelName);
     const metrics: MemberReportMetrics[] = [];
     const threadCache = new Map<string, Promise<GmailThread>>();
 
@@ -841,6 +936,7 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
           customUserLabelIds,
           categoryLabelResult.labels,
           categoryLabelNames,
+          bookedCallLabel,
           days,
           lookbackDays,
           now,
@@ -854,6 +950,9 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
     const issues = [
       ...baseIssues,
       ...categoryLabelResult.issues,
+      ...(bookedCallLabel
+        ? []
+        : [`Không tìm thấy Gmail booked-call label "${bookedCallLabelName}".`]),
       ...metrics.flatMap((item) => item.issues),
     ];
     const content = buildVietnameseReport(

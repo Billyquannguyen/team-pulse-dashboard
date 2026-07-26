@@ -7,6 +7,8 @@ export type WeeklyOutreachNarrativeFacts = {
   creatorOutreachSent: number;
   brandOutreachSent: number;
   calendlyBooked: number;
+  bookedCalls: number;
+  invalidTaggingThreads: number;
   missedInbound: number;
   followUpsDue: number;
   completedDueFollowUps: number;

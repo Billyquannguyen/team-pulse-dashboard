@@ -694,7 +694,9 @@ export async function getActiveTeammatesForServer() {
 }
 
 export async function getWeeklyOutreachReportMembers() {
-  const data = await getTeamMembersDataForServer();
+  const googleSheets = await getGoogleSheetsServer();
+  const config = googleSheets.getGoogleSheetsConfig();
+  const { data } = await refreshTeamMembersCache(config);
 
   return data.activeMembers.filter(
     (member) => member.weeklyReportEnabled && isWeeklyOutreachDepartment(member.teamDepartment),

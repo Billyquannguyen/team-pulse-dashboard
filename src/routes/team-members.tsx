@@ -103,8 +103,8 @@ function emptyDraft(): MemberDraft {
     websiteUrl: "",
     gmailLabel: "",
     discordUserId: "",
-    weeklyReportEnabled: false,
-    teamDepartment: "",
+    weeklyReportEnabled: true,
+    teamDepartment: "Outreach",
   };
 }
 

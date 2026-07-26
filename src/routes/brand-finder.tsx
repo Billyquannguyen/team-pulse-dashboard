@@ -36,6 +36,24 @@ export const Route = createFileRoute("/brand-finder")({
 });
 
 const STORAGE_KEY = "team-billion-brand-finder-apollo-v1";
+const DREAM_SHEET_ACCEPT = [
+  ".csv",
+  ".tsv",
+  ".txt",
+  ".xlsx",
+  ".xls",
+  ".xlsm",
+  ".ods",
+  ".pdf",
+  "text/csv",
+  "text/tab-separated-values",
+  "text/plain",
+  "application/pdf",
+  "application/vnd.ms-excel",
+  "application/vnd.ms-excel.sheet.macroEnabled.12",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+].join(",");
 const DEFAULT_SUBJECT_TEMPLATE = "Creator partnership for {{brand_name}}";
 const DEFAULT_BODY_TEMPLATE = `Hi {{contact_first_name}},
 
@@ -364,6 +382,94 @@ function parseDreamSheet(input: string): BrandRow[] {
   return brands;
 }
 
+function fileExtension(file: File) {
+  return file.name.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function isSpreadsheetUpload(file: File) {
+  const extension = fileExtension(file);
+  return ["xlsx", "xls", "xlsm", "ods"].includes(extension);
+}
+
+function isPdfUpload(file: File) {
+  return file.type === "application/pdf" || fileExtension(file) === "pdf";
+}
+
+function spreadsheetRowsToText(rows: unknown[][]) {
+  return rows
+    .filter((row) => row.some((cell) => String(cell ?? "").trim()))
+    .map((row) => row.map((cell) => String(cell ?? "").trim()).join("\t"))
+    .join("\n");
+}
+
+async function readSpreadsheetUpload(file: File) {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const firstSheetName = workbook.SheetNames[0];
+
+  if (!firstSheetName) {
+    throw new Error("This spreadsheet does not contain any sheets.");
+  }
+
+  const worksheet = workbook.Sheets[firstSheetName];
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+    blankrows: false,
+    defval: "",
+    header: 1,
+    raw: false,
+  });
+
+  return spreadsheetRowsToText(rows);
+}
+
+async function readPdfUpload(file: File) {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/build/pdf.worker.mjs",
+    import.meta.url,
+  ).toString();
+
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const pages: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const lines: string[] = [];
+    let line = "";
+
+    content.items.forEach((item) => {
+      if (!("str" in item)) return;
+
+      const text = item.str.trim();
+      if (text) line = [line, text].filter(Boolean).join("\t");
+      if ("hasEOL" in item && item.hasEOL && line) {
+        lines.push(line);
+        line = "";
+      }
+    });
+
+    if (line) lines.push(line);
+    pages.push(lines.join("\n"));
+  }
+
+  const text = pages.join("\n").trim();
+
+  if (!text) {
+    throw new Error(
+      "This PDF does not have readable text. Try exporting the sheet as CSV or Excel.",
+    );
+  }
+
+  return text;
+}
+
+async function readDreamSheetUpload(file: File) {
+  if (isSpreadsheetUpload(file)) return readSpreadsheetUpload(file);
+  if (isPdfUpload(file)) return readPdfUpload(file);
+  return file.text();
+}
+
 function applyBrandOverrides(brands: BrandRow[], overrides: Record<string, BrandOverride>) {
   return brands.map((brand) => {
     const override = overrides[brand.id];
@@ -614,6 +720,8 @@ function BrandFinderPage() {
   const [isCreatingDrafts, setIsCreatingDrafts] = useState(false);
   const [searchMessage, setSearchMessage] = useState("");
   const [searchError, setSearchError] = useState("");
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [uploadError, setUploadError] = useState("");
   const [draftMessage, setDraftMessage] = useState("");
   const [draftError, setDraftError] = useState("");
   const [hasLoadedSavedState, setHasLoadedSavedState] = useState(false);
@@ -774,11 +882,30 @@ function BrandFinderPage() {
 
   const handleDreamSheetFile = async (file: File | undefined) => {
     if (!file) return;
-    const text = await file.text();
-    setSheetInput(text);
-    setSheetFileName(file.name);
+
+    setUploadMessage("");
+    setUploadError("");
     setSearchMessage("");
     setSearchError("");
+
+    try {
+      const text = await readDreamSheetUpload(file);
+      const importedBrands = parseDreamSheet(text);
+
+      if (importedBrands.length === 0) {
+        throw new Error("I could not find any brand names in that file.");
+      }
+
+      setSheetInput(text);
+      setSheetFileName(file.name);
+      setUploadMessage(
+        `Imported ${importedBrands.length} brand${importedBrands.length === 1 ? "" : "s"} from ${file.name}.`,
+      );
+    } catch (error) {
+      setSheetInput("");
+      setSheetFileName("");
+      setUploadError(error instanceof Error ? error.message : "Could not read that upload.");
+    }
   };
 
   const addBrandsToDirectSearch = (items: BrandRow[]) => {
@@ -1035,6 +1162,8 @@ function BrandFinderPage() {
     setSelectedContactIds(new Set());
     setSearchMessage("");
     setSearchError("");
+    setUploadMessage("");
+    setUploadError("");
     setDraftMessage("");
     setDraftError("");
     window.localStorage.removeItem(STORAGE_KEY);
@@ -1073,7 +1202,7 @@ function BrandFinderPage() {
                   Upload sheet
                   <input
                     type="file"
-                    accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+                    accept={DREAM_SHEET_ACCEPT}
                     className="sr-only"
                     onChange={(event) => {
                       void handleDreamSheetFile(event.target.files?.[0]);
@@ -1092,6 +1221,19 @@ function BrandFinderPage() {
               </div>
             }
           >
+            {(uploadError || uploadMessage) && (
+              <div
+                className={cn(
+                  "mb-3 rounded-2xl border p-3 text-xs font-semibold",
+                  uploadError
+                    ? "border-destructive/30 bg-destructive/10 text-destructive"
+                    : "border-fun-lime/50 bg-fun-lime/20 text-foreground",
+                )}
+              >
+                {uploadError || uploadMessage}
+              </div>
+            )}
+
             <div className="max-w-full overflow-x-auto rounded-2xl border border-border">
               <table className="w-full min-w-[560px] text-sm">
                 <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
@@ -1108,7 +1250,7 @@ function BrandFinderPage() {
                         colSpan={3}
                         className="px-3 py-8 text-center text-sm text-muted-foreground"
                       >
-                        Upload a dream brand sheet to start.
+                        Upload CSV, Excel, Google Sheet export, or a text PDF to start.
                       </td>
                     </tr>
                   )}
