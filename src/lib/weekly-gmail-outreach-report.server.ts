@@ -1,11 +1,6 @@
 import "@tanstack/react-start/server-only";
 import { generateWeeklyOutreachNarrative } from "@/lib/ai/weekly-outreach-report.server";
 import { getWeeklyOutreachReportMembers, type TeamMemberConfig } from "@/lib/team-members";
-import {
-  analyzeOutreachSequence,
-  CREATOR_FOLLOW_UP_DAYS,
-  type OutreachSequenceMessage,
-} from "@/lib/weekly-gmail-outreach-report.logic";
 
 type GmailLabel = {
   id: string;
@@ -59,12 +54,6 @@ type MemberReportMetrics = {
   bookedCalls: number;
   invalidTaggingThreads: number;
   missedInbound: number;
-  followUpsDue: number;
-  completedDueFollowUps: number;
-  overdueCreatorThreads: number;
-  fullSequenceDueThreads: number;
-  incompleteFullSequenceThreads: number;
-  completedFullSequenceThreads: number;
   issues: string[];
 };
 
@@ -75,6 +64,7 @@ type ReportNarrative = {
   verdict: string;
   modelUsed: string | null;
   warnings: string[];
+  fallbackReason: string | null;
 };
 
 type WeeklyReportResult = {
@@ -96,7 +86,6 @@ export class GmailAuthError extends Error {
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_REPORT_DAYS = 7;
-const DEFAULT_SEQUENCE_LOOKBACK_DAYS = 90;
 const THREAD_FETCH_CONCURRENCY = 12;
 const REPORT_TIME_ZONE = "Asia/Ho_Chi_Minh";
 const DEFAULT_CALENDLY_BOOKED_QUERY =
@@ -116,12 +105,6 @@ function emptyTotals(): WeeklyReportTotals {
     bookedCalls: 0,
     invalidTaggingThreads: 0,
     missedInbound: 0,
-    followUpsDue: 0,
-    completedDueFollowUps: 0,
-    overdueCreatorThreads: 0,
-    fullSequenceDueThreads: 0,
-    incompleteFullSequenceThreads: 0,
-    completedFullSequenceThreads: 0,
   };
 }
 
@@ -164,17 +147,6 @@ function getPositiveIntegerEnv(name: string, fallback: number, maximum: number) 
 
 function getReportDays() {
   return getPositiveIntegerEnv("WEEKLY_GMAIL_REPORT_DAYS", DEFAULT_REPORT_DAYS, 31);
-}
-
-function getSequenceLookbackDays() {
-  return Math.max(
-    CREATOR_FOLLOW_UP_DAYS.at(-1) ?? 14,
-    getPositiveIntegerEnv(
-      "WEEKLY_GMAIL_SEQUENCE_LOOKBACK_DAYS",
-      DEFAULT_SEQUENCE_LOOKBACK_DAYS,
-      365,
-    ),
-  );
 }
 
 function getConfiguredQuery(envName: string, fallback: string) {
@@ -312,8 +284,8 @@ async function listGmailLabels(accessToken: string) {
   return response.labels ?? [];
 }
 
-async function countGmailMessages(accessToken: string, labelIds: string[], query: string) {
-  let count = 0;
+async function listGmailMessageThreadIds(accessToken: string, labelIds: string[], query: string) {
+  const threadIds = new Set<string>();
   let pageToken = "";
 
   do {
@@ -324,11 +296,13 @@ async function countGmailMessages(accessToken: string, labelIds: string[], query
     if (pageToken) params.set("pageToken", pageToken);
 
     const response = await gmailGet<GmailMessagesResponse>(accessToken, "messages", params);
-    count += response.messages?.length ?? 0;
+    for (const message of response.messages ?? []) {
+      if (message.threadId) threadIds.add(message.threadId);
+    }
     pageToken = response.nextPageToken ?? "";
   } while (pageToken);
 
-  return count;
+  return Array.from(threadIds);
 }
 
 async function listGmailThreadIds(accessToken: string, labelIds: string[], query: string) {
@@ -495,23 +469,30 @@ function isCreatorOutreachThread(
   return customLabels.length === 1 && customLabels[0] === memberLabelId;
 }
 
-function countSentMessagesSince(thread: GmailThread, sinceMs: number, nowMs: number) {
-  return (thread.messages ?? []).filter((message) => {
-    const labelIds = message.labelIds ?? [];
-    const timestamp = getMessageTimestamp(message);
-    return labelIds.includes("SENT") && timestamp >= sinceMs && timestamp <= nowMs;
-  }).length;
+function getDeliveredThreadMessages(thread: GmailThread) {
+  return (thread.messages ?? [])
+    .filter(
+      (message) => !(message.labelIds ?? []).includes("DRAFT") && getMessageTimestamp(message) > 0,
+    )
+    .sort((left, right) => getMessageTimestamp(left) - getMessageTimestamp(right));
 }
 
-function toSequenceMessages(thread: GmailThread): OutreachSequenceMessage[] {
-  return (thread.messages ?? []).map((message) => {
-    const labelIds = message.labelIds ?? [];
-    return {
-      internalDate: getMessageTimestamp(message),
-      sent: labelIds.includes("SENT"),
-      draft: labelIds.includes("DRAFT"),
-    };
-  });
+function isNewOutboundThread(thread: GmailThread, reportStartMs: number, reportEndMs: number) {
+  const firstMessage = getDeliveredThreadMessages(thread)[0];
+  const timestamp = firstMessage ? getMessageTimestamp(firstMessage) : 0;
+
+  return (
+    Boolean(firstMessage?.labelIds?.includes("SENT")) &&
+    timestamp >= reportStartMs &&
+    timestamp <= reportEndMs
+  );
+}
+
+function isOutboundThreadWithoutReply(thread: GmailThread) {
+  const messages = getDeliveredThreadMessages(thread);
+
+  if (!(messages[0]?.labelIds ?? []).includes("SENT")) return false;
+  return messages.slice(1).every((message) => (message.labelIds ?? []).includes("SENT"));
 }
 
 async function collectMemberMetrics(
@@ -523,9 +504,9 @@ async function collectMemberMetrics(
   categoryLabelNames: ReportCategoryLabelNames,
   bookedCallLabel: GmailLabel | null,
   days: number,
-  lookbackDays: number,
   now: Date,
   threadCache: Map<string, Promise<GmailThread>>,
+  countedBookedThreadIds: Set<string>,
 ): Promise<MemberReportMetrics> {
   const issues: string[] = [];
   const label = member.gmailLabel ? resolveLabel(labelIndex, member.gmailLabel) : null;
@@ -560,7 +541,7 @@ async function collectMemberMetrics(
   const creatorThreadQuery = [
     "in:sent",
     creatorExclusions,
-    `newer_than:${Math.max(days, lookbackDays)}d`,
+    `newer_than:${days}d`,
     "-in:spam",
     "-in:trash",
   ]
@@ -582,18 +563,13 @@ async function collectMemberMetrics(
 
   try {
     const [
-      [brandOutreachSent, missedInbound, calendlyBooked],
+      [missedInbound, calendlyBooked],
       creatorThreadIds,
+      brandOutreachThreadIds,
       recentMemberThreadIds,
+      bookedThreadIds,
     ] = await Promise.all([
       Promise.all([
-        categoryLabels.brandOutreach
-          ? countGmailMessages(
-              accessToken,
-              [label.id, categoryLabels.brandOutreach.id],
-              brandOutreachQuery,
-            )
-          : Promise.resolve(0),
         categoryLabels.brandInbound
           ? countGmailThreads(
               accessToken,
@@ -604,36 +580,44 @@ async function collectMemberMetrics(
         countGmailThreads(accessToken, [label.id], calendlyQuery),
       ]),
       listGmailThreadIds(accessToken, [label.id], creatorThreadQuery),
+      categoryLabels.brandOutreach
+        ? listGmailThreadIds(
+            accessToken,
+            [label.id, categoryLabels.brandOutreach.id],
+            brandOutreachQuery,
+          )
+        : Promise.resolve([]),
       listGmailThreadIds(accessToken, [label.id], recentMemberThreadsQuery),
+      bookedCallLabel
+        ? listGmailMessageThreadIds(
+            accessToken,
+            [label.id, bookedCallLabel.id],
+            recentMemberThreadsQuery,
+          )
+        : Promise.resolve([]),
     ]);
-    const [creatorThreads, recentMemberThreads] = await Promise.all([
+    const [creatorThreads, brandOutreachThreads, recentMemberThreads] = await Promise.all([
       loadGmailThreads(accessToken, creatorThreadIds, threadCache),
+      loadGmailThreads(accessToken, brandOutreachThreadIds, threadCache),
       loadGmailThreads(accessToken, recentMemberThreadIds, threadCache),
     ]);
 
-    metrics.brandOutreachSent = brandOutreachSent;
+    metrics.brandOutreachSent = brandOutreachThreads.filter((thread) =>
+      isNewOutboundThread(thread, reportStartMs, nowMs),
+    ).length;
     metrics.missedInbound = missedInbound;
     metrics.calendlyBooked = calendlyBooked;
+    for (const threadId of bookedThreadIds) {
+      if (countedBookedThreadIds.has(threadId)) continue;
+      countedBookedThreadIds.add(threadId);
+      metrics.bookedCalls += 1;
+    }
 
     for (const thread of creatorThreads) {
       const threadLabelIds = getThreadLabelIds(thread);
       if (!isCreatorOutreachThread(threadLabelIds, label.id, customUserLabelIds)) continue;
-
-      metrics.creatorOutreachSent += countSentMessagesSince(thread, reportStartMs, nowMs);
-      const sequence = analyzeOutreachSequence(toSequenceMessages(thread), nowMs);
-
-      if (!sequence || sequence.hasReply || sequence.followUpsDue === 0) continue;
-
-      metrics.followUpsDue += sequence.followUpsDue;
-      metrics.completedDueFollowUps += sequence.completedDueFollowUps;
-      if (sequence.isOverdue) metrics.overdueCreatorThreads += 1;
-      if (sequence.isFullSequenceDue) {
-        metrics.fullSequenceDueThreads += 1;
-        if (sequence.isFullSequenceComplete) {
-          metrics.completedFullSequenceThreads += 1;
-        } else {
-          metrics.incompleteFullSequenceThreads += 1;
-        }
+      if (isNewOutboundThread(thread, reportStartMs, nowMs)) {
+        metrics.creatorOutreachSent += 1;
       }
     }
 
@@ -644,12 +628,7 @@ async function collectMemberMetrics(
       const threadLabelIds = getThreadLabelIds(thread);
       const customLabelIds = getCustomThreadLabelIds(threadLabelIds, customUserLabelIds);
 
-      if (bookedCallLabel && hasExactCustomLabels(customLabelIds, [label.id, bookedCallLabel.id])) {
-        metrics.bookedCalls += 1;
-      }
-
-      const sequence = analyzeOutreachSequence(toSequenceMessages(thread), nowMs);
-      if (!sequence || sequence.hasReply) continue;
+      if (!isOutboundThreadWithoutReply(thread)) continue;
       if (hasValidOutreachLabels(customLabelIds, label.id, categoryLabels, bookedCallLabel)) {
         continue;
       }
@@ -691,50 +670,43 @@ function addMetrics(left: WeeklyReportTotals, right: MemberReportMetrics): Weekl
     bookedCalls: left.bookedCalls + right.bookedCalls,
     invalidTaggingThreads: left.invalidTaggingThreads + right.invalidTaggingThreads,
     missedInbound: left.missedInbound + right.missedInbound,
-    followUpsDue: left.followUpsDue + right.followUpsDue,
-    completedDueFollowUps: left.completedDueFollowUps + right.completedDueFollowUps,
-    overdueCreatorThreads: left.overdueCreatorThreads + right.overdueCreatorThreads,
-    fullSequenceDueThreads: left.fullSequenceDueThreads + right.fullSequenceDueThreads,
-    incompleteFullSequenceThreads:
-      left.incompleteFullSequenceThreads + right.incompleteFullSequenceThreads,
-    completedFullSequenceThreads:
-      left.completedFullSequenceThreads + right.completedFullSequenceThreads,
   };
 }
 
-function getVerdictCategory(totals: WeeklyReportTotals) {
-  if (totals.fullSequenceDueThreads === 0) return "insufficient" as const;
-  if (totals.incompleteFullSequenceThreads === 0) return "complete" as const;
-  if (totals.incompleteFullSequenceThreads * 2 > totals.fullSequenceDueThreads) {
-    return "majority_incomplete" as const;
-  }
-  return "some_incomplete" as const;
-}
-
 function buildFallbackVerdict(totals: WeeklyReportTotals) {
-  const category = getVerdictCategory(totals);
-
-  if (category === "insufficient") {
-    return "Chưa có creator outreach nào qua mốc 14 ngày để đánh giá đủ sequence.";
+  if (totals.missedInbound > 0 && totals.invalidTaggingThreads > 0) {
+    return "Cần ưu tiên xử lý brand inbound còn sót và sửa các conversation đang gắn tag sai quy tắc.";
   }
-  if (category === "complete") {
-    return "Các creator outreach đã hoàn thành đủ sequence 3 lần follow-up theo lịch 3, 7 và 14 ngày.";
+  if (totals.missedInbound > 0) {
+    return "Cần ưu tiên xử lý các brand inbound còn chưa được phản hồi.";
   }
-  if (category === "majority_incomplete") {
-    return "Có vẻ phần lớn creator outreach chưa hoàn thành đủ sequence 3 lần follow-up dù đã qua mốc 14 ngày.";
+  if (totals.invalidTaggingThreads > 0) {
+    return "Cần kiểm tra và sửa các conversation đang gắn tag sai quy tắc.";
   }
-  return "Một số creator outreach chưa hoàn thành đủ sequence 3 lần follow-up dù đã qua mốc 14 ngày.";
+  return "Không phát hiện brand inbound chưa xử lý hoặc conversation chưa reply có tag sai quy tắc.";
 }
 
-function buildFallbackSummary(totals: WeeklyReportTotals) {
-  if (totals.followUpsDue === 0) {
-    return "Tuần này chưa có lượt follow-up creator nào đến hạn theo lịch 3, 7 và 14 ngày.";
-  }
+function buildFallbackSummary() {
+  return "Báo cáo đã tổng hợp creator outreach, brand outreach, booking và tình trạng tagging trong tuần.";
+}
 
-  const rate = Math.round((totals.completedDueFollowUps / totals.followUpsDue) * 100);
-  return `Đội ngũ đã hoàn thành ${rate}% số lượt follow-up đang đến hạn; hiện có ${formatNumber(
-    totals.overdueCreatorThreads,
-  )} conversation bị trễ.`;
+function describeOpenRouterFailure(error: unknown) {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+
+  if (message.includes("missing")) return "thiếu cấu hình";
+  if (message.includes("timed out") || message.includes("timeout")) return "hết thời gian chờ";
+  if (message.includes("(401)") || message.includes("(403)")) return "API key bị từ chối";
+  if (message.includes("(402)") || message.includes("credit")) return "không đủ credit";
+  if (message.includes("(429)") || message.includes("rate limit")) return "model bị giới hạn";
+  if (message.includes("(404)")) return "model không khả dụng";
+  if (
+    message.includes("expected report format") ||
+    message.includes("empty response") ||
+    message.includes("invalid_type")
+  ) {
+    return "model trả về sai định dạng";
+  }
+  return "request hoặc model thất bại";
 }
 
 async function getReportNarrative(
@@ -747,7 +719,6 @@ async function getReportNarrative(
       reportDays: days,
       memberCount,
       ...totals,
-      verdictCategory: getVerdictCategory(totals),
     });
 
     return {
@@ -755,6 +726,7 @@ async function getReportNarrative(
       verdict: result.verdict,
       modelUsed: result.modelUsed,
       warnings: result.warnings,
+      fallbackReason: null,
     };
   } catch (error) {
     console.error(
@@ -763,12 +735,11 @@ async function getReportNarrative(
       }`,
     );
     return {
-      summary: buildFallbackSummary(totals),
+      summary: buildFallbackSummary(),
       verdict: buildFallbackVerdict(totals),
       modelUsed: null,
-      warnings: [
-        "Gmail scan đã hoàn tất; OpenRouter không khả dụng nên chỉ phần Nhận định dùng mẫu cố định.",
-      ],
+      warnings: [],
+      fallbackReason: describeOpenRouterFailure(error),
     };
   }
 }
@@ -779,46 +750,28 @@ function buildVietnameseReport(
   narrative: ReportNarrative,
   issues: string[],
   days: number,
-  lookbackDays: number,
   now: Date,
 ) {
-  const followUpRate =
-    totals.followUpsDue > 0
-      ? Math.round((totals.completedDueFollowUps / totals.followUpsDue) * 100)
-      : null;
-  const reportIssues = [...narrative.warnings, ...issues];
+  const reportIssues = issues;
 
   const lines = [
     "**Báo cáo Gmail Outreach hằng tuần**",
     `Thời gian: ${getWindowLabel(days, now)} (${days} ngày gần nhất)`,
     "",
     "**Tổng quan**",
-    `Creator outreach đã gửi: ${formatNumber(totals.creatorOutreachSent)}`,
-    `Brand outreach đã gửi: ${formatNumber(totals.brandOutreachSent)}`,
+    `Creator outreach mới: ${formatNumber(totals.creatorOutreachSent)}`,
+    `Brand outreach mới: ${formatNumber(totals.brandOutreachSent)}`,
     `Calendly booked: ${formatNumber(totals.calendlyBooked)}`,
     `Booked call (tag For Quân): ${formatNumber(totals.bookedCalls)}`,
     `Brand inbound chưa xử lý: ${formatNumber(totals.missedInbound)}`,
     `Tagging sai quy tắc (chưa reply): ${formatNumber(totals.invalidTaggingThreads)}`,
-    "",
-    "**Tần suất follow up**",
-    followUpRate === null
-      ? "Chưa có lượt follow-up nào đến hạn."
-      : `Đã hoàn thành ${formatNumber(totals.completedDueFollowUps)}/${formatNumber(
-          totals.followUpsDue,
-        )} lượt follow-up đến hạn (${followUpRate}%).`,
-    `Conversation đang trễ follow-up: ${formatNumber(totals.overdueCreatorThreads)}`,
-    `Qua 14 ngày nhưng chưa đủ 3 follow-up: ${formatNumber(
-      totals.incompleteFullSequenceThreads,
-    )}/${formatNumber(totals.fullSequenceDueThreads)}`,
-    `Đã hoàn thành đủ 3 follow-up: ${formatNumber(totals.completedFullSequenceThreads)}`,
     "",
     "**Nhận định**",
     narrative.summary,
     narrative.verdict,
     narrative.modelUsed
       ? `OpenRouter model: ${narrative.modelUsed}`
-      : "OpenRouter: fallback mẫu cố định (Gmail scan vẫn hoàn tất)",
-    `Phạm vi kiểm tra sequence: ${formatNumber(lookbackDays)} ngày gần nhất.`,
+      : `OpenRouter: fallback mẫu cố định (${narrative.fallbackReason})`,
     "",
     "**Theo member**",
   ];
@@ -828,15 +781,11 @@ function buildVietnameseReport(
   } else {
     for (const item of metrics) {
       lines.push(
-        `${formatMemberName(item.member)}: Creator ${formatNumber(
+        `${formatMemberName(item.member)}: Creator mới ${formatNumber(
           item.creatorOutreachSent,
-        )} | Brand ${formatNumber(item.brandOutreachSent)} | Follow-up ${formatNumber(
-          item.completedDueFollowUps,
-        )}/${formatNumber(item.followUpsDue)} | Trễ ${formatNumber(
-          item.overdueCreatorThreads,
-        )} | Booked ${formatNumber(item.bookedCalls)} | Missed inbound ${formatNumber(
-          item.missedInbound,
-        )}`,
+        )} | Brand mới ${formatNumber(item.brandOutreachSent)} | Booked ${formatNumber(
+          item.bookedCalls,
+        )} | Missed inbound ${formatNumber(item.missedInbound)}`,
       );
     }
   }
@@ -902,7 +851,6 @@ async function postGmailAuthErrorToDiscord() {
 export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult> {
   const members = await getWeeklyOutreachReportMembers();
   const days = getReportDays();
-  const lookbackDays = getSequenceLookbackDays();
   const now = new Date();
   const baseIssues = [
     ...findDuplicateLabels(members),
@@ -926,6 +874,7 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
     const bookedCallLabel = resolveLabel(labelIndex, bookedCallLabelName);
     const metrics: MemberReportMetrics[] = [];
     const threadCache = new Map<string, Promise<GmailThread>>();
+    const countedBookedThreadIds = new Set<string>();
 
     for (const member of members) {
       metrics.push(
@@ -938,9 +887,9 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
           categoryLabelNames,
           bookedCallLabel,
           days,
-          lookbackDays,
           now,
           threadCache,
+          countedBookedThreadIds,
         ),
       );
     }
@@ -955,15 +904,7 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
         : [`Không tìm thấy Gmail booked-call label "${bookedCallLabelName}".`]),
       ...metrics.flatMap((item) => item.issues),
     ];
-    const content = buildVietnameseReport(
-      metrics,
-      totals,
-      narrative,
-      issues,
-      days,
-      lookbackDays,
-      now,
-    );
+    const content = buildVietnameseReport(metrics, totals, narrative, issues, days, now);
     const mentionUserIds = members
       .map((member) => member.discordUserId.trim())
       .filter(validDiscordUserId);

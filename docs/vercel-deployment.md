@@ -55,7 +55,6 @@ GMAIL_REFRESH_TOKEN=your_gmail_refresh_token
 WEEKLY_GMAIL_READONLY_REFRESH_TOKEN=your_separate_gmail_readonly_refresh_token
 WEEKLY_GMAIL_REPORT_DISCORD_WEBHOOK_URL=your_discord_webhook_url
 WEEKLY_GMAIL_REPORT_DAYS=7
-WEEKLY_GMAIL_SEQUENCE_LOOKBACK_DAYS=90
 WEEKLY_GMAIL_BRAND_INBOUND_LABEL=Brand inbound
 WEEKLY_GMAIL_BRAND_OUTREACH_LABEL=Brand outreach
 WEEKLY_GMAIL_ONGOING_DEALS_LABEL=Ongoing Deals
@@ -95,7 +94,7 @@ For Slack DM follow-ups, the app uses `SLACK_USER_TOKEN` because personal DM his
 
 The weekly Vercel Cron job calls `/api/weekly-gmail-outreach-report` at the end of every Friday in Vietnam (`00:00` Saturday in Vietnam, or `17:00 UTC` Friday) and is protected by the same `CRON_SECRET`. Each run rereads the live TeamMembers sheet and covers the completed Saturday-to-Friday period. Report dates are displayed in the `Asia/Ho_Chi_Minh` time zone. It includes only active TeamMembers where `Weekly Report Enabled` is `TRUE` and `Team or Department` is `Creator` or `Outreach`. The Gmail token in `WEEKLY_GMAIL_READONLY_REFRESH_TOKEN` must be a separate token authorized with only `https://www.googleapis.com/auth/gmail.readonly`; the report code only performs Gmail `GET` requests. `WEEKLY_GMAIL_REPORT_DISCORD_WEBHOOK_URL` is used only to post the completed report or a short Gmail authentication error.
 
-The three Gmail category label variables default to the values shown above, so they only need changing if the mailbox labels are renamed. `WEEKLY_GMAIL_REPORT_DAYS` defaults to `7`, and `WEEKLY_GMAIL_SEQUENCE_LOOKBACK_DAYS` defaults to `90`. Creator follow-up completion uses the fixed 3, 7, and 14 day schedule and does not compare names across weekly snapshots.
+The three Gmail category label variables default to the values shown above, so they only need changing if the mailbox labels are renamed. `WEEKLY_GMAIL_REPORT_DAYS` defaults to `7`. Creator and brand outreach count one newly started outbound conversation in the report window; replies and later messages in older threads are excluded. The weekly report does not inspect creator follow-up sequences.
 
 The Slack user token needs permission to list IM conversations and read IM history. In Slack terms, expect scopes like `im:read`, `im:history`, and `users:read`. Private DM text is checked server-side only. The dashboard only receives a small reminder record with the person name, timestamp, overdue age, Slack open link, and a short safe snippet.
 

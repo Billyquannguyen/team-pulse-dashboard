@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
+  FileSpreadsheet,
   LayoutDashboard,
   LinkIcon,
   SearchCheck,
@@ -24,6 +25,7 @@ const items = [
   { to: "/deals", label: "Deals", icon: Table2 },
   { to: "/creators", label: "Creators", icon: Users },
   { to: "/brand-finder", label: "Brand Finder", icon: SearchCheck },
+  { label: "Pitching Sheets", icon: FileSpreadsheet, placeholder: true },
   { to: "/active-brands", label: "Active Brands", icon: Store },
   { to: "/goals", label: "Goals & Analytics", icon: Target },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
@@ -53,6 +55,22 @@ export function AppSidebar() {
       </Link>
       <nav className="mt-4 flex flex-col gap-1">
         {items.map((it) => {
+          if ("placeholder" in it) {
+            const Icon = it.icon;
+            return (
+              <div
+                key={it.label}
+                aria-disabled="true"
+                className="flex cursor-not-allowed items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium text-muted-foreground opacity-60"
+              >
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                  <Icon className="h-4 w-4" />
+                </span>
+                {it.label}
+              </div>
+            );
+          }
+
           const active = it.to === "/" ? path === "/" : path.startsWith(it.to);
           const Icon = it.icon;
           return (

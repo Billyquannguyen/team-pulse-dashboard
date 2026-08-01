@@ -10,13 +10,6 @@ export type WeeklyOutreachNarrativeFacts = {
   bookedCalls: number;
   invalidTaggingThreads: number;
   missedInbound: number;
-  followUpsDue: number;
-  completedDueFollowUps: number;
-  overdueCreatorThreads: number;
-  fullSequenceDueThreads: number;
-  incompleteFullSequenceThreads: number;
-  completedFullSequenceThreads: number;
-  verdictCategory: "insufficient" | "complete" | "majority_incomplete" | "some_incomplete";
 };
 
 export type WeeklyOutreachNarrative = {
@@ -48,7 +41,7 @@ const weeklyOutreachNarrativeSchema: Record<string, unknown> = {
     verdict: {
       type: "string",
       maxLength: 260,
-      description: "One concise Vietnamese management verdict matching verdictCategory.",
+      description: "One concise Vietnamese management verdict based only on the supplied facts.",
     },
   },
 };
@@ -70,11 +63,10 @@ export async function generateWeeklyOutreachNarrative(
           "Bạn viết phần nhận định ngắn cho báo cáo Gmail Outreach hằng tuần.",
           "Chỉ sử dụng số liệu JSON được cung cấp. Không bịa số, tên member, nguyên nhân hoặc hoạt động.",
           "Viết bằng tiếng Việt, trực tiếp, thực tế, không dùng lời động viên chung chung.",
-          "Không thay đổi ý nghĩa của verdictCategory.",
           "Không viết bất kỳ chữ số nào; số liệu đã được hiển thị ở phần cố định của report.",
-          'Chỉ dùng cụm "phần lớn" khi verdictCategory là "majority_incomplete".',
-          "Nếu verdictCategory là insufficient, phải nói chưa đủ dữ liệu qua mốc 14 ngày.",
-          "Nếu verdictCategory là complete, phải nói các sequence đến hạn đã hoàn thành đủ.",
+          "Tập trung vào outreach, booked calls, missed inbound và tagging.",
+          "Creator outreach và brand outreach chỉ tính conversation mới bắt đầu trong kỳ báo cáo.",
+          "Không đề cập follow-up sequence hoặc tần suất follow-up.",
           "Trả về đúng JSON theo schema, không thêm markdown.",
         ].join("\n"),
       },
@@ -85,10 +77,6 @@ export async function generateWeeklyOutreachNarrative(
     ],
   });
   const output = weeklyOutreachNarrativeOutput.parse(result.output);
-
-  if (facts.verdictCategory !== "majority_incomplete" && /phần lớn/i.test(output.verdict)) {
-    throw new Error('OpenRouter used "phần lớn" for the wrong verdict category.');
-  }
 
   if (/\d/.test(`${output.summary} ${output.verdict}`)) {
     throw new Error("OpenRouter added numeric claims to the narrative.");
