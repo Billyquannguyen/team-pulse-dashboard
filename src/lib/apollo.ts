@@ -85,8 +85,10 @@ function cleanBaseUrl(value: string) {
 }
 
 function apolloEnv() {
-  const apiKey = process.env.APOLLO_API_KEY ?? "";
-  const baseUrl = cleanBaseUrl(process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1");
+  const apiKey = (process.env.APOLLO_API_KEY ?? "").trim();
+  const baseUrl = cleanBaseUrl(
+    (process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1").trim(),
+  );
 
   if (!apiKey) {
     throw new Error("Missing APOLLO_API_KEY. Add it in Vercel Environment Variables first.");
@@ -214,8 +216,8 @@ async function postApollo(path: string, params: ApolloParams = {}, body?: unknow
     method: "POST",
     headers: {
       Accept: "application/json",
+      "Cache-Control": "no-cache",
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
       "x-api-key": apiKey,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
