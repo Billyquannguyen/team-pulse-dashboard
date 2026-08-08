@@ -1100,6 +1100,7 @@ function BrandFinderPage() {
   const createDrafts = async () => {
     setDraftError("");
     setDraftMessage("");
+    setSearchMessage("");
 
     if (selectedDraftCandidates.length === 0) {
       setDraftError("Select at least one contact first.");
@@ -1315,11 +1316,8 @@ function BrandFinderPage() {
                   <QueueActions
                     runLabel="Run Search"
                     runDisabled={isDirectSearching || directSearchBrands.length === 0}
-                    createDisabled={isCreatingDrafts || selectedContacts.length === 0}
                     isRunning={isDirectSearching}
-                    isCreating={isCreatingDrafts}
                     onRun={runDirectSearch}
-                    onCreate={() => void createDrafts()}
                   />
                 }
               >
@@ -1343,11 +1341,8 @@ function BrandFinderPage() {
                   <QueueActions
                     runLabel="Run Apollo"
                     runDisabled={isSearching || selectedBrands.length === 0}
-                    createDisabled={isCreatingDrafts || selectedContacts.length === 0}
                     isRunning={isSearching}
-                    isCreating={isCreatingDrafts}
                     onRun={() => void runApolloSearch()}
-                    onCreate={() => void createDrafts()}
                   />
                 }
               >
@@ -1379,7 +1374,7 @@ function BrandFinderPage() {
                     : "border-fun-lime/50 bg-fun-lime/20 text-foreground",
                 )}
               >
-                {searchError || draftError || searchMessage || draftMessage}
+                {draftError || draftMessage || searchError || searchMessage}
               </div>
             )}
 
@@ -1562,6 +1557,31 @@ function BrandFinderPage() {
                 </button>
               </div>
             </details>
+
+            <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-3">
+              <div className="mb-3 text-xs font-semibold text-muted-foreground">
+                {selectedContacts.length} selected contact{selectedContacts.length === 1 ? "" : "s"}{" "}
+                ready for Gmail
+                {skippedNoEmailCount > 0 ? `, ${skippedNoEmailCount} need enrich` : ""}.
+              </div>
+              <button
+                type="button"
+                disabled={isCreatingDrafts || selectedContacts.length === 0}
+                onClick={() => void createDrafts()}
+                className="tb-action inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isCreatingDrafts ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                {selectedContacts.length > 0
+                  ? `Create ${selectedContacts.length} Gmail draft${
+                      selectedContacts.length === 1 ? "" : "s"
+                    }`
+                  : "Create Gmail drafts"}
+              </button>
+            </div>
           </Panel>
 
           <Panel title="Email Template" subtitle={subjectTemplate || "No subject set"}>
@@ -1709,19 +1729,13 @@ function DecisionButtons({
 function QueueActions({
   runLabel,
   runDisabled,
-  createDisabled,
   isRunning,
-  isCreating,
   onRun,
-  onCreate,
 }: {
   runLabel: string;
   runDisabled: boolean;
-  createDisabled: boolean;
   isRunning: boolean;
-  isCreating: boolean;
   onRun: () => void;
-  onCreate: () => void;
 }) {
   return (
     <div className="flex flex-wrap gap-2">
@@ -1737,19 +1751,6 @@ function QueueActions({
           <Search className="h-3.5 w-3.5" />
         )}
         {runLabel}
-      </button>
-      <button
-        type="button"
-        disabled={createDisabled}
-        onClick={onCreate}
-        className="tb-action inline-flex h-9 items-center gap-2 rounded-2xl bg-muted px-3 text-xs font-bold text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {isCreating ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <Send className="h-3.5 w-3.5" />
-        )}
-        Create drafts
       </button>
     </div>
   );
