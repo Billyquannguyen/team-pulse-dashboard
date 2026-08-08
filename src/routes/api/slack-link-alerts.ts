@@ -20,11 +20,13 @@ function isAuthorizedCronRequest(request: Request) {
 
 export async function handleSlackLinkAlertRequest(request: Request) {
   if (!isAuthorizedCronRequest(request)) {
+    console.warn("[slack-link-alerts] rejected unauthorized request");
     return jsonResponse({ ok: false, error: "Unauthorized cron request." }, 401);
   }
 
   const force = new URL(request.url).searchParams.get("force") === "1";
   if (!force && !isUkSlackLinkAlertHour()) {
+    console.info("[slack-link-alerts] skipped outside UK alert hour");
     return jsonResponse({
       ok: true,
       skipped: true,
@@ -32,6 +34,7 @@ export async function handleSlackLinkAlertRequest(request: Request) {
     });
   }
 
+  console.info("[slack-link-alerts] authorized request", { force });
   const result = await syncSlackLinkAlerts();
   return jsonResponse(result, result.ok ? 200 : 500);
 }

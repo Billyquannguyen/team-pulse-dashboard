@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TeamMembersRouteImport } from './routes/team-members'
+import { Route as PitchingSheetsRouteImport } from './routes/pitching-sheets'
 import { Route as LeaderboardRouteImport } from './routes/leaderboard'
 import { Route as GoalsRouteImport } from './routes/goals'
 import { Route as DiagnosticsRouteImport } from './routes/diagnostics'
@@ -23,7 +24,6 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiWeeklyGmailOutreachReportRouteImport } from './routes/api/weekly-gmail-outreach-report'
 import { Route as ApiSlackLinkAlertsRouteImport } from './routes/api/slack-link-alerts'
 import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
-import { Route as ApiSlackDebugRouteImport } from './routes/api/slack-debug'
 import { Route as ApiSlackLinkAlertsSlotRouteImport } from './routes/api/slack-link-alerts.$slot'
 import { Route as ApiCalendlyRemindersWebhookRouteImport } from './routes/api/calendly-reminders/webhook'
 import { Route as ApiAiPersonalReportRouteImport } from './routes/api/ai/personal-report'
@@ -31,6 +31,11 @@ import { Route as ApiAiPersonalReportRouteImport } from './routes/api/ai/persona
 const TeamMembersRoute = TeamMembersRouteImport.update({
   id: '/team-members',
   path: '/team-members',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PitchingSheetsRoute = PitchingSheetsRouteImport.update({
+  id: '/pitching-sheets',
+  path: '/pitching-sheets',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LeaderboardRoute = LeaderboardRouteImport.update({
@@ -99,11 +104,6 @@ const ApiSlackFollowupsRoute = ApiSlackFollowupsRouteImport.update({
   path: '/api/slack-followups',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiSlackDebugRoute = ApiSlackDebugRouteImport.update({
-  id: '/api/slack-debug',
-  path: '/api/slack-debug',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiSlackLinkAlertsSlotRoute = ApiSlackLinkAlertsSlotRouteImport.update({
   id: '/$slot',
   path: '/$slot',
@@ -132,8 +132,8 @@ export interface FileRoutesByFullPath {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
-  '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
@@ -152,8 +152,8 @@ export interface FileRoutesByTo {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
-  '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
@@ -173,8 +173,8 @@ export interface FileRoutesById {
   '/diagnostics': typeof DiagnosticsRoute
   '/goals': typeof GoalsRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
-  '/api/slack-debug': typeof ApiSlackDebugRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
@@ -195,8 +195,8 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/pitching-sheets'
     | '/team-members'
-    | '/api/slack-debug'
     | '/api/slack-followups'
     | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
@@ -215,8 +215,8 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/pitching-sheets'
     | '/team-members'
-    | '/api/slack-debug'
     | '/api/slack-followups'
     | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
@@ -235,8 +235,8 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/goals'
     | '/leaderboard'
+    | '/pitching-sheets'
     | '/team-members'
-    | '/api/slack-debug'
     | '/api/slack-followups'
     | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
@@ -256,8 +256,8 @@ export interface RootRouteChildren {
   DiagnosticsRoute: typeof DiagnosticsRoute
   GoalsRoute: typeof GoalsRoute
   LeaderboardRoute: typeof LeaderboardRoute
+  PitchingSheetsRoute: typeof PitchingSheetsRoute
   TeamMembersRoute: typeof TeamMembersRoute
-  ApiSlackDebugRoute: typeof ApiSlackDebugRoute
   ApiSlackFollowupsRoute: typeof ApiSlackFollowupsRoute
   ApiSlackLinkAlertsRoute: typeof ApiSlackLinkAlertsRouteWithChildren
   ApiWeeklyGmailOutreachReportRoute: typeof ApiWeeklyGmailOutreachReportRoute
@@ -272,6 +272,13 @@ declare module '@tanstack/react-router' {
       path: '/team-members'
       fullPath: '/team-members'
       preLoaderRoute: typeof TeamMembersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pitching-sheets': {
+      id: '/pitching-sheets'
+      path: '/pitching-sheets'
+      fullPath: '/pitching-sheets'
+      preLoaderRoute: typeof PitchingSheetsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/leaderboard': {
@@ -365,13 +372,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSlackFollowupsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/slack-debug': {
-      id: '/api/slack-debug'
-      path: '/api/slack-debug'
-      fullPath: '/api/slack-debug'
-      preLoaderRoute: typeof ApiSlackDebugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/slack-link-alerts/$slot': {
       id: '/api/slack-link-alerts/$slot'
       path: '/$slot'
@@ -418,8 +418,8 @@ const rootRouteChildren: RootRouteChildren = {
   DiagnosticsRoute: DiagnosticsRoute,
   GoalsRoute: GoalsRoute,
   LeaderboardRoute: LeaderboardRoute,
+  PitchingSheetsRoute: PitchingSheetsRoute,
   TeamMembersRoute: TeamMembersRoute,
-  ApiSlackDebugRoute: ApiSlackDebugRoute,
   ApiSlackFollowupsRoute: ApiSlackFollowupsRoute,
   ApiSlackLinkAlertsRoute: ApiSlackLinkAlertsRouteWithChildren,
   ApiWeeklyGmailOutreachReportRoute: ApiWeeklyGmailOutreachReportRoute,

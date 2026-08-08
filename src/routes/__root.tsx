@@ -108,7 +108,7 @@ function RootComponent() {
         <div className="min-h-screen bg-background text-foreground">
           <div className="mx-auto flex w-full max-w-[1500px]">
             <AppSidebar />
-            <main className="flex-1 px-4 pb-28 pt-6 md:px-6 md:pt-8 lg:pb-10">
+            <main className="min-w-0 flex-1 px-4 pb-28 pt-6 md:px-6 md:pt-8 lg:pb-10">
               <DataSourceBanner />
               <Outlet />
             </main>

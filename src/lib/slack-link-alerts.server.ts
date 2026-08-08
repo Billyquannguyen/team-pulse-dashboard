@@ -1,6 +1,8 @@
 type SlackApiResponse<T> = T & {
   ok: boolean;
   error?: string;
+  needed?: string;
+  provided?: string;
   response_metadata?: { next_cursor?: string };
 };
 
@@ -174,7 +176,17 @@ async function slackApi<T>(
   const payload = (await response.json().catch(() => null)) as SlackApiResponse<T> | null;
 
   if (!response.ok || !payload?.ok) {
-    throw new Error(`Slack ${method} failed: ${payload?.error ?? `HTTP ${response.status}`}`);
+    const permissionDetails = [
+      payload?.needed ? `needed=${payload.needed}` : "",
+      payload?.provided ? `provided=${payload.provided}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    throw new Error(
+      `Slack ${method} failed: ${payload?.error ?? `HTTP ${response.status}`}${
+        permissionDetails ? ` (${permissionDetails})` : ""
+      }`,
+    );
   }
 
   return payload;
@@ -338,6 +350,10 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
   let checkedChannels = 0;
   let matchedMembers: string[] = [];
 
+  console.info("[slack-link-alerts] sync started", {
+    configuredMemberCount: configuredMemberNames().length,
+  });
+
   try {
     requiredEnv("SLACK_USER_TOKEN");
     requiredEnv("SLACK_LINK_ALERT_DISCORD_WEBHOOK_URL");
@@ -379,7 +395,7 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
       }
     }
 
-    return {
+    const result: SlackLinkAlertResult = {
       ok: true,
       checkedChannels,
       alertsSent,
@@ -387,14 +403,29 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
       matchedMembers,
       error: null,
     };
+    console.info("[slack-link-alerts] sync completed", {
+      checkedChannels,
+      alertsSent,
+      initializedChannels,
+      matchedMemberCount: matchedMembers.length,
+    });
+    return result;
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("[slack-link-alerts] sync failed", {
+      error: errorMessage,
+      checkedChannels,
+      alertsSent,
+      initializedChannels,
+      matchedMemberCount: matchedMembers.length,
+    });
     return {
       ok: false,
       checkedChannels,
       alertsSent,
       initializedChannels,
       matchedMembers,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
     };
   }
 }

@@ -1,5 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
+  FileSpreadsheet,
   LayoutDashboard,
   LinkIcon,
   SearchCheck,
@@ -17,6 +18,7 @@ const items = [
   { to: "/deals", label: "Deals", icon: Table2 },
   { to: "/creators", label: "Creators", icon: Users },
   { to: "/brand-finder", label: "Finder", icon: SearchCheck },
+  { to: "/pitching-sheets", label: "Pitching", icon: FileSpreadsheet },
   { to: "/active-brands", label: "Brands", icon: Store },
   { to: "/goals", label: "Analytics", icon: Target },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
@@ -27,7 +29,7 @@ const items = [
 export function MobileNav() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   return (
-    <nav className="lg:hidden fixed bottom-3 left-3 right-3 z-40 flex items-center justify-between rounded-3xl bg-card/95 p-2 shadow-lg ring-1 ring-border backdrop-blur">
+    <nav className="lg:hidden fixed bottom-3 left-3 right-3 z-40 flex items-center overflow-x-auto rounded-3xl bg-card/95 p-2 shadow-lg ring-1 ring-border backdrop-blur">
       {items.map((it) => {
         const active = it.to === "/" ? path === "/" : path.startsWith(it.to);
         const Icon = it.icon;
@@ -36,7 +38,7 @@ export function MobileNav() {
             key={it.to}
             to={it.to}
             className={cn(
-              "tb-action flex flex-1 flex-col items-center gap-0.5 rounded-2xl py-2 text-[10px] font-medium",
+              "tb-action flex min-w-16 flex-1 flex-col items-center gap-0.5 rounded-2xl py-2 text-[10px] font-medium",
               active ? "bg-primary/15 text-primary" : "text-muted-foreground",
             )}
           >
