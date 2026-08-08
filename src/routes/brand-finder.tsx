@@ -547,11 +547,25 @@ function findDuplicateContact(contact: ContactRow, contacts: ContactDatabaseCont
 
   if (byEmail) return byEmail;
 
-  return contacts.find(
+  const exactNameMatch = contacts.find(
     (databaseContact) =>
       compactKey(databaseContact.brandName) === compactKey(contact.brandName) &&
       compactKey(databaseContact.contactName) === compactKey(contact.contactName),
   );
+
+  if (exactNameMatch) return exactNameMatch;
+
+  const firstName = compactKey(contactFirstName(contact.contactName, contact.contactFirstName));
+  if (!firstName) return undefined;
+
+  const sameBrandFirstNameMatches = contacts.filter(
+    (databaseContact) =>
+      compactKey(databaseContact.brandName) === compactKey(contact.brandName) &&
+      compactKey(contactFirstName(databaseContact.contactName, databaseContact.contactFirstName)) ===
+        firstName,
+  );
+
+  return sameBrandFirstNameMatches.length === 1 ? sameBrandFirstNameMatches[0] : undefined;
 }
 
 function contactDuplicateLabel(contact: ContactRow, contacts: ContactDatabaseContact[]) {
@@ -589,6 +603,33 @@ function apiContactToRow(contact: ApolloContactResult, brands: BrandRow[]): Cont
     apolloPersonId: contact.apolloPersonId,
     apolloOrganizationId: contact.apolloOrganizationId,
     linkedin: contact.linkedin,
+  };
+
+  return {
+    ...row,
+    id: contactId(row),
+  };
+}
+
+function applyStoredContactFallback(
+  contact: ContactRow,
+  databaseContacts: ContactDatabaseContact[],
+): ContactRow {
+  const storedContact = findDuplicateContact(contact, databaseContacts);
+  if (!storedContact) return contact;
+
+  const contactName =
+    contact.contactName && contact.contactName !== "Unknown contact"
+      ? contact.contactName
+      : storedContact.contactName;
+  const email = contact.email || storedContact.email;
+  const position = contact.position || storedContact.position;
+  const row = {
+    ...contact,
+    contactName,
+    contactFirstName: contactFirstName(contactName, contact.contactFirstName),
+    email,
+    position,
   };
 
   return {
@@ -1035,7 +1076,9 @@ function BrandFinderPage() {
         },
       });
       const incoming = result.contacts
-        .map((contact) => apiContactToRow(contact, brandsToSearch))
+        .map((contact) =>
+          applyStoredContactFallback(apiContactToRow(contact, brandsToSearch), databaseContacts),
+        )
         .filter((contact) => !filters.requireEmail || contact.email);
 
       setContacts((current) => mergeContacts(current, incoming));
@@ -1062,7 +1105,9 @@ function BrandFinderPage() {
           contacts: [contactRowToApolloContact(contact)],
         },
       });
-      const [enriched] = result.contacts.map((item) => apiContactToRow(item, selectedBrands));
+      const [enriched] = result.contacts.map((item) =>
+        applyStoredContactFallback(apiContactToRow(item, selectedBrands), databaseContacts),
+      );
       if (!enriched) {
         setSearchError("Apollo did not return an enriched contact.");
         return;
@@ -1402,7 +1447,7 @@ function BrandFinderPage() {
                   )}
                   {approvalContacts.map((contact) => {
                     const isSelected = isApprovalContactSelected(contact);
-                    const canEnrich = contact.source === "Apollo";
+                    const canEnrich = contact.source === "Apollo" && !contact.email;
                     const isEnriching = enrichingContactIds.has(contact.id);
 
                     return (
@@ -1558,30 +1603,6 @@ function BrandFinderPage() {
               </div>
             </details>
 
-            <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-3">
-              <div className="mb-3 text-xs font-semibold text-muted-foreground">
-                {selectedContacts.length} selected contact{selectedContacts.length === 1 ? "" : "s"}{" "}
-                ready for Gmail
-                {skippedNoEmailCount > 0 ? `, ${skippedNoEmailCount} need enrich` : ""}.
-              </div>
-              <button
-                type="button"
-                disabled={isCreatingDrafts || selectedContacts.length === 0}
-                onClick={() => void createDrafts()}
-                className="tb-action inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isCreatingDrafts ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                {selectedContacts.length > 0
-                  ? `Create ${selectedContacts.length} Gmail draft${
-                      selectedContacts.length === 1 ? "" : "s"
-                    }`
-                  : "Create Gmail drafts"}
-              </button>
-            </div>
           </Panel>
 
           <Panel title="Email Template" subtitle={subjectTemplate || "No subject set"}>
@@ -1630,6 +1651,31 @@ function BrandFinderPage() {
                 </label>
               </div>
             </details>
+
+            <div className="mt-3 rounded-2xl border border-primary/20 bg-primary/5 p-3">
+              <div className="mb-3 text-xs font-semibold text-muted-foreground">
+                {selectedContacts.length} selected contact{selectedContacts.length === 1 ? "" : "s"}{" "}
+                ready for Gmail
+                {skippedNoEmailCount > 0 ? `, ${skippedNoEmailCount} need enrich` : ""}.
+              </div>
+              <button
+                type="button"
+                disabled={isCreatingDrafts || selectedContacts.length === 0}
+                onClick={() => void createDrafts()}
+                className="tb-action inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isCreatingDrafts ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                {selectedContacts.length > 0
+                  ? `Create ${selectedContacts.length} Gmail draft${
+                      selectedContacts.length === 1 ? "" : "s"
+                    }`
+                  : "Create Gmail drafts"}
+              </button>
+            </div>
           </Panel>
 
           <Panel title="Contact Database" subtitle="Used for duplicate flags.">
