@@ -182,6 +182,16 @@ function safeFilename(value: string) {
     .replace(/^-|-$/g, "");
 }
 
+function excelHyperlinkFormula(value: string) {
+  const url = value.trim();
+  if (!/^https?:\/\//i.test(url)) return null;
+  const escaped = url.replace(/"/g, '""');
+  return {
+    formula: `HYPERLINK("${escaped}","${escaped}")`,
+    result: url,
+  };
+}
+
 function rankedOptions(values: string[]) {
   const counts = new Map<string, number>();
   values.forEach((rawValue) => {
@@ -422,7 +432,6 @@ function PitchingSheetsPage() {
       );
     }
     result.push(
-      { key: "analytics", label: "Analytics", value: (row) => row.profile.analytics },
       { key: "gender", label: "Gender", value: (row) => row.profile.gender },
       {
         key: "interested",
@@ -592,9 +601,7 @@ function PitchingSheetsPage() {
     const interestedIndex = columns.findIndex((column) => column.key === "interested") + 1;
     const editableKeys = new Set(["interested", "rate", "deliverables", "comments"]);
     const hyperlinkKeys = new Set(
-      columns
-        .filter((column) => column.label.includes("Link") || column.key === "analytics")
-        .map((column) => column.key),
+      columns.filter((column) => column.label.includes("Link")).map((column) => column.key),
     );
 
     worksheet.eachRow((row, rowNumber) => {
@@ -623,12 +630,12 @@ function PitchingSheetsPage() {
           },
         };
         if (column?.label.includes("Following")) cell.numFmt = "#,##0";
-        if (
-          hyperlinkKeys.has(column?.key) &&
-          typeof rawValue === "string" &&
-          /^https?:\/\//.test(rawValue)
-        ) {
-          cell.value = { text: rawValue, hyperlink: rawValue };
+        const hyperlink =
+          hyperlinkKeys.has(column?.key) && typeof rawValue === "string"
+            ? excelHyperlinkFormula(rawValue)
+            : null;
+        if (hyperlink) {
+          cell.value = hyperlink;
           cell.font = { name: "Aptos", size: 10, color: { argb: "FF2767C6" }, underline: true };
         }
       });

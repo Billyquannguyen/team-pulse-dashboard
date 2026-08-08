@@ -73,7 +73,6 @@ function buildStructuredReportData(
       creatorsSourced: report.metrics.creatorsSourced,
       contacted: report.metrics.contacted,
       emailsSent: report.metrics.emailsSent,
-      igOutreach: report.metrics.igOutreach,
       replies: report.metrics.replies,
       bookedCalls: report.metrics.bookedCalls,
       signed: report.metrics.signed,

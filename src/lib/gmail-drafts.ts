@@ -22,11 +22,15 @@ export type GmailDraftResult = {
   message: string;
 };
 
-function requiredEnv(name: string) {
+const BRAND_FINDER_GMAIL_CLIENT_ID_ENV = "BRAND_FINDER_GMAIL_CLIENT_ID";
+const BRAND_FINDER_GMAIL_CLIENT_SECRET_ENV = "BRAND_FINDER_GMAIL_CLIENT_SECRET";
+const BRAND_FINDER_GMAIL_REFRESH_TOKEN_ENV = "BRAND_FINDER_GMAIL_REFRESH_TOKEN";
+
+function requiredBrandFinderGmailEnv(name: string) {
   const value = process.env[name] ?? "";
   if (!value) {
     throw new Error(
-      `Missing ${name}. Add it in Vercel Environment Variables before creating Gmail drafts.`,
+      `Missing ${name}. Add the Brand Finder Gmail OAuth variables in Vercel Environment Variables before creating Gmail drafts.`,
     );
   }
   return value;
@@ -51,9 +55,9 @@ async function getGmailAccessToken() {
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams({
-      client_id: requiredEnv("GMAIL_CLIENT_ID"),
-      client_secret: requiredEnv("GMAIL_CLIENT_SECRET"),
-      refresh_token: requiredEnv("GMAIL_REFRESH_TOKEN"),
+      client_id: requiredBrandFinderGmailEnv(BRAND_FINDER_GMAIL_CLIENT_ID_ENV),
+      client_secret: requiredBrandFinderGmailEnv(BRAND_FINDER_GMAIL_CLIENT_SECRET_ENV),
+      refresh_token: requiredBrandFinderGmailEnv(BRAND_FINDER_GMAIL_REFRESH_TOKEN_ENV),
       grant_type: "refresh_token",
     }),
   });

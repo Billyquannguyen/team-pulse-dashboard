@@ -1,7 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import {
   AtSign,
-  Instagram,
   MessageCircle,
   PhoneCall,
   Percent,
@@ -115,12 +114,6 @@ export function OutreachSummaryCard({
       tone: "var(--fun-lime)",
     },
     {
-      label: "IG outreach",
-      value: totals.igOutreach.toLocaleString(),
-      icon: Instagram,
-      tone: "var(--fun-pink)",
-    },
-    {
       label: "Replies",
       value: totals.replies.toLocaleString(),
       icon: MessageCircle,
@@ -184,7 +177,7 @@ export function OutreachSummaryCard({
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
+      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -214,7 +207,6 @@ export function OutreachSummaryCard({
                 <th className="px-3 py-2.5 text-right font-medium">Creators</th>
                 <th className="px-3 py-2.5 text-right font-medium">Contacted</th>
                 <th className="px-3 py-2.5 text-right font-medium">Emails</th>
-                <th className="px-3 py-2.5 text-right font-medium">IG</th>
                 <th className="px-3 py-2.5 text-right font-medium">Replies</th>
                 <th className="px-3 py-2.5 text-right font-medium">Calls</th>
                 <th className="px-3 py-2.5 text-right font-medium">Signed & partnered</th>
@@ -246,7 +238,6 @@ export function OutreachSummaryCard({
                   <td className="px-3 py-3 text-right">{member.totalCreators.toLocaleString()}</td>
                   <td className="px-3 py-3 text-right">{member.contacted.toLocaleString()}</td>
                   <td className="px-3 py-3 text-right">{member.emailed.toLocaleString()}</td>
-                  <td className="px-3 py-3 text-right">{member.igOutreach.toLocaleString()}</td>
                   <td className="px-3 py-3 text-right font-semibold">
                     {member.replies.toLocaleString()}
                   </td>

@@ -49,9 +49,11 @@ SLACK_SIGNING_SECRET=your_slack_signing_secret
 SLACK_LINK_ALERT_MEMBER_NAMES=Holly Jerrim,Fenya Lavrson,Alex Hendy
 SLACK_LINK_ALERT_DISCORD_WEBHOOK_URL=your_discord_channel_webhook_url
 CRON_SECRET=long_random_secret_for_vercel_cron
-GMAIL_CLIENT_ID=your_google_oauth_client_id
-GMAIL_CLIENT_SECRET=your_google_oauth_client_secret
-GMAIL_REFRESH_TOKEN=your_gmail_refresh_token
+BRAND_FINDER_GMAIL_CLIENT_ID=your_brand_finder_google_oauth_client_id
+BRAND_FINDER_GMAIL_CLIENT_SECRET=your_brand_finder_google_oauth_client_secret
+BRAND_FINDER_GMAIL_REFRESH_TOKEN=your_brand_finder_gmail_compose_refresh_token
+GMAIL_CLIENT_ID=your_weekly_report_google_oauth_client_id
+GMAIL_CLIENT_SECRET=your_weekly_report_google_oauth_client_secret
 WEEKLY_GMAIL_READONLY_REFRESH_TOKEN=your_separate_gmail_readonly_refresh_token
 WEEKLY_GMAIL_REPORT_DISCORD_WEBHOOK_URL=your_discord_webhook_url
 WEEKLY_GMAIL_REPORT_DAYS=7
@@ -79,6 +81,8 @@ OpenRouter credentials are server-side only. Billy GPT Personal Report uses `OPE
 The Weekly Gmail Outreach Report reuses those same OpenRouter variables. Gmail and the TeamMembers sheet calculate every number with fixed rules; OpenRouter only writes the short Vietnamese summary and verdict. If the configured free model is unavailable or returns an invalid answer, the report still posts to Discord with a fixed Vietnamese fallback.
 
 After adding or changing env vars in Vercel, redeploy the project.
+
+Brand Finder Gmail drafts use their own OAuth variables: `BRAND_FINDER_GMAIL_CLIENT_ID`, `BRAND_FINDER_GMAIL_CLIENT_SECRET`, and `BRAND_FINDER_GMAIL_REFRESH_TOKEN`. Generate that refresh token from the same OAuth client using Gmail compose permission: `https://www.googleapis.com/auth/gmail.compose`. These variables are intentionally separate from the weekly Gmail report so draft creation can be changed without touching the read-only report token.
 
 For Team Assets, the spreadsheet must have a worksheet tab named `Team Assets` with `title` and `url` columns. Optional columns are `subtitle`, `icon`, `color`, `category`, `enabled`, and `sort_order`.
 

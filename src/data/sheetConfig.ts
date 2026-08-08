@@ -100,6 +100,7 @@ export type OutreachField =
   | "email"
   | "niche"
   | "mainPlatform"
+  | "outreached"
   | "emailed"
   | "igOutreach"
   | "replied"
@@ -117,6 +118,7 @@ export const OUTREACH_COLUMN_ALIASES: Record<OutreachField, string[]> = {
   email: ["email", "email address"],
   niche: ["niche", "category", "vertical"],
   mainPlatform: ["main platform", "platform", "channel"],
+  outreached: ["outreached", "outreach", "contacted"],
   emailed: ["emailed", "email sent"],
   igOutreach: ["ig outreach", "instagram outreach", "dm outreach"],
   replied: ["replied", "reply", "responded"],

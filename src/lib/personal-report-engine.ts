@@ -446,7 +446,7 @@ export function buildPersonalReport(
       ? `Deal count is above team average: ${memberDeals.length} versus ${Math.round(benchmarks.avgDealCount)}.`
       : `Deal count is at ${memberDeals.length} versus team average ${Math.round(benchmarks.avgDealCount)}.`,
     `Deals per exclusive creator: ${opportunityDensity.toFixed(1)} versus team average ${benchmarks.avgOpportunityDensity.toFixed(1)}.`,
-    `Outreach snapshot: ${outreachMetrics.creatorsSourced} sourced, ${outreachMetrics.contacted} contacted, ${outreachMetrics.emailsSent} emails, ${outreachMetrics.igOutreach} IG outreach, ${outreachMetrics.replies} replies, ${outreachMetrics.bookedCalls} calls, ${outreachMetrics.signed} signed/partnered.`,
+    `Outreach snapshot: ${outreachMetrics.creatorsSourced} sourced, ${outreachMetrics.contacted} contacted, ${outreachMetrics.emailsSent} emails, ${outreachMetrics.replies} replies, ${outreachMetrics.bookedCalls} calls, ${outreachMetrics.signed} signed/partnered.`,
     `Outreach rates: ${outreachMetrics.replyRate}% reply, ${outreachMetrics.bookingRate}% booking, ${outreachMetrics.callClosingRate}% call closing, ${outreachMetrics.overallClosingRate}% overall closing.`,
   ].filter(Boolean) as string[];
 

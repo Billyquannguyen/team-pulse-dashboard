@@ -217,6 +217,7 @@ const SUMMARY_LABELS = {
 
 const DEFAULT_REVENUE_GOAL = 300000;
 const DEFAULT_DEALS_GOAL = 20;
+const DEAL_ARCHIVE_TAB_NAMES = ["Ex-managers"];
 const SERVER_DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const QUERY_STALE_TIME_MS = SERVER_DATA_CACHE_TTL_MS;
 const QUERY_REFETCH_INTERVAL_MS = SERVER_DATA_CACHE_TTL_MS;
@@ -291,6 +292,14 @@ function isIgnoredOutreachSheet(value: string) {
 
 function isSignedCreatorsSheet(value: string) {
   return normalizeSheetLabel(value).includes("signed creators");
+}
+
+function isDealArchiveSheet(value: string) {
+  const normalized = normalizeSheetLabel(value);
+
+  return DEAL_ARCHIVE_TAB_NAMES.some(
+    (tabName) => normalized === normalizeSheetLabel(tabName),
+  );
 }
 
 function getSystemTabSkipReason(sheetName: string) {
@@ -479,6 +488,8 @@ async function readConfiguredDealMemberSheets(
   const configuredRefs: SheetRef[] = [];
 
   for (const sheet of discovered) {
+    if (isDealArchiveSheet(sheet.sheetName)) continue;
+
     const skipReason = getSystemTabSkipReason(sheet.sheetName);
     if (skipReason) {
       skippedTabs.push({ sheetName: sheet.sheetName, reason: skipReason });
@@ -520,6 +531,15 @@ async function readConfiguredDealMemberSheets(
     configuredRefs.push({
       ...matchedRef,
       memberName: member.displayName,
+    });
+  }
+
+  for (const sheet of discovered) {
+    if (!isDealArchiveSheet(sheet.sheetName)) continue;
+
+    configuredRefs.push({
+      ...sheet,
+      memberName: cleanMemberName(sheet.sheetName),
     });
   }
 
@@ -771,7 +791,7 @@ function buildOutreachDashboardData(
   const members = team.map((member) => {
     const memberName = canonicalMemberName(member.name);
     const rows = outreachRows.filter((row) => canonicalMemberName(row.memberName) === memberName);
-    const contacted = rows.filter((row) => row.emailed || row.igOutreach).length;
+    const contacted = rows.filter((row) => row.outreached || row.emailed || row.igOutreach).length;
     const emailed = rows.filter((row) => row.emailed).length;
     const igOutreach = rows.filter((row) => row.igOutreach).length;
     const replies = rows.filter((row) => row.replied).length;
@@ -1167,7 +1187,7 @@ async function readDashboardSheetData(
   };
   const teamMembersData = await getTeamMembersDataForServer();
   const activeMembers = teamMembersData.activeMembers;
-  const dealHistoryMembers = teamMembersData.members;
+  const dealSheetMembers = activeMembers;
 
   if (debug) {
     debug.teamMembers = {
@@ -1185,7 +1205,7 @@ async function readDashboardSheetData(
   const sheets = await readConfiguredDealMemberSheets(
     config,
     config.teamSpreadsheetId,
-    dealHistoryMembers,
+    dealSheetMembers,
     debug,
   );
   logDashboardDataFlow("deal sheet rows returned", {
@@ -1234,7 +1254,10 @@ async function readDashboardSheetData(
 
   logDashboardDataFlow("dashboard data loaded from google sheets", {
     teamMembers: team.length,
-    dealHistoryMembers: dealHistoryMembers.length,
+    dealSheetMembers: dealSheetMembers.length,
+    archiveDealTabs: validDealSheets
+      .filter((sheet) => isDealArchiveSheet(sheet.sheetName))
+      .map((sheet) => sheet.sheetName),
     deals: deals.length,
     creators: creatorData.creators.length,
     outreachMembers: creatorData.outreach.members.length,

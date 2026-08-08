@@ -29,6 +29,7 @@ export type OutreachRow = {
   email?: string;
   niche: string;
   mainPlatform: Platform;
+  outreached: boolean;
   emailed: boolean;
   igOutreach: boolean;
   replied: boolean;
@@ -40,13 +41,7 @@ export type OutreachRow = {
   notes?: string;
 };
 
-const REQUIRED_OUTREACH_FIELDS: OutreachField[] = [
-  "emailed",
-  "igOutreach",
-  "replied",
-  "bookedCall",
-  "finalStatus",
-];
+const REQUIRED_OUTREACH_FIELDS: OutreachField[] = ["replied", "bookedCall", "finalStatus"];
 
 const REQUIRED_DEAL_FIELDS: DashboardDealField[] = [
   "brand",
@@ -107,6 +102,7 @@ const OUTREACH_FIELD_LABELS: Record<OutreachField, string> = {
   email: "Email",
   niche: "Niche",
   mainPlatform: "Main platform",
+  outreached: "Outreached",
   emailed: "Emailed",
   igOutreach: "IG outreach",
   replied: "Replied",
@@ -291,6 +287,7 @@ export function isOutreachWorksheetHeader(headers: string[]) {
     "youtubeLink",
   ]);
   const hasMetricHeader =
+    hasHeaderAlias(headers, OUTREACH_COLUMN_ALIASES, "outreached") ||
     hasHeaderAlias(headers, OUTREACH_COLUMN_ALIASES, "emailed") ||
     hasHeaderAlias(headers, OUTREACH_COLUMN_ALIASES, "igOutreach") ||
     hasHeaderAlias(headers, OUTREACH_COLUMN_ALIASES, "replied") ||
@@ -378,7 +375,12 @@ export function normalizeMemberOutreachRows(tabName: string, rows: SheetRow[]): 
       const finalStatus = getHeaderCell(row, lookup, "finalStatus");
       const hasBookedCallColumn = lookup.bookedCall !== undefined && lookup.bookedCall >= 0;
       const bookedCallValue = getHeaderCell(row, lookup, "bookedCall");
-      const emailed = parseBoolean(getHeaderCell(row, lookup, "emailed"));
+      const email = getHeaderCell(row, lookup, "email");
+      const hasEmailedColumn = lookup.emailed !== undefined && lookup.emailed >= 0;
+      const outreached = parseBoolean(getHeaderCell(row, lookup, "outreached"));
+      const emailed =
+        parseBoolean(getHeaderCell(row, lookup, "emailed")) ||
+        (!hasEmailedColumn && outreached && Boolean(email.trim()));
       const igOutreach = parseBoolean(getHeaderCell(row, lookup, "igOutreach"));
       const replied = parseBoolean(getHeaderCell(row, lookup, "replied"));
       const bookedCall = hasBookedCallColumn
@@ -394,9 +396,10 @@ export function normalizeMemberOutreachRows(tabName: string, rows: SheetRow[]): 
         tiktokLink: getHeaderCell(row, lookup, "tiktokLink") || undefined,
         instagramLink: getHeaderCell(row, lookup, "instagramLink") || undefined,
         youtubeLink: getHeaderCell(row, lookup, "youtubeLink") || undefined,
-        email: getHeaderCell(row, lookup, "email") || undefined,
+        email: email || undefined,
         niche: getHeaderCell(row, lookup, "niche"),
         mainPlatform: parsePlatform(getHeaderCell(row, lookup, "mainPlatform")),
+        outreached,
         emailed,
         igOutreach,
         replied,
