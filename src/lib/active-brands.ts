@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 
 type GoogleSheetsConfig = {
   serviceAccountEmail: string;
@@ -165,9 +165,7 @@ function emptyDebug(): ActiveBrandsReadDebug {
   };
 }
 
-async function getGoogleSheetsServer() {
-  return import("@/lib/google-sheets.server");
-}
+const getGoogleSheetsServer = createServerOnlyFn(async () => import("@/lib/google-sheets.server"));
 
 function getActiveBrandsSpreadsheetId() {
   return process.env[ACTIVE_BRANDS_SPREADSHEET_ENV]?.trim() ?? "";
