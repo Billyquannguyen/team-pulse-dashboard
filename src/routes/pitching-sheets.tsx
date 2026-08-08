@@ -1,20 +1,29 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowLeft,
+  Check,
   CheckSquare,
   ExternalLink,
   FileSpreadsheet,
+  Loader2,
   Pencil,
   Plus,
-  RotateCcw,
   Search,
-  SlidersHorizontal,
+  Sparkles,
+  Users,
 } from "lucide-react";
-import * as XLSX from "xlsx";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { ConfigurableStructuredForm } from "@/components/pitching/ConfigurableStructuredForm";
 import {
-  PreparedDatasetPreviewModal,
+  validateStructuredForm,
+  type StructuredFormField,
+  type StructuredFormValue,
+  type StructuredFormValues,
+} from "@/components/pitching/structured-form";
+import {
+  PreparedDatasetPreview,
   type PreparedRow,
   type PreviewColumn,
 } from "@/components/pitching/PreparedDatasetPreviewModal";
@@ -27,7 +36,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { DashboardSelect, DashboardSelectField } from "@/components/ui/dashboard-select";
+import { DashboardSelect } from "@/components/ui/dashboard-select";
 import {
   createCreatorProfile,
   creatorProfilesQuery,
@@ -45,7 +54,7 @@ export const Route = createFileRoute("/pitching-sheets")({
       { title: "Pitching Sheets — Team Billion" },
       {
         name: "description",
-        content: "Filter the private creator roster and prepare client-ready pitching sheets.",
+        content: "Build polished, client-ready creator pitching sheets.",
       },
     ],
   }),
@@ -53,6 +62,9 @@ export const Route = createFileRoute("/pitching-sheets")({
 });
 
 type Platform = "TikTok" | "Instagram" | "YouTube";
+type WorkflowStage = "form" | "exclusives" | "preview";
+type PitchRow = PreparedRow & { profile: CreatorProfile; isRosterExclusive: boolean };
+
 type ProfileDraft = {
   creatorName: string;
   location: string;
@@ -76,9 +88,17 @@ type ProfileDraft = {
   updatedBy: string;
 };
 
-type PitchRow = PreparedRow & { profile: CreatorProfile; isRosterExclusive: boolean };
-
 const platforms: Platform[] = ["TikTok", "Instagram", "YouTube"];
+const initialFormValues: StructuredFormValues = {
+  clientName: "",
+  campaignName: "",
+  platforms: [...platforms],
+  minimumFollowing: "",
+  maximumFollowing: "",
+  gender: "All genders",
+  countries: [],
+  niches: [],
+};
 
 const emptyDraft: ProfileDraft = {
   creatorName: "",
@@ -102,12 +122,6 @@ const emptyDraft: ProfileDraft = {
   dataIssues: "",
   updatedBy: "Team member",
 };
-
-function unique(values: string[]) {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((a, b) =>
-    a.localeCompare(b),
-  );
-}
 
 function followerValue(profile: CreatorProfile, platform: Platform) {
   if (platform === "TikTok") return profile.ttFollowing;
@@ -168,18 +182,40 @@ function safeFilename(value: string) {
     .replace(/^-|-$/g, "");
 }
 
+function rankedOptions(values: string[]) {
+  const counts = new Map<string, number>();
+  values.forEach((rawValue) => {
+    const value = rawValue.trim();
+    if (value) counts.set(value, (counts.get(value) ?? 0) + 1);
+  });
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([value, count]) => ({
+      value,
+      label: value,
+      description: `${count.toLocaleString()} creators`,
+    }));
+}
+
+function normalizedLookupValue(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\/(www\.)?/, "")
+    .replace(/[?#].*$/, "")
+    .replace(/\/+$/, "");
+}
+
 function ProfileField({
   label,
   value,
   onChange,
   type = "text",
-  placeholder,
 }: {
   label: string;
   value: string | number;
   onChange: (value: string) => void;
   type?: string;
-  placeholder?: string;
 }) {
   return (
     <label className="space-y-1 text-xs font-semibold text-muted-foreground">
@@ -188,7 +224,6 @@ function ProfileField({
         type={type}
         min={type === "number" ? 0 : undefined}
         value={value}
-        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         className="h-10 rounded-2xl bg-background text-sm text-foreground"
       />
@@ -196,81 +231,28 @@ function ProfileField({
   );
 }
 
-function CreatorResultsTable({
-  profiles,
-  selectedIds,
-  rosterExclusive,
-  onToggle,
-  onEdit,
-}: {
-  profiles: CreatorProfile[];
-  selectedIds: Set<string>;
-  rosterExclusive: boolean;
-  onToggle: (creatorId: string) => void;
-  onEdit: (profile: CreatorProfile) => void;
-}) {
+function WorkflowSteps({ stage }: { stage: WorkflowStage }) {
+  const activeIndex = stage === "form" ? 0 : stage === "exclusives" ? 1 : 2;
   return (
-    <div className="max-h-[460px] overflow-auto border-t border-border">
-      <table className="min-w-full text-sm">
-        <thead className="sticky top-0 z-10 bg-muted text-xs uppercase tracking-wide text-muted-foreground">
-          <tr>
-            <th className="px-4 py-3 text-left">Select</th>
-            <th className="px-4 py-3 text-left">Creator</th>
-            <th className="px-4 py-3 text-left">Manager</th>
-            <th className="px-4 py-3 text-left">Location</th>
-            <th className="px-4 py-3 text-left">Niches</th>
-            <th className="px-4 py-3 text-right">Main following</th>
-            <th className="px-4 py-3 text-right">Edit</th>
-          </tr>
-        </thead>
-        <tbody>
-          {profiles.map((profile) => (
-            <tr key={profile.creatorId} className="border-t border-border/70 hover:bg-muted/40">
-              <td className="px-4 py-3">
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(profile.creatorId)}
-                  onChange={() => onToggle(profile.creatorId)}
-                  aria-label={`Select ${profile.creatorName}`}
-                  className="h-4 w-4 accent-primary"
-                />
-              </td>
-              <td className="px-4 py-3 font-semibold">
-                <div className="flex flex-wrap items-center gap-2">
-                  {profile.creatorName}
-                  {rosterExclusive ? (
-                    <span className="rounded-full bg-primary/15 px-2.5 py-1 text-[11px] font-semibold text-primary">
-                      Our roster exclusive
-                    </span>
-                  ) : null}
-                </div>
-              </td>
-              <td className="px-4 py-3 text-muted-foreground">{profile.talentManager || "—"}</td>
-              <td className="px-4 py-3">{profile.location || "—"}</td>
-              <td className="max-w-xs px-4 py-3 text-muted-foreground">{profile.nicheTags}</td>
-              <td className="px-4 py-3 text-right tabular-nums">
-                {followerValue(
-                  profile,
-                  platforms.includes(profile.mainPlatform as Platform)
-                    ? (profile.mainPlatform as Platform)
-                    : "TikTok",
-                ).toLocaleString()}
-              </td>
-              <td className="px-4 py-3 text-right">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => onEdit(profile)}
-                  aria-label={`Edit ${profile.creatorName}`}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="flex items-center gap-2 text-xs font-semibold">
+      {["Filters", "Team exclusives", "Preview"].map((label, index) => (
+        <div key={label} className="flex items-center gap-2">
+          <span
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-full",
+              index <= activeIndex
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground",
+            )}
+          >
+            {index < activeIndex ? <Check className="h-3.5 w-3.5" /> : index + 1}
+          </span>
+          <span className={index === activeIndex ? "text-foreground" : "text-muted-foreground"}>
+            {label}
+          </span>
+          {index < 2 ? <span className="h-px w-5 bg-border sm:w-10" /> : null}
+        </div>
+      ))}
     </div>
   );
 }
@@ -280,32 +262,9 @@ function PitchingSheetsPage() {
   const { data, isLoading } = useQuery(creatorProfilesQuery);
   const { data: rosterData } = useQuery(dashboardSheetQuery);
   const profiles = useMemo(() => data?.profiles ?? [], [data?.profiles]);
-  const [search, setSearch] = useState("");
-  const deferredSearch = useDeferredValue(search.trim().toLowerCase());
-  const [selectedPlatforms, setSelectedPlatforms] = useState<Set<Platform>>(new Set());
-  const [mainPlatform, setMainPlatform] = useState("All main platforms");
-  const [gender, setGender] = useState("All genders");
-  const [manager, setManager] = useState("All managers");
-  const [location, setLocation] = useState("All locations");
-  const [niche, setNiche] = useState("All niches");
-  const [minimumFollowing, setMinimumFollowing] = useState("");
-  const [maximumFollowing, setMaximumFollowing] = useState("");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [previewRows, setPreviewRows] = useState<PitchRow[]>([]);
-  const [previewSelectedIds, setPreviewSelectedIds] = useState<Set<string>>(new Set());
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [exclusiveReminderOpen, setExclusiveReminderOpen] = useState(false);
-  const [clientName, setClientName] = useState("");
-  const [campaignName, setCampaignName] = useState("");
-  const [editing, setEditing] = useState<CreatorProfile | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [draft, setDraft] = useState<ProfileDraft>(emptyDraft);
-  const [saveError, setSaveError] = useState("");
-  const [saving, setSaving] = useState(false);
-
   const rosterReady = rosterData?.source === "google-sheet";
   const currentRosterCreators = useMemo(
-    () => (rosterReady ? rosterData.creators : []),
+    () => (rosterReady ? (rosterData?.creators ?? []) : []),
     [rosterData?.creators, rosterReady],
   );
   const currentRosterExclusiveCount = useMemo(
@@ -316,117 +275,112 @@ function PitchingSheetsPage() {
     () => matchCurrentRosterExclusiveProfileIds(profiles, currentRosterCreators),
     [currentRosterCreators, profiles],
   );
-
-  const options = useMemo(() => {
-    const niches = profiles.flatMap((profile) => profile.nicheTags.split(","));
-    return {
-      managers: ["All managers", ...unique(profiles.map((profile) => profile.talentManager))],
-      locations: ["All locations", ...unique(profiles.map((profile) => profile.location))],
-      genders: ["All genders", ...unique(profiles.map((profile) => profile.gender))],
-      niches: ["All niches", ...unique(niches)],
-      mainPlatforms: [
-        "All main platforms",
-        ...unique(profiles.map((profile) => profile.mainPlatform)),
-      ],
-    };
-  }, [profiles]);
-
-  const filtered = useMemo(() => {
-    const minimum = minimumFollowing === "" ? 0 : Number(minimumFollowing);
-    const maximum = maximumFollowing === "" ? Number.POSITIVE_INFINITY : Number(maximumFollowing);
-    const chosenPlatforms = [...selectedPlatforms];
-
-    const matches = profiles.filter((profile) => {
-      if (!profile.active) return false;
-      if (manager !== "All managers" && profile.talentManager !== manager) return false;
-      if (location !== "All locations" && profile.location !== location) return false;
-      if (gender !== "All genders" && profile.gender !== gender) return false;
-      if (mainPlatform !== "All main platforms" && profile.mainPlatform !== mainPlatform)
-        return false;
-      if (
-        niche !== "All niches" &&
-        !profile.nicheTags
-          .split(",")
-          .map((value) => value.trim())
-          .includes(niche)
-      )
-        return false;
-      if (chosenPlatforms.length > 0) {
-        const platformMatch = chosenPlatforms.some(
-          (platform) =>
-            platformAvailable(profile, platform) &&
-            followerValue(profile, platform) >= minimum &&
-            followerValue(profile, platform) <= maximum,
-        );
-        if (!platformMatch) return false;
-      } else {
-        const largestFollowing = Math.max(
-          profile.ttFollowing,
-          profile.instaFollowing,
-          profile.ytFollowing,
-        );
-        if (largestFollowing < minimum || largestFollowing > maximum) return false;
-      }
-      if (deferredSearch) {
-        const haystack = [
-          profile.creatorName,
-          profile.talentManager,
-          profile.location,
-          profile.nicheTags,
-          profile.nicheDetail,
-          profile.mainPlatform,
-        ]
-          .join(" ")
-          .toLowerCase();
-        if (!haystack.includes(deferredSearch)) return false;
-      }
-      return true;
-    });
-
-    return matches.sort((left, right) => {
-      const platformsToScore = chosenPlatforms.length ? chosenPlatforms : platforms;
-      const leftScore = Math.max(
-        ...platformsToScore.map((platform) => followerValue(left, platform)),
-      );
-      const rightScore = Math.max(
-        ...platformsToScore.map((platform) => followerValue(right, platform)),
-      );
-      return rightScore - leftScore || left.creatorName.localeCompare(right.creatorName);
-    });
-  }, [
-    deferredSearch,
-    gender,
-    location,
-    mainPlatform,
-    manager,
-    maximumFollowing,
-    minimumFollowing,
-    niche,
-    profiles,
-    selectedPlatforms,
-  ]);
-
-  const rosterExclusiveMatches = useMemo(
-    () => filtered.filter((profile) => rosterExclusiveProfileIds.has(profile.creatorId)),
-    [filtered, rosterExclusiveProfileIds],
-  );
-  const otherMatches = useMemo(
-    () => filtered.filter((profile) => !rosterExclusiveProfileIds.has(profile.creatorId)),
-    [filtered, rosterExclusiveProfileIds],
-  );
-  const selectedVisibleCount = useMemo(
-    () => filtered.filter((profile) => selectedIds.has(profile.creatorId)).length,
-    [filtered, selectedIds],
-  );
-  const unselectedRosterExclusives = useMemo(
-    () => rosterExclusiveMatches.filter((profile) => !selectedIds.has(profile.creatorId)),
-    [rosterExclusiveMatches, selectedIds],
+  const rosterExclusiveProfiles = useMemo(
+    () => profiles.filter((profile) => rosterExclusiveProfileIds.has(profile.creatorId)),
+    [profiles, rosterExclusiveProfileIds],
   );
 
-  const outputPlatforms = useMemo(
-    () => (selectedPlatforms.size ? [...selectedPlatforms] : platforms),
-    [selectedPlatforms],
+  const [workflowOpen, setWorkflowOpen] = useState(false);
+  const [workflowStage, setWorkflowStage] = useState<WorkflowStage>("form");
+  const [formValues, setFormValues] = useState<StructuredFormValues>(initialFormValues);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [workflowError, setWorkflowError] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [baseProfiles, setBaseProfiles] = useState<CreatorProfile[]>([]);
+  const [selectedExclusiveIds, setSelectedExclusiveIds] = useState<Set<string>>(new Set());
+  const [previewSelectedIds, setPreviewSelectedIds] = useState<Set<string>>(new Set());
+  const [lookupQuery, setLookupQuery] = useState("");
+  const [lookupSubmitted, setLookupSubmitted] = useState(false);
+  const [editing, setEditing] = useState<CreatorProfile | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [draft, setDraft] = useState<ProfileDraft>(emptyDraft);
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const countryOptions = useMemo(
+    () => rankedOptions(profiles.map((profile) => profile.location)),
+    [profiles],
   );
+  const nicheOptions = useMemo(
+    () => rankedOptions(profiles.flatMap((profile) => profile.nicheTags.split(","))),
+    [profiles],
+  );
+  const genderOptions = useMemo(
+    () => [
+      { value: "All genders", label: "All genders" },
+      ...rankedOptions(profiles.map((profile) => profile.gender)),
+    ],
+    [profiles],
+  );
+
+  const formFields = useMemo<StructuredFormField[]>(
+    () => [
+      {
+        key: "clientName",
+        label: "Client Name",
+        type: "text",
+        required: true,
+        placeholder: "Client or brand",
+      },
+      {
+        key: "campaignName",
+        label: "Campaign Name",
+        type: "text",
+        placeholder: "Optional campaign name",
+      },
+      {
+        key: "platforms",
+        label: "Platforms",
+        type: "multi-select",
+        required: true,
+        options: platforms.map((platform) => ({ value: platform, label: platform })),
+      },
+      {
+        key: "minimumFollowing",
+        label: "Minimum Following",
+        type: "number",
+        min: 0,
+        placeholder: "No minimum",
+      },
+      {
+        key: "maximumFollowing",
+        label: "Maximum Following",
+        type: "number",
+        min: 0,
+        placeholder: "No maximum",
+        validate: (value, values) => {
+          if (value === "" || values.minimumFollowing === "") return undefined;
+          return Number(value) < Number(values.minimumFollowing)
+            ? "Maximum following must be greater than the minimum."
+            : undefined;
+        },
+      },
+      {
+        key: "gender",
+        label: "Gender",
+        type: "select",
+        options: genderOptions,
+      },
+      {
+        key: "countries",
+        label: "Countries",
+        type: "multi-select",
+        placeholder: "All countries",
+        helperText: "Most common countries appear first.",
+        options: countryOptions,
+      },
+      {
+        key: "niches",
+        label: "Niches",
+        type: "multi-select",
+        placeholder: "All niches",
+        options: nicheOptions,
+      },
+    ],
+    [countryOptions, genderOptions, nicheOptions],
+  );
+
+  const selectedPlatforms = formValues.platforms as Platform[];
   const outputColumns = useMemo<PreviewColumn<PitchRow>[]>(() => {
     const result: PreviewColumn<PitchRow>[] = [
       { key: "creatorName", label: "Creator Name", value: (row) => row.profile.creatorName },
@@ -434,106 +388,297 @@ function PitchingSheetsPage() {
       { key: "niche", label: "Niche", value: (row) => row.profile.nicheTags },
       { key: "mainPlatform", label: "Main Platform", value: (row) => row.profile.mainPlatform },
     ];
-    if (outputPlatforms.includes("TikTok")) {
+    if (selectedPlatforms.includes("TikTok")) {
       result.push(
-        { key: "ttFollowing", label: "TT Following", value: (row) => row.profile.ttFollowing },
+        {
+          key: "ttFollowing",
+          label: "TT Following",
+          value: (row) => row.profile.ttFollowing,
+          align: "right",
+        },
         { key: "ttLink", label: "TT Link", value: (row) => row.profile.ttLink },
       );
     }
-    if (outputPlatforms.includes("Instagram")) {
+    if (selectedPlatforms.includes("Instagram")) {
       result.push(
         {
           key: "instaFollowing",
           label: "Insta Following",
           value: (row) => row.profile.instaFollowing,
+          align: "right",
         },
         { key: "instaLink", label: "Insta Link", value: (row) => row.profile.instaLink },
       );
     }
-    if (outputPlatforms.includes("YouTube")) {
+    if (selectedPlatforms.includes("YouTube")) {
       result.push(
-        { key: "ytFollowing", label: "YT Following", value: (row) => row.profile.ytFollowing },
+        {
+          key: "ytFollowing",
+          label: "YT Following",
+          value: (row) => row.profile.ytFollowing,
+          align: "right",
+        },
         { key: "ytLink", label: "YT Link", value: (row) => row.profile.ytLink },
       );
     }
     result.push(
       { key: "analytics", label: "Analytics", value: (row) => row.profile.analytics },
       { key: "gender", label: "Gender", value: (row) => row.profile.gender },
-      { key: "interested", label: "Interested?", value: () => "", sortable: false },
-      { key: "rate", label: "Rate", value: () => "", sortable: false },
-      { key: "deliverables", label: "Deliverables", value: () => "", sortable: false },
-      { key: "comments", label: "Comments", value: () => "", sortable: false },
+      {
+        key: "interested",
+        label: "Interested?",
+        value: () => "☐",
+        sortable: false,
+        align: "center",
+      },
+      { key: "rate", label: "Rate", value: () => "", sortable: false, align: "center" },
+      {
+        key: "deliverables",
+        label: "Deliverables",
+        value: () => "",
+        sortable: false,
+        align: "center",
+      },
+      {
+        key: "comments",
+        label: "Comments",
+        value: () => "",
+        sortable: false,
+        align: "center",
+      },
     );
     return result;
-  }, [outputPlatforms]);
+  }, [selectedPlatforms]);
 
-  const smartSort = (left: PitchRow, right: PitchRow) => {
-    if (left.isRosterExclusive !== right.isRosterExclusive) return left.isRosterExclusive ? -1 : 1;
-    const scorePlatforms = outputPlatforms.length ? outputPlatforms : platforms;
-    const leftScore = Math.max(
-      ...scorePlatforms.map((platform) => followerValue(left.profile, platform)),
+  const preparedRows = useMemo<PitchRow[]>(() => {
+    const selectedExclusives = rosterExclusiveProfiles.filter((profile) =>
+      selectedExclusiveIds.has(profile.creatorId),
     );
-    const rightScore = Math.max(
-      ...scorePlatforms.map((platform) => followerValue(right.profile, platform)),
-    );
-    return (
-      rightScore - leftScore || left.profile.creatorName.localeCompare(right.profile.creatorName)
-    );
-  };
-
-  const clearFilters = () => {
-    setSearch("");
-    setSelectedPlatforms(new Set());
-    setMainPlatform("All main platforms");
-    setGender("All genders");
-    setManager("All managers");
-    setLocation("All locations");
-    setNiche("All niches");
-    setMinimumFollowing("");
-    setMaximumFollowing("");
-    setSelectedIds(new Set());
-  };
-
-  const togglePlatform = (platform: Platform) => {
-    setSelectedPlatforms((current) => {
-      const next = new Set(current);
-      if (next.has(platform)) next.delete(platform);
-      else next.add(platform);
-      return next;
-    });
-  };
-
-  const toggleCreatorSelection = (creatorId: string) => {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(creatorId)) next.delete(creatorId);
-      else next.add(creatorId);
-      return next;
-    });
-  };
-
-  const openPreparedPreview = () => {
-    const chosenProfiles = [...rosterExclusiveMatches, ...otherMatches].filter((profile) =>
-      selectedIds.has(profile.creatorId),
-    );
-    const rows = chosenProfiles.map((profile) => ({
+    return [...selectedExclusives, ...baseProfiles].map((profile) => ({
       id: profile.creatorId,
       profile,
       isRosterExclusive: rosterExclusiveProfileIds.has(profile.creatorId),
     }));
-    setPreviewRows(rows);
-    setPreviewSelectedIds(new Set(rows.map((row) => row.id)));
-    setExclusiveReminderOpen(false);
-    setPreviewOpen(true);
+  }, [baseProfiles, rosterExclusiveProfileIds, rosterExclusiveProfiles, selectedExclusiveIds]);
+
+  const lookupResults = useMemo(() => {
+    if (!lookupSubmitted || !lookupQuery.trim()) return [];
+    const needle = normalizedLookupValue(lookupQuery);
+    return profiles
+      .filter((profile) => {
+        const values = [profile.creatorName, profile.ttLink, profile.instaLink, profile.ytLink].map(
+          normalizedLookupValue,
+        );
+        return values.some((value) => value === needle || value.includes(needle));
+      })
+      .slice(0, 8);
+  }, [lookupQuery, lookupSubmitted, profiles]);
+
+  const updateFormValue = (key: string, value: StructuredFormValue) => {
+    setFormValues((current) => ({ ...current, [key]: value }));
+    setFormErrors((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
   };
 
-  const requestPreview = () => {
-    if (!rosterReady) return;
-    if (unselectedRosterExclusives.length > 0) {
-      setExclusiveReminderOpen(true);
+  const prepareBaseProfiles = () => {
+    const errors = validateStructuredForm(formFields, formValues);
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    if (!rosterReady) {
+      setWorkflowError(
+        "The current Creators roster is unavailable, so exclusives cannot be reviewed safely.",
+      );
       return;
     }
-    openPreparedPreview();
+
+    setPreparing(true);
+    setWorkflowError("");
+    window.setTimeout(() => {
+      const selectedCountries = formValues.countries as string[];
+      const selectedNiches = formValues.niches as string[];
+      const gender = String(formValues.gender);
+      const minimum = formValues.minimumFollowing === "" ? 0 : Number(formValues.minimumFollowing);
+      const maximum =
+        formValues.maximumFollowing === ""
+          ? Number.POSITIVE_INFINITY
+          : Number(formValues.maximumFollowing);
+
+      const matches = profiles.filter((profile) => {
+        if (!profile.active || rosterExclusiveProfileIds.has(profile.creatorId)) return false;
+        if (gender !== "All genders" && profile.gender !== gender) return false;
+        if (selectedCountries.length > 0 && !selectedCountries.includes(profile.location))
+          return false;
+        if (selectedNiches.length > 0) {
+          const profileNiches = profile.nicheTags.split(",").map((value) => value.trim());
+          if (!selectedNiches.some((niche) => profileNiches.includes(niche))) return false;
+        }
+        return selectedPlatforms.some(
+          (platform) =>
+            platformAvailable(profile, platform) &&
+            followerValue(profile, platform) >= minimum &&
+            followerValue(profile, platform) <= maximum,
+        );
+      });
+
+      setBaseProfiles(matches);
+      setPreparing(false);
+      setWorkflowStage("exclusives");
+    }, 350);
+  };
+
+  const openPreview = () => {
+    setPreviewSelectedIds(new Set());
+    setWorkflowStage("preview");
+  };
+
+  const smartSort = (left: PitchRow, right: PitchRow) => {
+    if (left.isRosterExclusive !== right.isRosterExclusive) return left.isRosterExclusive ? -1 : 1;
+    const leftFollowing = Math.max(
+      ...selectedPlatforms.map((platform) => followerValue(left.profile, platform)),
+    );
+    const rightFollowing = Math.max(
+      ...selectedPlatforms.map((platform) => followerValue(right.profile, platform)),
+    );
+    return (
+      rightFollowing - leftFollowing ||
+      left.profile.creatorName.localeCompare(right.profile.creatorName)
+    );
+  };
+
+  const downloadRows = async (rows: PitchRow[], columns: PreviewColumn<PitchRow>[]) => {
+    const ExcelJS = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Team Billion";
+    workbook.created = new Date();
+    const worksheet = workbook.addWorksheet("Creator Shortlist", {
+      properties: { tabColor: { argb: "FFFF6B5F" } },
+      views: [{ state: "frozen", ySplit: 1 }],
+      pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1 },
+    });
+
+    const widthFor = (label: string) => {
+      if (label.includes("Link") || label === "Analytics") return 38;
+      if (label === "Creator Name" || label === "Deliverables") return 24;
+      if (label === "Niche" || label === "Comments") return 30;
+      if (label.includes("Following")) return 15;
+      return 17;
+    };
+
+    worksheet.columns = columns.map((column, index) => ({
+      header: column.label,
+      key: `column${index}`,
+      width: widthFor(column.label),
+    }));
+    rows.forEach((row) => worksheet.addRow(columns.map((column) => column.value(row))));
+    worksheet.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: Math.max(1, rows.length + 1), column: columns.length },
+    };
+    worksheet.sheetProperties.pageSetUpPr = { fitToPage: true };
+
+    const header = worksheet.getRow(1);
+    header.height = 34;
+    header.eachCell((cell) => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF6B5F" } };
+      cell.font = { name: "Aptos", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = { bottom: { style: "medium", color: { argb: "FFE14E43" } } };
+    });
+
+    const interestedIndex = columns.findIndex((column) => column.key === "interested") + 1;
+    const editableKeys = new Set(["interested", "rate", "deliverables", "comments"]);
+    const hyperlinkKeys = new Set(
+      columns
+        .filter((column) => column.label.includes("Link") || column.key === "analytics")
+        .map((column) => column.key),
+    );
+
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      row.height = 28;
+      row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+        const column = columns[columnNumber - 1];
+        const rawValue = column?.value(rows[rowNumber - 2]);
+        cell.font = { name: "Aptos", size: 10, color: { argb: "FF23232A" } };
+        cell.alignment = {
+          vertical: "middle",
+          horizontal:
+            column?.align === "center" ? "center" : column?.align === "right" ? "right" : "left",
+          wrapText: column?.key === "niche" || column?.key === "comments",
+        };
+        cell.border = { bottom: { style: "thin", color: { argb: "FFE8E2DC" } } };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: {
+            argb: editableKeys.has(column?.key)
+              ? "FFFFF7D6"
+              : rowNumber % 2 === 0
+                ? "FFFFFCF9"
+                : "FFFFFFFF",
+          },
+        };
+        if (column?.label.includes("Following")) cell.numFmt = "#,##0";
+        if (
+          hyperlinkKeys.has(column?.key) &&
+          typeof rawValue === "string" &&
+          /^https?:\/\//.test(rawValue)
+        ) {
+          cell.value = { text: rawValue, hyperlink: rawValue };
+          cell.font = { name: "Aptos", size: 10, color: { argb: "FF2767C6" }, underline: true };
+        }
+      });
+      if (interestedIndex > 0) {
+        const interestedCell = row.getCell(interestedIndex);
+        interestedCell.value = "☐";
+        interestedCell.font = { name: "Segoe UI Symbol", size: 15, color: { argb: "FF334155" } };
+        interestedCell.alignment = { horizontal: "center", vertical: "middle" };
+        interestedCell.dataValidation = {
+          type: "list",
+          allowBlank: false,
+          formulae: ['"☐,☑"'],
+          showErrorMessage: true,
+          errorTitle: "Choose a checkbox value",
+          error: "Select either unchecked or checked.",
+        };
+      }
+    });
+
+    worksheet.addConditionalFormatting({
+      ref: `${worksheet.getColumn(interestedIndex).letter}2:${worksheet.getColumn(interestedIndex).letter}${Math.max(2, rows.length + 1)}`,
+      rules: [
+        {
+          type: "containsText",
+          operator: "containsText",
+          text: "☑",
+          style: { fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } } },
+        },
+      ],
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([new Uint8Array(buffer)], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const filenameParts = [
+      String(formValues.clientName),
+      String(formValues.campaignName),
+      "Pitching Sheet",
+    ]
+      .map(safeFilename)
+      .filter(Boolean);
+    link.href = url;
+    link.download = `${filenameParts.join(" - ") || "Creator Pitching Sheet"}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
   const openCreate = () => {
@@ -597,46 +742,103 @@ function PitchingSheetsPage() {
     }
   };
 
-  const downloadRows = (rows: PitchRow[], columns: PreviewColumn<PitchRow>[]) => {
-    const matrix = [
-      columns.map((column) => column.label),
-      ...rows.map((row) => columns.map((column) => column.value(row))),
-    ];
-    const worksheet = XLSX.utils.aoa_to_sheet(matrix);
-    worksheet["!autofilter"] = {
-      ref: `A1:${XLSX.utils.encode_col(columns.length - 1)}${matrix.length}`,
-    };
-    worksheet["!cols"] = columns.map((column) => ({
-      wch: column.label.includes("Link") || column.label === "Analytics" ? 34 : 18,
-    }));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Creator Shortlist");
-    const parts = [clientName, campaignName, "Pitching Sheet"].map(safeFilename).filter(Boolean);
-    XLSX.writeFile(workbook, `${parts.join(" - ") || "Creator Pitching Sheet"}.xlsx`);
-  };
-
-  const exclusiveCount = rosterExclusiveProfileIds.size;
-  const reviewCount = profiles.filter((profile) => profile.reviewStatus === "Needs Review").length;
-
   return (
     <div className="space-y-6">
       <AppHeader
         title="Pitching Sheets"
-        subtitle="Filter the private creator roster and prepare a client-ready spreadsheet."
+        subtitle="Build a polished creator shortlist in three guided steps."
       />
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        {[
-          ["Creator profiles", profiles.length],
-          ["Current roster exclusives matched", exclusiveCount],
-          ["Needs identity review", reviewCount],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-3xl bg-card p-5 ring-1 ring-border">
-            <div className="text-xs font-semibold text-muted-foreground">{label}</div>
-            <div className="mt-1 text-2xl font-bold">{Number(value).toLocaleString()}</div>
+      <section className="relative overflow-hidden rounded-[32px] bg-card ring-1 ring-border">
+        <div className="grid min-h-[430px] lg:grid-cols-[0.9fr_1.3fr]">
+          <div className="relative z-10 flex flex-col justify-center p-7 md:p-10">
+            <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/15 text-primary">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <h2 className="max-w-lg text-3xl font-bold tracking-tight md:text-4xl">
+              Turn your creator database into a client-ready shortlist.
+            </h2>
+            <p className="mt-4 max-w-xl text-sm leading-6 text-muted-foreground md:text-base">
+              Choose the campaign criteria, review every Team Billion exclusive, then copy or
+              download a polished pitching sheet.
+            </p>
+            <div className="mt-7 flex flex-wrap gap-3">
+              <Button
+                type="button"
+                size="lg"
+                className="rounded-2xl"
+                disabled={isLoading || profiles.length === 0}
+                onClick={() => {
+                  setWorkflowStage("form");
+                  setWorkflowOpen(true);
+                }}
+              >
+                <FileSpreadsheet className="h-4 w-4" /> Start a Pitching Sheet
+              </Button>
+              {data?.sheetUrl ? (
+                <Button asChild type="button" size="lg" variant="outline" className="rounded-2xl">
+                  <a href={data.sheetUrl} target="_blank" rel="noreferrer">
+                    Open Master <ExternalLink className="h-4 w-4" />
+                  </a>
+                </Button>
+              ) : null}
+            </div>
           </div>
-        ))}
-      </div>
+
+          <div className="relative min-h-[330px] overflow-hidden bg-[#fff9f4] p-6 lg:min-h-full lg:p-9">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,107,95,0.18),transparent_55%)]" />
+            <div className="relative h-full overflow-hidden rounded-3xl border border-[#eadfd7] bg-white shadow-xl">
+              <div className="flex items-center gap-2 border-b border-[#eadfd7] bg-[#fff1eb] px-4 py-3">
+                <span className="h-2.5 w-2.5 rounded-full bg-primary" />
+                <span className="text-xs font-bold text-[#5e514b]">Client creator shortlist</span>
+              </div>
+              <div className="pointer-events-none select-none overflow-hidden blur-[2.5px]">
+                <table className="min-w-[760px] text-[11px] text-[#6d625d]">
+                  <thead className="bg-primary text-white">
+                    <tr>
+                      {["Creator", "Location", "Niche", "Platform", "Following", "Interested?"].map(
+                        (header) => (
+                          <th key={header} className="px-4 py-3 text-left font-semibold">
+                            {header}
+                          </th>
+                        ),
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(profiles.length > 0 ? profiles.slice(0, 9) : Array.from({ length: 9 })).map(
+                      (profile, index) => (
+                        <tr
+                          key={profile ? profile.creatorId : index}
+                          className="border-b border-[#eee8e3]"
+                        >
+                          <td className="px-4 py-3 font-semibold">
+                            {profile ? profile.creatorName : "Creator profile"}
+                          </td>
+                          <td className="px-4 py-3">{profile ? profile.location : "Country"}</td>
+                          <td className="px-4 py-3">{profile ? profile.nicheTags : "Niche"}</td>
+                          <td className="px-4 py-3">
+                            {profile ? profile.mainPlatform : "Platform"}
+                          </td>
+                          <td className="px-4 py-3">
+                            {profile ? profile.ttFollowing.toLocaleString() : "100,000"}
+                          </td>
+                          <td className="px-4 py-3 text-center">☐</td>
+                        </tr>
+                      ),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center bg-white/20">
+                <div className="rounded-full bg-white/95 px-4 py-2 text-xs font-bold text-primary shadow-lg">
+                  Your sheet preview
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {!rosterReady ? (
         <div
@@ -644,309 +846,309 @@ function PitchingSheetsPage() {
           className="rounded-3xl bg-destructive/10 px-5 py-4 text-sm text-destructive ring-1 ring-destructive/20"
         >
           Current roster reminders are unavailable because the Creators sheet is not connected.
-          Preview is paused so roster exclusives cannot be missed silently.
+          Generating a pitching sheet is paused so exclusives cannot be missed silently.
         </div>
-      ) : currentRosterExclusiveCount > exclusiveCount ? (
+      ) : currentRosterExclusiveCount > rosterExclusiveProfiles.length ? (
         <div
           role="status"
           className="rounded-3xl bg-amber-50 px-5 py-4 text-sm text-amber-900 ring-1 ring-amber-200"
         >
-          {currentRosterExclusiveCount - exclusiveCount} current roster exclusive
-          {currentRosterExclusiveCount - exclusiveCount === 1 ? " has" : "s have"} no matching
-          social account in Creator Profiles and need review.
+          {currentRosterExclusiveCount - rosterExclusiveProfiles.length} current roster exclusive
+          {currentRosterExclusiveCount - rosterExclusiveProfiles.length === 1
+            ? " needs"
+            : "s need"}{" "}
+          a matching social link in Creator Profiles.
         </div>
       ) : null}
 
-      <section className="rounded-3xl bg-card p-5 ring-1 ring-border md:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/15 text-primary">
-              <FileSpreadsheet className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="font-semibold">Private creator master</h2>
-              <p className="text-xs text-muted-foreground">
-                {isLoading
-                  ? "Loading profiles..."
-                  : data?.source === "error"
-                    ? data.error
-                    : "One current profile per creator"}
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {data?.sheetUrl && (
-              <Button asChild variant="outline" className="rounded-2xl">
-                <a href={data.sheetUrl} target="_blank" rel="noreferrer">
-                  Open Master Sheet <ExternalLink className="h-4 w-4" />
-                </a>
-              </Button>
-            )}
-            <Button type="button" onClick={openCreate} className="rounded-2xl">
-              <Plus className="h-4 w-4" /> Add Creator
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-3xl bg-card p-5 ring-1 ring-border md:p-6">
-        <div className="flex items-center gap-2">
-          <SlidersHorizontal className="h-4 w-4 text-primary" />
-          <h2 className="font-semibold">Build the shortlist</h2>
-        </div>
-
-        <div className="mt-5 grid gap-4 xl:grid-cols-[1.2fr_1fr]">
-          <div className="space-y-4">
-            <label className="block text-xs font-semibold text-muted-foreground">
-              Search creator or talent manager
-              <span className="relative mt-1 block">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Creator, manager, niche, location..."
-                  className="h-11 rounded-2xl bg-background pl-9 text-sm text-foreground"
-                />
-              </span>
-            </label>
-
-            <fieldset>
-              <legend className="text-xs font-semibold text-muted-foreground">
-                Platforms to pitch
-              </legend>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {platforms.map((platform) => {
-                  const selected = selectedPlatforms.has(platform);
-                  return (
-                    <button
-                      key={platform}
-                      type="button"
-                      onClick={() => togglePlatform(platform)}
-                      aria-pressed={selected}
-                      className={cn(
-                        "rounded-2xl px-4 py-2 text-sm font-semibold ring-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        selected
-                          ? "bg-primary text-primary-foreground ring-primary"
-                          : "bg-background text-muted-foreground ring-border hover:text-foreground",
-                      )}
-                    >
-                      {platform}
-                    </button>
-                  );
-                })}
-              </div>
-            </fieldset>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <ProfileField
-                label="Minimum following"
-                type="number"
-                value={minimumFollowing}
-                onChange={setMinimumFollowing}
-                placeholder="No minimum"
-              />
-              <ProfileField
-                label="Maximum following"
-                type="number"
-                value={maximumFollowing}
-                onChange={setMaximumFollowing}
-                placeholder="No maximum"
-              />
-            </div>
-          </div>
-
-          <div className="grid content-start gap-3 sm:grid-cols-2">
-            <DashboardSelectField
-              label="Main Platform"
-              value={mainPlatform}
-              options={options.mainPlatforms}
-              onChange={setMainPlatform}
-            />
-            <DashboardSelectField
-              label="Gender"
-              value={gender}
-              options={options.genders}
-              onChange={setGender}
-            />
-            <DashboardSelectField
-              label="Talent Manager"
-              value={manager}
-              options={options.managers}
-              onChange={setManager}
-            />
-            <DashboardSelectField
-              label="Location"
-              value={location}
-              options={options.locations}
-              onChange={setLocation}
-            />
-            <DashboardSelectField
-              label="Niche"
-              value={niche}
-              options={options.niches}
-              onChange={setNiche}
-            />
-          </div>
-        </div>
-
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-          <p className="text-sm font-semibold text-primary">
-            Current roster exclusives are always shown separately and selected manually.
-          </p>
-          <Button type="button" variant="ghost" onClick={clearFilters} className="rounded-2xl">
-            <RotateCcw className="h-4 w-4" /> Clear filters
-          </Button>
-        </div>
-      </section>
-
-      <section className="overflow-hidden rounded-3xl bg-card ring-1 ring-border">
-        <div className="flex flex-wrap items-center justify-between gap-3 p-5 md:p-6">
+      <section className="rounded-[32px] bg-card p-6 ring-1 ring-border md:p-8">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="font-semibold">Matching creators</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {filtered.length.toLocaleString()} matches · {selectedVisibleCount.toLocaleString()}{" "}
-              manually selected
+            <div className="flex items-center gap-2">
+              <Search className="h-4 w-4 text-primary" />
+              <h2 className="font-semibold">Find a specific creator</h2>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Paste a TikTok, Instagram or YouTube link, or search by creator name to find their
+              profile and talent manager.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-2xl"
-              disabled={filtered.length === 0}
-              onClick={() => setSelectedIds(new Set(filtered.map((profile) => profile.creatorId)))}
-            >
-              <CheckSquare className="h-4 w-4" /> Select all matches
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-2xl"
-              disabled={selectedVisibleCount === 0}
-              onClick={() => setSelectedIds(new Set())}
-            >
-              Clear selection
-            </Button>
-            <Button
-              type="button"
-              className="rounded-2xl"
-              disabled={selectedVisibleCount === 0 || !rosterReady}
-              onClick={requestPreview}
-            >
-              Preview {selectedVisibleCount} selected
-            </Button>
-          </div>
+          <Button type="button" variant="outline" className="rounded-2xl" onClick={openCreate}>
+            <Plus className="h-4 w-4" /> Add Creator
+          </Button>
         </div>
-
-        {rosterExclusiveMatches.length > 0 ? (
-          <div className="border-t border-border bg-primary/[0.04]">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 md:px-6">
-              <div>
-                <h3 className="font-semibold text-primary">Our exclusive roster matches</h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {
-                    rosterExclusiveMatches.filter((profile) => selectedIds.has(profile.creatorId))
-                      .length
-                  }{" "}
-                  of {rosterExclusiveMatches.length} selected. These are never added automatically.
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl"
-                onClick={() =>
-                  setSelectedIds(
-                    (current) =>
-                      new Set([
-                        ...current,
-                        ...rosterExclusiveMatches.map((profile) => profile.creatorId),
-                      ]),
-                  )
-                }
-              >
-                <CheckSquare className="h-4 w-4" /> Select roster matches
-              </Button>
-            </div>
-            <CreatorResultsTable
-              profiles={rosterExclusiveMatches}
-              selectedIds={selectedIds}
-              rosterExclusive
-              onToggle={toggleCreatorSelection}
-              onEdit={openEdit}
+        <form
+          className="mt-5 flex flex-col gap-2 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setLookupSubmitted(true);
+          }}
+        >
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={lookupQuery}
+              onChange={(event) => {
+                setLookupQuery(event.target.value);
+                setLookupSubmitted(false);
+              }}
+              placeholder="Paste a social link or enter a creator name"
+              className="h-11 rounded-2xl pl-9"
             />
           </div>
-        ) : null}
+          <Button type="submit" className="h-11 rounded-2xl" disabled={!lookupQuery.trim()}>
+            Find Creator
+          </Button>
+        </form>
 
-        {otherMatches.length > 0 ? (
-          <div className="border-t border-border">
-            <div className="px-5 py-4 md:px-6">
-              <h3 className="font-semibold">Other matching creators</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Select any additional creators you want to pitch.
-              </p>
+        {lookupSubmitted ? (
+          lookupResults.length > 0 ? (
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              {lookupResults.map((profile) => (
+                <div
+                  key={profile.creatorId}
+                  className="rounded-2xl bg-muted/50 p-4 ring-1 ring-border"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-semibold">{profile.creatorName}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {profile.location || "Location unavailable"} ·{" "}
+                        {profile.nicheTags || "No niche tags"}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => openEdit(profile)}
+                      aria-label={`Edit ${profile.creatorName}`}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="mt-4 rounded-xl bg-card px-3 py-2 text-sm">
+                    <span className="text-xs font-semibold text-muted-foreground">
+                      Talent Manager
+                    </span>
+                    <div className="mt-0.5 font-semibold">
+                      {profile.talentManager || "Not recorded"}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {[
+                      ["TikTok", profile.ttLink],
+                      ["Instagram", profile.instaLink],
+                      ["YouTube", profile.ytLink],
+                    ].map(([label, url]) =>
+                      url ? (
+                        <a
+                          key={label}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-full bg-card px-3 py-1 text-xs font-semibold text-primary ring-1 ring-border hover:underline"
+                        >
+                          {label} <ExternalLink className="ml-1 inline h-3 w-3" />
+                        </a>
+                      ) : null,
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-            <CreatorResultsTable
-              profiles={otherMatches}
-              selectedIds={selectedIds}
-              rosterExclusive={false}
-              onToggle={toggleCreatorSelection}
-              onEdit={openEdit}
-            />
-          </div>
-        ) : null}
-
-        {!isLoading && filtered.length === 0 ? (
-          <div className="border-t border-border px-6 py-12 text-center text-muted-foreground">
-            No active creators match these filters.
-          </div>
+          ) : (
+            <div className="mt-5 rounded-2xl bg-muted px-4 py-8 text-center text-sm text-muted-foreground">
+              No creator profile matched that name or social link.
+            </div>
+          )
         ) : null}
       </section>
 
-      <Dialog open={exclusiveReminderOpen} onOpenChange={setExclusiveReminderOpen}>
-        <DialogContent className="max-w-lg rounded-3xl">
-          <DialogHeader>
-            <DialogTitle>Review your roster exclusives</DialogTitle>
-            <DialogDescription>
-              {unselectedRosterExclusives.length} matching roster exclusive
-              {unselectedRosterExclusives.length === 1 ? " is" : "s are"} still unselected. They
-              will not be added automatically.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-48 overflow-auto rounded-2xl bg-muted p-3 text-sm">
-            {unselectedRosterExclusives.map((profile) => (
-              <div key={profile.creatorId} className="py-1 font-medium">
-                {profile.creatorName}
+      <Dialog
+        open={workflowOpen}
+        onOpenChange={(open) => {
+          setWorkflowOpen(open);
+          if (!open) setWorkflowStage("form");
+        }}
+      >
+        <DialogContent className="flex h-[92vh] w-[96vw] max-w-none flex-col gap-0 overflow-hidden rounded-3xl border-border bg-card p-0 sm:rounded-3xl">
+          {workflowStage !== "preview" ? (
+            <div className="border-b border-border px-5 py-5 pr-14 md:px-7">
+              <WorkflowSteps stage={workflowStage} />
+            </div>
+          ) : null}
+
+          {workflowStage === "form" ? (
+            <div className="min-h-0 flex-1 overflow-y-auto p-5 md:p-7">
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold">Build your pitching criteria</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Choose what belongs in this client sheet. Your entries stay here if you go back.
+                </p>
               </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-2xl"
-              onClick={() => setExclusiveReminderOpen(false)}
-            >
-              Go back and review
-            </Button>
-            <Button type="button" className="rounded-2xl" onClick={openPreparedPreview}>
-              Continue without them
-            </Button>
-          </div>
+              <ConfigurableStructuredForm
+                fields={formFields}
+                values={formValues}
+                errors={formErrors}
+                onChange={updateFormValue}
+                onSubmit={prepareBaseProfiles}
+                submitting={preparing}
+                submitLabel="Generate Preview"
+              />
+              {workflowError ? (
+                <p
+                  role="alert"
+                  className="mt-4 rounded-2xl bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                >
+                  {workflowError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {workflowStage === "exclusives" ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="border-b border-border px-5 py-5 md:px-7">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-bold">Please consider our exclusive creators</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Every current Team Billion exclusive is shown here, regardless of your
+                      filters. Select the ones you want to add.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-primary/10 px-4 py-2 text-sm font-semibold text-primary">
+                    {selectedExclusiveIds.size} of {rosterExclusiveProfiles.length} selected
+                  </div>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto bg-background p-5 md:p-7">
+                {rosterExclusiveProfiles.length > 0 ? (
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {rosterExclusiveProfiles.map((profile) => {
+                      const selected = selectedExclusiveIds.has(profile.creatorId);
+                      return (
+                        <button
+                          key={profile.creatorId}
+                          type="button"
+                          onClick={() =>
+                            setSelectedExclusiveIds((current) => {
+                              const next = new Set(current);
+                              if (next.has(profile.creatorId)) next.delete(profile.creatorId);
+                              else next.add(profile.creatorId);
+                              return next;
+                            })
+                          }
+                          aria-pressed={selected}
+                          className={cn(
+                            "flex items-start gap-3 rounded-2xl p-4 text-left ring-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                            selected
+                              ? "bg-primary/10 ring-primary"
+                              : "bg-card ring-border hover:bg-muted/50",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border",
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border bg-background",
+                            )}
+                          >
+                            {selected ? <Check className="h-3.5 w-3.5" /> : null}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate font-semibold">
+                              {profile.creatorName}
+                            </span>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {profile.location || "No location"} ·{" "}
+                              {profile.nicheTags || "No niche"}
+                            </span>
+                            <span className="mt-2 block text-xs font-semibold text-primary">
+                              {profile.mainPlatform} ·{" "}
+                              {Math.max(
+                                profile.ttFollowing,
+                                profile.instaFollowing,
+                                profile.ytFollowing,
+                              ).toLocaleString()}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-3xl bg-card px-6 py-14 text-center ring-1 ring-border">
+                    <Users className="mx-auto h-7 w-7 text-muted-foreground" />
+                    <div className="mt-3 font-semibold">No roster exclusives could be matched</div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Add matching social links to Creator Profiles before generating the sheet.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-4 md:px-7">
+                <p className="text-sm text-muted-foreground">
+                  {baseProfiles.length.toLocaleString()} filtered database records will also be
+                  prepared.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-2xl"
+                    onClick={() => setWorkflowStage("form")}
+                  >
+                    <ArrowLeft className="h-4 w-4" /> Back
+                  </Button>
+                  {rosterExclusiveProfiles.length > 0 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-2xl"
+                      onClick={() =>
+                        setSelectedExclusiveIds(
+                          new Set(rosterExclusiveProfiles.map((profile) => profile.creatorId)),
+                        )
+                      }
+                    >
+                      <CheckSquare className="h-4 w-4" /> Select All Exclusives
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    className="rounded-2xl"
+                    disabled={preparedRows.length === 0}
+                    onClick={openPreview}
+                  >
+                    Continue to Preview
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {workflowStage === "preview" ? (
+            <PreparedDatasetPreview
+              columns={outputColumns}
+              rows={preparedRows}
+              selectedIds={previewSelectedIds}
+              onSelectedIdsChange={setPreviewSelectedIds}
+              smartSort={smartSort}
+              smartSortLabel="Pin Team Exclusives"
+              onCopy={copyRows}
+              onDownload={downloadRows}
+              onBack={() => setWorkflowStage("exclusives")}
+              onDone={() => setWorkflowOpen(false)}
+              title="Pitching sheet preview"
+            />
+          ) : null}
         </DialogContent>
       </Dialog>
-
-      <PreparedDatasetPreviewModal
-        open={previewOpen}
-        onOpenChange={setPreviewOpen}
-        columns={outputColumns}
-        rows={previewRows}
-        selectedIds={previewSelectedIds}
-        onSelectedIdsChange={setPreviewSelectedIds}
-        smartSort={smartSort}
-        onCopy={copyRows}
-        onDownload={downloadRows}
-      />
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
         <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto rounded-3xl">
@@ -956,7 +1158,6 @@ function PitchingSheetsPage() {
               Changes save directly to the private Creator Profiles worksheet.
             </DialogDescription>
           </DialogHeader>
-
           <div className="grid gap-4 py-2 sm:grid-cols-2 lg:grid-cols-3">
             <ProfileField
               label="Creator Name"
@@ -972,7 +1173,6 @@ function PitchingSheetsPage() {
               label="Niche Tags"
               value={draft.nicheTags}
               onChange={(value) => setDraft({ ...draft, nicheTags: value })}
-              placeholder="Beauty, Lifestyle"
             />
             <ProfileField
               label="Niche Detail"
@@ -995,7 +1195,7 @@ function PitchingSheetsPage() {
                 onChange={(value) => setDraft({ ...draft, type: value as CreatorProfileType })}
               />
             </label>
-            {draft.type === "Exclusive" && (
+            {draft.type === "Exclusive" ? (
               <label className="space-y-1 text-xs font-semibold text-muted-foreground">
                 <span>Exclusive Tier</span>
                 <DashboardSelect
@@ -1006,7 +1206,7 @@ function PitchingSheetsPage() {
                   }
                 />
               </label>
-            )}
+            ) : null}
             <ProfileField
               label="Talent Manager"
               value={draft.talentManager}
@@ -1073,16 +1273,14 @@ function PitchingSheetsPage() {
               Active for pitching
             </label>
           </div>
-
-          {saveError && (
+          {saveError ? (
             <p
               role="alert"
               className="rounded-2xl bg-destructive/10 px-4 py-3 text-sm text-destructive"
             >
               {saveError}
             </p>
-          )}
-
+          ) : null}
           <div className="flex justify-end gap-2 border-t border-border pt-4">
             <Button
               type="button"
@@ -1098,6 +1296,7 @@ function PitchingSheetsPage() {
               disabled={saving || !draft.creatorName.trim()}
               onClick={() => void saveProfile()}
             >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {saving ? "Saving..." : editing ? "Save Changes" : "Add Creator"}
             </Button>
           </div>
