@@ -17,6 +17,7 @@ import { Route as DiagnosticsRouteImport } from './routes/diagnostics'
 import { Route as DealsRouteImport } from './routes/deals'
 import { Route as CreatorsRouteImport } from './routes/creators'
 import { Route as ContactDatabaseRouteImport } from './routes/contact-database'
+import { Route as BulkSenderRouteImport } from './routes/bulk-sender'
 import { Route as BrandFinderRouteImport } from './routes/brand-finder'
 import { Route as AssetsRouteImport } from './routes/assets'
 import { Route as ActiveBrandsRouteImport } from './routes/active-brands'
@@ -66,6 +67,11 @@ const CreatorsRoute = CreatorsRouteImport.update({
 const ContactDatabaseRoute = ContactDatabaseRouteImport.update({
   id: '/contact-database',
   path: '/contact-database',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BulkSenderRoute = BulkSenderRouteImport.update({
+  id: '/bulk-sender',
+  path: '/bulk-sender',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BrandFinderRoute = BrandFinderRouteImport.update({
@@ -126,6 +132,7 @@ export interface FileRoutesByFullPath {
   '/active-brands': typeof ActiveBrandsRoute
   '/assets': typeof AssetsRoute
   '/brand-finder': typeof BrandFinderRoute
+  '/bulk-sender': typeof BulkSenderRoute
   '/contact-database': typeof ContactDatabaseRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/active-brands': typeof ActiveBrandsRoute
   '/assets': typeof AssetsRoute
   '/brand-finder': typeof BrandFinderRoute
+  '/bulk-sender': typeof BulkSenderRoute
   '/contact-database': typeof ContactDatabaseRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
@@ -167,6 +175,7 @@ export interface FileRoutesById {
   '/active-brands': typeof ActiveBrandsRoute
   '/assets': typeof AssetsRoute
   '/brand-finder': typeof BrandFinderRoute
+  '/bulk-sender': typeof BulkSenderRoute
   '/contact-database': typeof ContactDatabaseRoute
   '/creators': typeof CreatorsRoute
   '/deals': typeof DealsRoute
@@ -189,6 +198,7 @@ export interface FileRouteTypes {
     | '/active-brands'
     | '/assets'
     | '/brand-finder'
+    | '/bulk-sender'
     | '/contact-database'
     | '/creators'
     | '/deals'
@@ -209,6 +219,7 @@ export interface FileRouteTypes {
     | '/active-brands'
     | '/assets'
     | '/brand-finder'
+    | '/bulk-sender'
     | '/contact-database'
     | '/creators'
     | '/deals'
@@ -229,6 +240,7 @@ export interface FileRouteTypes {
     | '/active-brands'
     | '/assets'
     | '/brand-finder'
+    | '/bulk-sender'
     | '/contact-database'
     | '/creators'
     | '/deals'
@@ -250,6 +262,7 @@ export interface RootRouteChildren {
   ActiveBrandsRoute: typeof ActiveBrandsRoute
   AssetsRoute: typeof AssetsRoute
   BrandFinderRoute: typeof BrandFinderRoute
+  BulkSenderRoute: typeof BulkSenderRoute
   ContactDatabaseRoute: typeof ContactDatabaseRoute
   CreatorsRoute: typeof CreatorsRoute
   DealsRoute: typeof DealsRoute
@@ -321,6 +334,13 @@ declare module '@tanstack/react-router' {
       path: '/contact-database'
       fullPath: '/contact-database'
       preLoaderRoute: typeof ContactDatabaseRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bulk-sender': {
+      id: '/bulk-sender'
+      path: '/bulk-sender'
+      fullPath: '/bulk-sender'
+      preLoaderRoute: typeof BulkSenderRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/brand-finder': {
@@ -412,6 +432,7 @@ const rootRouteChildren: RootRouteChildren = {
   ActiveBrandsRoute: ActiveBrandsRoute,
   AssetsRoute: AssetsRoute,
   BrandFinderRoute: BrandFinderRoute,
+  BulkSenderRoute: BulkSenderRoute,
   ContactDatabaseRoute: ContactDatabaseRoute,
   CreatorsRoute: CreatorsRoute,
   DealsRoute: DealsRoute,

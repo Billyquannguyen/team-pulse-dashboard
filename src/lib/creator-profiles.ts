@@ -263,6 +263,8 @@ async function cachedData() {
   return refreshPromise;
 }
 
+export const getCreatorProfilesForServer = createServerOnlyFn(async () => cachedData());
+
 function invalidateCache() {
   cache = null;
   refreshPromise = null;

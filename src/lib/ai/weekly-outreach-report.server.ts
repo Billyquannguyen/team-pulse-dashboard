@@ -19,6 +19,30 @@ export type WeeklyOutreachNarrative = {
   warnings: string[];
 };
 
+export type MissingMemberTagCandidate = {
+  candidateId: string;
+  from: string;
+  subject: string;
+  receivedAt: string;
+  emailText: string;
+};
+
+export type ExclusiveCreatorAssignment = {
+  creatorId: string;
+  creatorName: string;
+  memberId: string;
+  memberName: string;
+};
+
+export type MissingMemberTagDecision = {
+  candidateId: string;
+  report: boolean;
+  creatorId: string;
+  memberId: string;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+};
+
 type WeeklyOutreachNarrativeOutput = Pick<WeeklyOutreachNarrative, "summary" | "verdict">;
 
 const weeklyOutreachNarrativeOutput = z
@@ -45,6 +69,96 @@ const weeklyOutreachNarrativeSchema: Record<string, unknown> = {
     },
   },
 };
+
+const missingMemberTagDecision = z
+  .object({
+    candidateId: z.string().trim().min(1).max(120),
+    report: z.boolean(),
+    creatorId: z.string().trim().max(120),
+    memberId: z.string().trim().max(120),
+    confidence: z.enum(["high", "medium", "low"]),
+    reason: z.string().trim().max(180),
+  })
+  .strict();
+
+const missingMemberTagOutput = z
+  .object({ decisions: z.array(missingMemberTagDecision).max(60) })
+  .strict();
+
+const missingMemberTagSchema: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["decisions"],
+  properties: {
+    decisions: {
+      type: "array",
+      maxItems: 60,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["candidateId", "report", "creatorId", "memberId", "confidence", "reason"],
+        properties: {
+          candidateId: { type: "string", maxLength: 120 },
+          report: { type: "boolean" },
+          creatorId: { type: "string", maxLength: 120 },
+          memberId: { type: "string", maxLength: 120 },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          reason: { type: "string", maxLength: 180 },
+        },
+      },
+    },
+  },
+};
+
+export async function identifyMissingMemberTags({
+  candidates,
+  assignments,
+}: {
+  candidates: MissingMemberTagCandidate[];
+  assignments: ExclusiveCreatorAssignment[];
+}): Promise<{ decisions: MissingMemberTagDecision[]; modelUsed: string; warnings: string[] }> {
+  if (candidates.length === 0 || assignments.length === 0) {
+    return { decisions: [], modelUsed: "", warnings: [] };
+  }
+
+  const aiService = createAIService();
+  const result = await aiService.generateStructured<z.infer<typeof missingMemberTagOutput>>({
+    schemaName: "weekly_gmail_missing_member_tags",
+    schema: missingMemberTagSchema,
+    maxTokens: 2_400,
+    temperature: 0.05,
+    timeoutMs: 45_000,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You review inbound emails that have no team-member Gmail tag and no team reply.",
+          "The mailbox receives spam, newsletters, automated notifications, cold sales and irrelevant mail; ignore those.",
+          "Report only when the email text gives strong evidence that it concerns one creator in the supplied exclusive-creator assignments.",
+          "Use only the supplied creatorId and memberId. Never invent a creator, member or relationship.",
+          "Set report=true only for high confidence. Medium or low confidence must be ignored.",
+          "A shared first name, vague campaign language or sender display name alone is not enough.",
+          "For ignored emails, return empty creatorId and memberId and a short reason.",
+          "Return concise JSON only.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: JSON.stringify(
+          {
+            task: "Find likely missed inbound emails that should carry an exclusive creator's member tag",
+            exclusiveCreatorAssignments: assignments,
+            inboundCandidates: candidates,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  });
+  const output = missingMemberTagOutput.parse(result.output);
+  return { decisions: output.decisions, modelUsed: result.modelUsed, warnings: result.warnings };
+}
 
 export async function generateWeeklyOutreachNarrative(
   facts: WeeklyOutreachNarrativeFacts,

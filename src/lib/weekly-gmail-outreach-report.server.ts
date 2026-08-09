@@ -1,5 +1,11 @@
 import "@tanstack/react-start/server-only";
-import { generateWeeklyOutreachNarrative } from "@/lib/ai/weekly-outreach-report.server";
+import {
+  generateWeeklyOutreachNarrative,
+  identifyMissingMemberTags,
+  type ExclusiveCreatorAssignment,
+  type MissingMemberTagCandidate,
+} from "@/lib/ai/weekly-outreach-report.server";
+import { getCreatorProfilesForServer, type CreatorProfile } from "@/lib/creator-profiles";
 import { getWeeklyOutreachReportMembers, type TeamMemberConfig } from "@/lib/team-members";
 
 type GmailLabel = {
@@ -26,6 +32,15 @@ type GmailThreadMessage = {
   id?: string;
   labelIds?: string[];
   internalDate?: string;
+  snippet?: string;
+  payload?: GmailMessagePart;
+};
+
+type GmailMessagePart = {
+  mimeType?: string;
+  headers?: Array<{ name?: string; value?: string }>;
+  body?: { data?: string };
+  parts?: GmailMessagePart[];
 };
 
 type GmailThread = {
@@ -77,6 +92,13 @@ type WeeklyReportResult = {
   issues: string[];
 };
 
+type MissingMemberTagAlert = {
+  candidateId: string;
+  member: TeamMemberConfig;
+  creatorName: string;
+  sentence: string;
+};
+
 export class GmailAuthError extends Error {
   constructor(message: string) {
     super(message);
@@ -87,6 +109,8 @@ export class GmailAuthError extends Error {
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_REPORT_DAYS = 7;
 const THREAD_FETCH_CONCURRENCY = 12;
+const MAX_UNTAGGED_INBOUND_CANDIDATES = 50;
+const MAX_AI_EMAIL_TEXT_LENGTH = 1_200;
 const REPORT_TIME_ZONE = "Asia/Ho_Chi_Minh";
 const DEFAULT_CALENDLY_BOOKED_QUERY =
   '{"calendly" "calendly.com" "scheduled event" "booked" "confirmed"}';
@@ -305,14 +329,19 @@ async function listGmailMessageThreadIds(accessToken: string, labelIds: string[]
   return Array.from(threadIds);
 }
 
-async function listGmailThreadIds(accessToken: string, labelIds: string[], query: string) {
+async function listGmailThreadIds(
+  accessToken: string,
+  labelIds: string[],
+  query: string,
+  maximum = Number.POSITIVE_INFINITY,
+) {
   const threadIds: string[] = [];
   let pageToken = "";
 
   do {
     const params = new URLSearchParams();
     params.set("q", query);
-    params.set("maxResults", "500");
+    params.set("maxResults", String(Math.min(500, Math.max(1, maximum - threadIds.length))));
     for (const labelId of labelIds) params.append("labelIds", labelId);
     if (pageToken) params.set("pageToken", pageToken);
 
@@ -321,9 +350,9 @@ async function listGmailThreadIds(accessToken: string, labelIds: string[], query
       if (thread.id) threadIds.push(thread.id);
     }
     pageToken = response.nextPageToken ?? "";
-  } while (pageToken);
+  } while (pageToken && threadIds.length < maximum);
 
-  return Array.from(new Set(threadIds));
+  return Array.from(new Set(threadIds)).slice(0, maximum);
 }
 
 async function countGmailThreads(accessToken: string, labelIds: string[], query: string) {
@@ -335,6 +364,12 @@ async function getGmailThread(accessToken: string, threadId: string) {
   params.set("format", "metadata");
   params.append("metadataHeaders", "From");
 
+  return gmailGet<GmailThread>(accessToken, `threads/${encodeURIComponent(threadId)}`, params);
+}
+
+async function getFullGmailThread(accessToken: string, threadId: string) {
+  const params = new URLSearchParams();
+  params.set("format", "full");
   return gmailGet<GmailThread>(accessToken, `threads/${encodeURIComponent(threadId)}`, params);
 }
 
@@ -358,6 +393,19 @@ async function loadGmailThreads(
       }),
     );
     threads.push(...loaded);
+  }
+
+  return threads;
+}
+
+async function loadFullGmailThreads(accessToken: string, threadIds: string[]) {
+  const threads: GmailThread[] = [];
+
+  for (let index = 0; index < threadIds.length; index += THREAD_FETCH_CONCURRENCY) {
+    const batch = threadIds.slice(index, index + THREAD_FETCH_CONCURRENCY);
+    threads.push(
+      ...(await Promise.all(batch.map((threadId) => getFullGmailThread(accessToken, threadId)))),
+    );
   }
 
   return threads;
@@ -428,38 +476,6 @@ function getCustomThreadLabelIds(threadLabelIds: Set<string>, customUserLabelIds
   return Array.from(threadLabelIds).filter((labelId) => customUserLabelIds.has(labelId));
 }
 
-function hasExactCustomLabels(customLabelIds: string[], expectedLabelIds: string[]) {
-  return (
-    customLabelIds.length === expectedLabelIds.length &&
-    expectedLabelIds.every((labelId) => customLabelIds.includes(labelId))
-  );
-}
-
-function hasValidOutreachLabels(
-  customLabelIds: string[],
-  memberLabelId: string,
-  categoryLabels: ReportCategoryLabels,
-  bookedCallLabel: GmailLabel | null,
-) {
-  if (hasExactCustomLabels(customLabelIds, [memberLabelId])) return true;
-
-  const validSecondaryLabelIds = [
-    ...Object.values(categoryLabels).flatMap((label) => (label ? [label.id] : [])),
-    ...(bookedCallLabel ? [bookedCallLabel.id] : []),
-  ];
-
-  return validSecondaryLabelIds.some((labelId) =>
-    hasExactCustomLabels(customLabelIds, [memberLabelId, labelId]),
-  );
-}
-
-function formatCustomLabels(customLabelIds: string[], labelIndex: Map<string, GmailLabel>) {
-  return customLabelIds
-    .map((labelId) => labelIndex.get(labelId)?.name || labelId)
-    .sort((left, right) => left.localeCompare(right))
-    .join(" + ");
-}
-
 function isCreatorOutreachThread(
   threadLabelIds: Set<string>,
   memberLabelId: string,
@@ -477,6 +493,249 @@ function getDeliveredThreadMessages(thread: GmailThread) {
     .sort((left, right) => getMessageTimestamp(left) - getMessageTimestamp(right));
 }
 
+function getHeader(message: GmailThreadMessage, name: string) {
+  return (
+    message.payload?.headers
+      ?.find((header) => header.name?.trim().toLowerCase() === name.toLowerCase())
+      ?.value?.trim() ?? ""
+  );
+}
+
+function decodeGmailBody(data: string) {
+  try {
+    const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const binary = globalThis.atob(padded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
+function collectMessageText(part: GmailMessagePart | undefined): string[] {
+  if (!part) return [];
+  const childText = (part.parts ?? []).flatMap(collectMessageText);
+  if (childText.length > 0) return childText;
+
+  const decoded = part.body?.data ? decodeGmailBody(part.body.data) : "";
+  if (!decoded) return [];
+  if (part.mimeType?.toLowerCase() === "text/html") {
+    return [
+      decoded
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<[^>]+>/g, " "),
+    ];
+  }
+  return [decoded];
+}
+
+function cleanEmailText(value: string) {
+  return value
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isClearlyAutomatedEmail(message: GmailThreadMessage) {
+  const from = getHeader(message, "From").toLowerCase();
+  const subject = getHeader(message, "Subject").toLowerCase();
+  const autoSubmitted = getHeader(message, "Auto-Submitted").toLowerCase();
+  const precedence = getHeader(message, "Precedence").toLowerCase();
+  const hasUnsubscribeHeader = Boolean(getHeader(message, "List-Unsubscribe"));
+
+  return (
+    /(?:^|[<@._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster)(?:[>@._-]|$)/i.test(from) ||
+    (autoSubmitted !== "" && autoSubmitted !== "no") ||
+    /^(bulk|junk|list)$/.test(precedence) ||
+    hasUnsubscribeHeader ||
+    /\b(newsletter|weekly digest|daily digest|unsubscribe|delivery status|automatic reply|out of office|password reset|verification code|confirm your email|receipt)\b/i.test(
+      subject,
+    )
+  );
+}
+
+function hasTeamReply(thread: GmailThread) {
+  return getDeliveredThreadMessages(thread).some((message) =>
+    (message.labelIds ?? []).includes("SENT"),
+  );
+}
+
+function hasAnyMemberLabel(thread: GmailThread, memberLabelIds: Set<string>) {
+  return Array.from(getThreadLabelIds(thread)).some((labelId) => memberLabelIds.has(labelId));
+}
+
+function normalizePersonKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function memberForTalentManager(manager: string, members: TeamMemberConfig[]) {
+  const managerKey = normalizePersonKey(manager);
+  if (!managerKey) return null;
+  return (
+    members.find((member) =>
+      [member.displayName, member.gmailLabel, member.id]
+        .map(normalizePersonKey)
+        .some((value) => value === managerKey),
+    ) ?? null
+  );
+}
+
+function buildExclusiveAssignments(profiles: CreatorProfile[], members: TeamMemberConfig[]) {
+  const assignments = new Map<string, ExclusiveCreatorAssignment>();
+
+  for (const profile of profiles) {
+    if (!profile.active || profile.type !== "Exclusive" || !profile.creatorName.trim()) continue;
+    const member = memberForTalentManager(profile.talentManager, members);
+    if (!member) continue;
+    const assignment: ExclusiveCreatorAssignment = {
+      creatorId: profile.creatorId,
+      creatorName: profile.creatorName.trim(),
+      memberId: member.id,
+      memberName: member.displayName,
+    };
+    assignments.set(`${assignment.creatorId}:${assignment.memberId}`, assignment);
+  }
+
+  return Array.from(assignments.values());
+}
+
+function discordInline(value: string, fallback: string) {
+  const cleaned = value
+    .replace(/([\\*_`~|])/g, "\\$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (cleaned || fallback).slice(0, 160);
+}
+
+function formatAlertReceivedAt(receivedAt: string) {
+  const date = new Date(receivedAt);
+  if (!Number.isFinite(date.getTime())) return "an unknown time";
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: REPORT_TIME_ZONE,
+  }).format(date);
+}
+
+function buildMissingMemberTagSentence({
+  candidate,
+  member,
+  creatorName,
+}: {
+  candidate: MissingMemberTagCandidate;
+  member: TeamMemberConfig;
+  creatorName: string;
+}) {
+  const subject = discordInline(candidate.subject, "No subject");
+  const sender = discordInline(candidate.from, "unknown sender");
+  const creator = discordInline(creatorName, "an exclusive creator");
+  const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${encodeURIComponent(candidate.candidateId)}`;
+  return `Email **“${subject}”** from **${sender}**, received **${formatAlertReceivedAt(
+    candidate.receivedAt,
+  )}**, may be for ${formatMemberName(
+    member,
+  )} because it mentions exclusive creator **${creator}**; it has no member tag and no team reply, so please check: [open email](${gmailUrl}).`;
+}
+
+async function collectMissingMemberTagAlerts({
+  accessToken,
+  days,
+  members,
+  memberLabelIds,
+  profiles,
+}: {
+  accessToken: string;
+  days: number;
+  members: TeamMemberConfig[];
+  memberLabelIds: Set<string>;
+  profiles: CreatorProfile[];
+}) {
+  const assignments = buildExclusiveAssignments(profiles, members);
+  if (assignments.length === 0) {
+    throw new Error("No active exclusive creators could be matched to weekly-report members.");
+  }
+
+  const query = withReportWindow(
+    "in:inbox -from:me -category:promotions -category:social -category:forums",
+    days,
+  );
+  const threadIds = await listGmailThreadIds(
+    accessToken,
+    [],
+    query,
+    MAX_UNTAGGED_INBOUND_CANDIDATES,
+  );
+  const threads = await loadFullGmailThreads(accessToken, threadIds);
+  const candidates: MissingMemberTagCandidate[] = [];
+
+  for (const thread of threads) {
+    if (!thread.id || hasTeamReply(thread) || hasAnyMemberLabel(thread, memberLabelIds)) continue;
+    const messages = getDeliveredThreadMessages(thread);
+    const latestInbound = [...messages]
+      .reverse()
+      .find((message) => !(message.labelIds ?? []).includes("SENT"));
+    if (!latestInbound || isClearlyAutomatedEmail(latestInbound)) continue;
+
+    const subject = getHeader(latestInbound, "Subject");
+    const from = getHeader(latestInbound, "From");
+    const bodyText = cleanEmailText(
+      collectMessageText(latestInbound.payload).join(" ") || latestInbound.snippet || "",
+    ).slice(0, MAX_AI_EMAIL_TEXT_LENGTH);
+    if (!subject && !bodyText) continue;
+
+    candidates.push({
+      candidateId: thread.id,
+      from,
+      subject,
+      receivedAt: new Date(getMessageTimestamp(latestInbound)).toISOString(),
+      emailText: [subject, bodyText].filter(Boolean).join("\n").slice(0, MAX_AI_EMAIL_TEXT_LENGTH),
+    });
+  }
+
+  const aiResult = await identifyMissingMemberTags({ candidates, assignments });
+  const candidateIndex = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]));
+  const assignmentIndex = new Map(
+    assignments.map((assignment) => [`${assignment.creatorId}:${assignment.memberId}`, assignment]),
+  );
+  const memberIndex = new Map(members.map((member) => [member.id, member]));
+  const alerts = new Map<string, MissingMemberTagAlert>();
+
+  for (const decision of aiResult.decisions) {
+    if (!decision.report || decision.confidence !== "high") continue;
+    const candidate = candidateIndex.get(decision.candidateId);
+    const assignment = assignmentIndex.get(`${decision.creatorId}:${decision.memberId}`);
+    const member = memberIndex.get(decision.memberId);
+    if (!candidate || !assignment || !member) continue;
+    alerts.set(candidate.candidateId, {
+      candidateId: candidate.candidateId,
+      member,
+      creatorName: assignment.creatorName,
+      sentence: buildMissingMemberTagSentence({
+        candidate,
+        member,
+        creatorName: assignment.creatorName,
+      }),
+    });
+  }
+
+  return {
+    alerts: Array.from(alerts.values()),
+    warnings: aiResult.warnings,
+    modelUsed: aiResult.modelUsed,
+    candidatesChecked: candidates.length,
+  };
+}
+
 function isNewOutboundThread(thread: GmailThread, reportStartMs: number, reportEndMs: number) {
   const firstMessage = getDeliveredThreadMessages(thread)[0];
   const timestamp = firstMessage ? getMessageTimestamp(firstMessage) : 0;
@@ -486,13 +745,6 @@ function isNewOutboundThread(thread: GmailThread, reportStartMs: number, reportE
     timestamp >= reportStartMs &&
     timestamp <= reportEndMs
   );
-}
-
-function isOutboundThreadWithoutReply(thread: GmailThread) {
-  const messages = getDeliveredThreadMessages(thread);
-
-  if (!(messages[0]?.labelIds ?? []).includes("SENT")) return false;
-  return messages.slice(1).every((message) => (message.labelIds ?? []).includes("SENT"));
 }
 
 async function collectMemberMetrics(
@@ -559,14 +811,11 @@ async function collectMemberMetrics(
     getConfiguredQuery("WEEKLY_GMAIL_CALENDLY_BOOKED_QUERY", DEFAULT_CALENDLY_BOOKED_QUERY),
     days,
   );
-  const recentMemberThreadsQuery = withReportWindow("", days);
-
   try {
     const [
       [missedInbound, calendlyBooked],
       creatorThreadIds,
       brandOutreachThreadIds,
-      recentMemberThreadIds,
       bookedThreadIds,
     ] = await Promise.all([
       Promise.all([
@@ -587,19 +836,17 @@ async function collectMemberMetrics(
             brandOutreachQuery,
           )
         : Promise.resolve([]),
-      listGmailThreadIds(accessToken, [label.id], recentMemberThreadsQuery),
       bookedCallLabel
         ? listGmailMessageThreadIds(
             accessToken,
             [label.id, bookedCallLabel.id],
-            recentMemberThreadsQuery,
+            withReportWindow("", days),
           )
         : Promise.resolve([]),
     ]);
-    const [creatorThreads, brandOutreachThreads, recentMemberThreads] = await Promise.all([
+    const [creatorThreads, brandOutreachThreads] = await Promise.all([
       loadGmailThreads(accessToken, creatorThreadIds, threadCache),
       loadGmailThreads(accessToken, brandOutreachThreadIds, threadCache),
-      loadGmailThreads(accessToken, recentMemberThreadIds, threadCache),
     ]);
 
     metrics.brandOutreachSent = brandOutreachThreads.filter((thread) =>
@@ -619,34 +866,6 @@ async function collectMemberMetrics(
       if (isNewOutboundThread(thread, reportStartMs, nowMs)) {
         metrics.creatorOutreachSent += 1;
       }
-    }
-
-    let invalidTaggingCount = 0;
-    const invalidTaggingExamples = new Set<string>();
-
-    for (const thread of recentMemberThreads) {
-      const threadLabelIds = getThreadLabelIds(thread);
-      const customLabelIds = getCustomThreadLabelIds(threadLabelIds, customUserLabelIds);
-
-      if (!isOutboundThreadWithoutReply(thread)) continue;
-      if (hasValidOutreachLabels(customLabelIds, label.id, categoryLabels, bookedCallLabel)) {
-        continue;
-      }
-
-      invalidTaggingCount += 1;
-      if (invalidTaggingExamples.size < 2) {
-        invalidTaggingExamples.add(formatCustomLabels(customLabelIds, labelIndex));
-      }
-    }
-
-    if (invalidTaggingCount > 0) {
-      metrics.invalidTaggingThreads = invalidTaggingCount;
-      const examples = Array.from(invalidTaggingExamples).filter(Boolean).join("; ");
-      issues.push(
-        `${member.displayName}: ${formatNumber(
-          invalidTaggingCount,
-        )} conversation chưa nhận reply có tag ngoài quy tắc${examples ? ` (${examples})` : ""}.`,
-      );
     }
 
     return metrics;
@@ -749,6 +968,7 @@ function buildVietnameseReport(
   totals: WeeklyReportTotals,
   narrative: ReportNarrative,
   issues: string[],
+  missingMemberTagAlertCount: number,
   days: number,
   now: Date,
 ) {
@@ -791,8 +1011,17 @@ function buildVietnameseReport(
   }
 
   lines.push("", "**Tagging/config cần kiểm tra**");
+  if (missingMemberTagAlertCount > 0) {
+    lines.push(
+      `${formatNumber(missingMemberTagAlertCount)} email có khả năng thiếu member tag; xem notification riêng bên dưới.`,
+    );
+  }
   if (reportIssues.length === 0) {
-    lines.push("Không có vấn đề cấu hình được phát hiện.");
+    if (missingMemberTagAlertCount === 0) {
+      lines.push(
+        "AI không tìm thấy email inbound chưa reply nào có khả năng cao đang thiếu member tag.",
+      );
+    }
   } else {
     for (const issue of reportIssues.slice(0, 12)) {
       lines.push(`- ${issue}`);
@@ -894,6 +1123,44 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
       );
     }
 
+    let missingMemberTagAlerts: MissingMemberTagAlert[] = [];
+    let missingTagModelUsed = "";
+    const missingTagIssues: string[] = [];
+    const missingTagWarnings: string[] = [];
+    try {
+      const creatorProfiles = await getCreatorProfilesForServer();
+      const memberLabelIds = new Set(
+        members
+          .map((member) => resolveLabel(labelIndex, member.gmailLabel)?.id ?? "")
+          .filter(Boolean),
+      );
+      const scan = await collectMissingMemberTagAlerts({
+        accessToken,
+        days,
+        members,
+        memberLabelIds,
+        profiles: creatorProfiles.profiles,
+      });
+      missingMemberTagAlerts = scan.alerts;
+      missingTagModelUsed = scan.modelUsed;
+      missingTagWarnings.push(...scan.warnings);
+      console.info("[weekly-gmail-report] missing-member-tag scan completed", {
+        candidatesChecked: scan.candidatesChecked,
+        alerts: scan.alerts.length,
+        exclusiveAssignmentsAvailable: buildExclusiveAssignments(creatorProfiles.profiles, members)
+          .length,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[weekly-gmail-report] missing-member-tag scan failed: ${message}`);
+      missingTagIssues.push(`Không chạy được AI check cho email thiếu member tag (${message}).`);
+    }
+
+    for (const alert of missingMemberTagAlerts) {
+      const memberMetrics = metrics.find((item) => item.member.id === alert.member.id);
+      if (memberMetrics) memberMetrics.invalidTaggingThreads += 1;
+    }
+
     const totals = metrics.reduce(addMetrics, emptyTotals());
     const narrative = await getReportNarrative(totals, days, members.length);
     const issues = [
@@ -903,22 +1170,38 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
         ? []
         : [`Không tìm thấy Gmail booked-call label "${bookedCallLabelName}".`]),
       ...metrics.flatMap((item) => item.issues),
+      ...missingTagIssues,
     ];
-    const content = buildVietnameseReport(metrics, totals, narrative, issues, days, now);
+    const content = buildVietnameseReport(
+      metrics,
+      totals,
+      narrative,
+      issues,
+      missingMemberTagAlerts.length,
+      days,
+      now,
+    );
     const mentionUserIds = members
       .map((member) => member.discordUserId.trim())
       .filter(validDiscordUserId);
 
     await postDiscordMessage(content, Array.from(new Set(mentionUserIds)));
+    for (const alert of missingMemberTagAlerts) {
+      const discordUserId = alert.member.discordUserId.trim();
+      await postDiscordMessage(
+        alert.sentence,
+        validDiscordUserId(discordUserId) ? [discordUserId] : [],
+      );
+    }
 
     return {
       ok: true,
       posted: true,
       memberCount: members.length,
       totals,
-      openRouterUsed: Boolean(narrative.modelUsed),
-      openRouterModel: narrative.modelUsed,
-      issues: [...narrative.warnings, ...issues],
+      openRouterUsed: Boolean(narrative.modelUsed || missingTagModelUsed),
+      openRouterModel: narrative.modelUsed || missingTagModelUsed,
+      issues: [...narrative.warnings, ...missingTagWarnings, ...issues],
     };
   } catch (error) {
     if (error instanceof GmailAuthError) {

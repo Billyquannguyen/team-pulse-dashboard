@@ -1,7 +1,24 @@
 import { useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Copy, Download, Pin } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronDown,
+  Copy,
+  Download,
+  Pin,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 export type PreviewColumn<Row> = {
@@ -94,8 +111,38 @@ export function PreparedDatasetPreview<Row extends PreparedRow>({
     () => displayedRows.filter((row) => selectedIds.has(row.id)),
     [displayedRows, selectedIds],
   );
+  const deselectedRows = useMemo(
+    () => displayedRows.filter((row) => !selectedIds.has(row.id)),
+    [displayedRows, selectedIds],
+  );
   const allSelected = displayedRows.length > 0 && selectedRows.length === displayedRows.length;
   const someSelected = selectedRows.length > 0 && !allSelected;
+  const rowGroups = useMemo(
+    () => [
+      {
+        key: "all",
+        label: "All rows",
+        rows: displayedRows,
+        copyFeedback: "All rows copied with header",
+        downloadFeedback: "All rows downloaded with header",
+      },
+      {
+        key: "selected",
+        label: "Selected rows",
+        rows: selectedRows,
+        copyFeedback: "Selected rows copied with header",
+        downloadFeedback: "Selected rows downloaded with header",
+      },
+      {
+        key: "deselected",
+        label: "Deselected rows",
+        rows: deselectedRows,
+        copyFeedback: "Deselected rows copied with header",
+        downloadFeedback: "Deselected rows downloaded with header",
+      },
+    ],
+    [deselectedRows, displayedRows, selectedRows],
+  );
 
   const selectRange = (row: Row, event: React.MouseEvent) => {
     const lastIndex = lastClickedId.current
@@ -139,11 +186,11 @@ export function PreparedDatasetPreview<Row extends PreparedRow>({
     window.setTimeout(() => setFeedback(""), 2500);
   };
 
-  const performDownload = async () => {
+  const performDownload = async (downloadRows: Row[], label: string) => {
     setDownloading(true);
     try {
-      await onDownload(displayedRows, columns);
-      setFeedback("Download created");
+      await onDownload(downloadRows, columns);
+      setFeedback(label);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Download failed");
     } finally {
@@ -167,41 +214,83 @@ export function PreparedDatasetPreview<Row extends PreparedRow>({
             {smartSort ? (
               <Button
                 type="button"
-                variant={smartSorting ? "secondary" : "outline"}
+                variant={smartSorting ? "default" : "outline"}
                 onClick={() => setSmartSorting((value) => !value)}
-                className="rounded-2xl"
+                className={cn(
+                  "rounded-2xl",
+                  smartSorting && "shadow-md shadow-primary/20 ring-2 ring-primary/20",
+                )}
                 aria-pressed={smartSorting}
               >
                 <Pin className="h-4 w-4" />
                 {smartSortLabel} {smartSorting ? "On" : "Off"}
               </Button>
             ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-2xl"
-              disabled={displayedRows.length === 0}
-              onClick={() => void performCopy(displayedRows, "All displayed rows copied")}
-            >
-              <Copy className="h-4 w-4" /> Copy All Rows
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-2xl"
-              disabled={selectedRows.length === 0}
-              onClick={() => void performCopy(selectedRows, "Selected rows copied")}
-            >
-              <Copy className="h-4 w-4" /> Copy Selected Rows
-            </Button>
-            <Button
-              type="button"
-              className="rounded-2xl"
-              disabled={displayedRows.length === 0 || downloading}
-              onClick={() => void performDownload()}
-            >
-              <Download className="h-4 w-4" /> {downloading ? "Preparing..." : "Download"}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  className="rounded-2xl"
+                  disabled={displayedRows.length === 0 || downloading}
+                >
+                  <Download className="h-4 w-4" />
+                  {downloading ? "Preparing..." : "Download rows"}
+                  <ChevronDown className="h-4 w-4 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 rounded-2xl p-2">
+                <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Download as Excel
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {rowGroups.map((group) => (
+                  <DropdownMenuItem
+                    key={group.key}
+                    disabled={group.rows.length === 0}
+                    onSelect={() => void performDownload(group.rows, group.downloadFeedback)}
+                    className="flex cursor-pointer items-center justify-between rounded-xl px-3 py-2"
+                  >
+                    <span>{group.label}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {group.rows.length.toLocaleString()}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-2xl"
+                  disabled={displayedRows.length === 0}
+                >
+                  <Copy className="h-4 w-4" />
+                  Copy rows
+                  <ChevronDown className="h-4 w-4 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 rounded-2xl p-2">
+                <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Copy with header row
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {rowGroups.map((group) => (
+                  <DropdownMenuItem
+                    key={group.key}
+                    disabled={group.rows.length === 0}
+                    onSelect={() => void performCopy(group.rows, group.copyFeedback)}
+                    className="flex cursor-pointer items-center justify-between rounded-xl px-3 py-2"
+                  >
+                    <span>{group.label}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {group.rows.length.toLocaleString()}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
         <div aria-live="polite" className="mt-2 min-h-5 text-xs font-semibold text-primary">

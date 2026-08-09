@@ -587,8 +587,6 @@ function PitchingSheetsPage() {
       from: { row: 1, column: 1 },
       to: { row: Math.max(1, rows.length + 1), column: columns.length },
     };
-    worksheet.sheetProperties.pageSetUpPr = { fitToPage: true };
-
     const header = worksheet.getRow(1);
     header.height = 34;
     header.eachCell((cell) => {
