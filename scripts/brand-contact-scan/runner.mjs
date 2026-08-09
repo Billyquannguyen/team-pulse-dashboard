@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const DEFAULT_QUERY =
   'in:anywhere -in:spam -in:trash {campaign collaboration partnership creator influencer sponsorship paid "brand brief" booking collab "creator campaign" "influencer campaign" "brand partnership"}';
@@ -58,13 +59,7 @@ const AUTOMATED_OR_LOW_VALUE_DOMAINS = new Set(["amazon.com", "beehiiv.com", "su
 
 const TEAM_ENTITY_NAMES = ["Team Billion", "Stride Social", "Katlas", "Katlas Media"];
 
-const KNOWN_CREATOR_NAMES = new Set([
-  "henri palms",
-  "henri palmer",
-  "dilshoda",
-  "simon",
-  "simone",
-]);
+const KNOWN_CREATOR_NAMES = new Set(["henri palms", "henri palmer", "dilshoda", "simon", "simone"]);
 
 const KNOWN_CREATOR_EMAIL_HINTS = new Set([
   "henriandebs",
@@ -146,10 +141,12 @@ const POSITION_PATTERNS = [
   "Assistant",
 ];
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
 
 async function main() {
   loadEnvFiles([".env", ".env.local", ".env.brand-contact-scan", ".env.opportunity-ingestion"]);
@@ -182,7 +179,11 @@ async function main() {
     return;
   }
 
-  console.log(options.dryRun ? "DRY RUN: no sheet writes will happen." : "LIVE RUN: Contact Database rows can be created or updated.");
+  console.log(
+    options.dryRun
+      ? "DRY RUN: no sheet writes will happen."
+      : "LIVE RUN: Contact Database rows can be created or updated.",
+  );
   console.log(`Team Asset sheet: ${config.spreadsheetId}`);
   console.log(`Query: ${config.query}`);
 
@@ -229,7 +230,9 @@ async function main() {
     const batches = chunk(unreadIds, config.batchSize);
 
     for (const batch of batches) {
-      const messages = await mapWithConcurrency(batch, config.concurrency, (id) => gmail.getMessage(id));
+      const messages = await mapWithConcurrency(batch, config.concurrency, (id) =>
+        gmail.getMessage(id),
+      );
       const plan = createWritePlan(messages, {
         existingById,
         seenThisRun,
@@ -357,11 +360,18 @@ Options:
 function loadConfig(options) {
   const missing = [];
   const baseQuery = options.query || process.env.BRAND_CONTACT_SCAN_GMAIL_QUERY || DEFAULT_QUERY;
-  const query = withSinceDays(baseQuery, options.sinceDays || Number(process.env.BRAND_CONTACT_SCAN_SINCE_DAYS || 0));
+  const query = withSinceDays(
+    baseQuery,
+    options.sinceDays || Number(process.env.BRAND_CONTACT_SCAN_SINCE_DAYS || 0),
+  );
   let checkpointPath = options.checkpointPath;
 
   if (!options.checkpointExplicit && !options.dryRun && options.maxEmails > 0) {
-    checkpointPath = path.join(process.cwd(), CHECKPOINT_DIR, `checkpoint.max-${options.maxEmails}.json`);
+    checkpointPath = path.join(
+      process.cwd(),
+      CHECKPOINT_DIR,
+      `checkpoint.max-${options.maxEmails}.json`,
+    );
   }
 
   const config = {
@@ -404,7 +414,9 @@ async function validateCredentials({ gmail, sheets, config }) {
   console.log(`Gmail client ID: ${maskValue(config.gmailClientId)}`);
   console.log(`Gmail refresh token: ${maskValue(config.gmailRefreshToken)}`);
   console.log(`Service account: ${config.serviceAccountEmail}`);
-  console.log(`Private key loaded: ${config.privateKey.includes("BEGIN PRIVATE KEY") ? "yes" : "no"}`);
+  console.log(
+    `Private key loaded: ${config.privateKey.includes("BEGIN PRIVATE KEY") ? "yes" : "no"}`,
+  );
   console.log(`Team Asset spreadsheet ID: ${config.spreadsheetId}`);
 
   const profile = await gmail.profile();
@@ -472,7 +484,10 @@ function createInitialState({ runId, startedAt, query }) {
 }
 
 function createRunId() {
-  const stamp = new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[-:T.Z]/g, "")
+    .slice(0, 14);
   return `BRAND-CONTACTS-${stamp}`;
 }
 
@@ -517,7 +532,9 @@ function createSheetsTokenProvider(config) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.access_token) {
-      throw new Error(`Google Sheets service account auth failed (${response.status}): ${formatGoogleError(result)}`);
+      throw new Error(
+        `Google Sheets service account auth failed (${response.status}): ${formatGoogleError(result)}`,
+      );
     }
     cached = {
       accessToken: result.access_token,
@@ -576,6 +593,11 @@ function createGmailClient(tokenProvider) {
     },
     async getMessage(messageId) {
       const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}`);
+      url.searchParams.set("format", "full");
+      return googleFetch(url, tokenProvider);
+    },
+    async getThread(threadId) {
+      const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}`);
       url.searchParams.set("format", "full");
       return googleFetch(url, tokenProvider);
     },
@@ -652,11 +674,15 @@ async function googleFetch(url, tokenProvider, init = {}) {
     if (response.ok) return body;
     if ([429, 500, 502, 503, 504].includes(response.status) && attempt < maxAttempts - 1) {
       const delayMs = retryDelayMs(response, attempt);
-      console.warn(`Google API asked us to slow down (${response.status}). Waiting ${Math.round(delayMs / 1000)}s before retry ${attempt + 2}/${maxAttempts}.`);
+      console.warn(
+        `Google API asked us to slow down (${response.status}). Waiting ${Math.round(delayMs / 1000)}s before retry ${attempt + 2}/${maxAttempts}.`,
+      );
       await sleep(delayMs);
       continue;
     }
-    throw new Error(`Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`);
+    throw new Error(
+      `Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`,
+    );
   }
   throw new Error(`Google API failed after retries: ${url.pathname}`);
 }
@@ -689,12 +715,14 @@ async function loadContactDatabase(sheets) {
     const oldRowCount = table.rows.length;
     const contacts = normalizeContactRows(table.headers, table.rows);
     const rows = contacts.map((contact) => contactToRow(contact));
-    await sheets.valuesUpdate(`${quoteSheet(CONTACT_DATABASE_TAB)}!A1:F${Math.max(1, rows.length + 1)}`, [
-      CONTACT_HEADERS,
-      ...rows,
-    ]);
+    await sheets.valuesUpdate(
+      `${quoteSheet(CONTACT_DATABASE_TAB)}!A1:F${Math.max(1, rows.length + 1)}`,
+      [CONTACT_HEADERS, ...rows],
+    );
     if (oldRowCount > rows.length) {
-      await sheets.valuesClear(`${quoteSheet(CONTACT_DATABASE_TAB)}!A${rows.length + 2}:F${oldRowCount + 1}`);
+      await sheets.valuesClear(
+        `${quoteSheet(CONTACT_DATABASE_TAB)}!A${rows.length + 2}:F${oldRowCount + 1}`,
+      );
     }
     await sheets.valuesClear(`${quoteSheet(CONTACT_DATABASE_TAB)}!G:ZZ`);
     await sheets.batchUpdate([
@@ -713,7 +741,9 @@ async function loadContactDatabase(sheets) {
 
   return {
     sheetId: tab.properties.sheetId,
-    gridRowCount: tab.properties.gridProperties?.rowCount ?? Math.max(CONTACT_HEADERS.length, table.rows.length + 1),
+    gridRowCount:
+      tab.properties.gridProperties?.rowCount ??
+      Math.max(CONTACT_HEADERS.length, table.rows.length + 1),
     contacts: normalizeContactRows(table.headers, table.rows),
   };
 }
@@ -733,7 +763,9 @@ function getTab(metadata, name) {
 
 function hasCurrentHeaderSchema(headers) {
   if (headers.length !== CONTACT_HEADERS.length) return false;
-  return CONTACT_HEADERS.every((header, index) => compactKey(headers[index] ?? "") === compactKey(header));
+  return CONTACT_HEADERS.every(
+    (header, index) => compactKey(headers[index] ?? "") === compactKey(header),
+  );
 }
 
 function normalizeContactRows(headers, rows) {
@@ -811,7 +843,11 @@ function createWritePlan(messages, context) {
 
       const contact = result.contact;
       if (context.seenThisRun.has(contact.id)) {
-        plan.skips.push({ ok: false, reason: "Duplicate found in this run", code: "duplicate-run" });
+        plan.skips.push({
+          ok: false,
+          reason: "Duplicate found in this run",
+          code: "duplicate-run",
+        });
         continue;
       }
       context.seenThisRun.add(contact.id);
@@ -820,7 +856,11 @@ function createWritePlan(messages, context) {
       if (existing?.rowNumber) {
         const merged = mergeContact(existing, contact);
         if (contactsEqual(existing, merged)) {
-          plan.skips.push({ ok: false, reason: "Existing row already has this contact", code: "duplicate-existing" });
+          plan.skips.push({
+            ok: false,
+            reason: "Existing row already has this contact",
+            code: "duplicate-existing",
+          });
           continue;
         }
         plan.updates.push({
@@ -865,7 +905,11 @@ function extractBrandContact(email) {
   const position = inferPosition(text);
 
   if (isCreatorTeamThread(email.subject) && isCreatorManagementSender({ senderDomain, position })) {
-    return { ok: false, reason: "Creator-management thread without a clear brand", code: "missing-brand" };
+    return {
+      ok: false,
+      reason: "Creator-management thread without a clear brand",
+      code: "missing-brand",
+    };
   }
 
   const brandName = inferBrandName({ email, sender, text });
@@ -877,11 +921,19 @@ function extractBrandContact(email) {
   const contactName = cleanContactName(sender.name);
 
   if (sameEntityName(brandName, contactName)) {
-    return { ok: false, reason: "Brand looked like the sender contact name", code: "missing-brand" };
+    return {
+      ok: false,
+      reason: "Brand looked like the sender contact name",
+      code: "missing-brand",
+    };
   }
 
   if (/talent manager/i.test(position) && looksLikePersonName(brandName)) {
-    return { ok: false, reason: "Brand looked like a represented talent, not a brand", code: "missing-brand" };
+    return {
+      ok: false,
+      reason: "Brand looked like a represented talent, not a brand",
+      code: "missing-brand",
+    };
   }
 
   const contact = {
@@ -898,7 +950,9 @@ function extractBrandContact(email) {
 
 function inferBrandName({ email, sender, text }) {
   const candidates = [];
-  const subject = String(email.subject ?? "").replace(/^(re|fw|fwd)\s*:\s*/i, "").trim();
+  const subject = String(email.subject ?? "")
+    .replace(/^(re|fw|fwd)\s*:\s*/i, "")
+    .trim();
 
   collectMatches(candidates, subject, [
     /^\s*\[\s*(?:paid\s+collab|paid\s+collaboration|collab|collaboration|campaign|brief)[^\]/]*\/\s*([A-Z][A-Za-z0-9&'.+ -]{1,55})\s*\]/gi,
@@ -959,14 +1013,19 @@ function inferBrandFromSenderDomain(domain) {
 }
 
 function chooseBestBrandCandidate(candidates) {
-  const cleaned = unique(candidates.map(cleanBrandName).filter((candidate) => candidate && !isBadBrandCandidate(candidate)));
+  const cleaned = unique(
+    candidates
+      .map(cleanBrandName)
+      .filter((candidate) => candidate && !isBadBrandCandidate(candidate)),
+  );
   if (cleaned.length === 0) return "";
 
   const scored = cleaned.map((candidate, index) => {
     let score = 100 - index;
     const words = candidate.split(/\s+/);
     if (words.length <= 3) score += 8;
-    if (/\b(ai|app|beauty|skin|labs|studio|shop|co|coffee|fit|health|wear)\b/i.test(candidate)) score += 4;
+    if (/\b(ai|app|beauty|skin|labs|studio|shop|co|coffee|fit|health|wear)\b/i.test(candidate))
+      score += 4;
     if (words.length > 5) score -= 20;
     if (candidate.length > 42) score -= 10;
     return { candidate, score };
@@ -988,10 +1047,14 @@ function isBadBrandCandidate(value) {
     /^introduction\s+please\s+find\b/i.test(value) ||
     /^(cooperation|manager|thailand\s+trip)\b/i.test(value) ||
     /^(review|approval|rate|rates|details|deck|brief)$/i.test(value) ||
-    /\b(creator|creators|collaborations?|partnerships?|equity|visibility|instagram|youtube)\b/i.test(value) ||
+    /\b(creator|creators|collaborations?|partnerships?|equity|visibility|instagram|youtube)\b/i.test(
+      value,
+    ) ||
     /^(for|from|with|new|potential|paid|creator|influencer|brand|campaign)\b/i.test(value) ||
     /^behind\b/i.test(value) ||
-    /\b(your content|your creator|their review|our review|your review|our client|the client|next steps|calendar|meeting|invoice|receipt|confirmed everything|best)\b/i.test(value) ||
+    /\b(your content|your creator|their review|our review|your review|our client|the client|next steps|calendar|meeting|invoice|receipt|confirmed everything|best)\b/i.test(
+      value,
+    ) ||
     String(value).length > 60
   );
 }
@@ -1013,16 +1076,22 @@ function isInternalPairCandidate(value) {
 }
 
 function isCreatorTeamThread(subject) {
-  const cleanSubject = String(subject ?? "").replace(/^(re|fw|fwd)\s*:\s*/i, "").trim();
+  const cleanSubject = String(subject ?? "")
+    .replace(/^(re|fw|fwd)\s*:\s*/i, "")
+    .trim();
   const team = TEAM_ENTITY_NAMES.map(flexibleNamePattern).join("|");
   if (!team) return false;
-  return new RegExp(`^\\s*(?:@?[A-Za-z0-9_.-]+|[A-Z][A-Za-z0-9&'.+ -]{1,55})\\s*(?:x|X|×)\\s*(?:${team})\\b`, "i").test(
-    cleanSubject,
-  );
+  return new RegExp(
+    `^\\s*(?:@?[A-Za-z0-9_.-]+|[A-Z][A-Za-z0-9&'.+ -]{1,55})\\s*(?:x|X|×)\\s*(?:${team})\\b`,
+    "i",
+  ).test(cleanSubject);
 }
 
 function isCreatorManagementSender({ senderDomain, position }) {
-  return GENERIC_EMAIL_DOMAINS.has(senderDomain) || /\b(talent manager|creator manager|management)\b/i.test(position);
+  return (
+    GENERIC_EMAIL_DOMAINS.has(senderDomain) ||
+    /\b(talent manager|creator manager|management)\b/i.test(position)
+  );
 }
 
 function isKnownCreatorSender({ sender, contactEmail, senderDomain }) {
@@ -1060,7 +1129,9 @@ function appearsAsBrandCreatorPair(candidate, text) {
   const name = flexibleNamePattern(candidate);
   const team = TEAM_ENTITY_NAMES.map(flexibleNamePattern).join("|");
   if (!name) return false;
-  const match = String(text ?? "").match(new RegExp(`^\\[?\\s*${name}\\s*(?:x|X|×)\\s+([^\\]\\n:|,-]+)`, "i"));
+  const match = String(text ?? "").match(
+    new RegExp(`^\\[?\\s*${name}\\s*(?:x|X|×)\\s+([^\\]\\n:|,-]+)`, "i"),
+  );
   if (!match?.[1]) return false;
   return team ? !new RegExp(`^(?:${team})$`, "i").test(cleanEntityName(match[1])) : true;
 }
@@ -1092,7 +1163,9 @@ function appearsAsTeamCreatorPair(candidate, text) {
 function appearsAfterCreatorLabel(candidate, text) {
   const name = flexibleNamePattern(candidate);
   if (!name) return false;
-  return new RegExp(`\\b(?:creator|talent|influencer)(?:\\s+name)?\\s*:?\\s*${name}\\b`, "i").test(text);
+  return new RegExp(`\\b(?:creator|talent|influencer)(?:\\s+name)?\\s*:?\\s*${name}\\b`, "i").test(
+    text,
+  );
 }
 
 function flexibleNamePattern(value) {
@@ -1109,7 +1182,9 @@ function inferPosition(text) {
     if (lower.includes(position.toLowerCase())) return position;
   }
 
-  const titleMatch = String(text ?? "").match(/(?:title|role|position)\s*:?\s*([A-Za-z /-]{3,60})/i);
+  const titleMatch = String(text ?? "").match(
+    /(?:title|role|position)\s*:?\s*([A-Za-z /-]{3,60})/i,
+  );
   if (titleMatch?.[1]) return cleanPosition(titleMatch[1]);
   return "";
 }
@@ -1128,7 +1203,10 @@ function parseSender(from) {
 
 function normalizeGmailMessage(message) {
   const headers = Object.fromEntries(
-    (message.payload?.headers ?? []).map((header) => [String(header.name).toLowerCase(), header.value]),
+    (message.payload?.headers ?? []).map((header) => [
+      String(header.name).toLowerCase(),
+      header.value,
+    ]),
   );
   const body = decodePayload(message.payload);
 
@@ -1138,7 +1216,9 @@ function normalizeGmailMessage(message) {
     from: headers.from ?? "",
     to: headers.to ?? "",
     subject: headers.subject ?? "(no subject)",
-    date: headers.date ? new Date(headers.date) : new Date(Number(message.internalDate ?? Date.now())),
+    date: headers.date
+      ? new Date(headers.date)
+      : new Date(Number(message.internalDate ?? Date.now())),
     snippet: message.snippet ?? "",
     body,
     displayUrl: `https://mail.google.com/mail/#all/${message.id}`,
@@ -1273,7 +1353,9 @@ function mergeContact(existing, incoming) {
 }
 
 function contactsEqual(left, right) {
-  return CONTACT_HEADERS.every((header) => String(left[header] ?? "") === String(right[header] ?? ""));
+  return CONTACT_HEADERS.every(
+    (header) => String(left[header] ?? "") === String(right[header] ?? ""),
+  );
 }
 
 function contactId(brandName, email) {
@@ -1284,11 +1366,17 @@ function contactId(brandName, email) {
 
 function splitFirstName(contactName, explicitFirstName) {
   if (String(explicitFirstName ?? "").trim()) return String(explicitFirstName).trim();
-  return String(contactName ?? "").trim().split(/\s+/)[0] ?? "";
+  return (
+    String(contactName ?? "")
+      .trim()
+      .split(/\s+/)[0] ?? ""
+  );
 }
 
 function normalizeEmail(value) {
-  return String(value ?? "").trim().toLowerCase();
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
 }
 
 function isValidEmail(value) {
@@ -1305,7 +1393,9 @@ function domainMatches(domain, domains) {
 
 function isNoReplyEmail(email) {
   const local = email.split("@")[0] ?? "";
-  return /^(no-?reply|donotreply|do-not-reply|notification|notifications|mailer|mailchimp|calendar|support|store-news|news|hello-news)$/i.test(local);
+  return /^(no-?reply|donotreply|do-not-reply|notification|notifications|mailer|mailchimp|calendar|support|store-news|news|hello-news)$/i.test(
+    local,
+  );
 }
 
 function sameEntityName(left, right) {
@@ -1323,7 +1413,10 @@ function cleanBrandName(value) {
   return stripKnownCreatorFragments(cleanEntityName(value))
     .replace(/\s+featuring\b.*$/i, "")
     .replace(/\s+on\s+(?:tiktok|instagram|youtube)\b.*$/i, "")
-    .replace(/\b(?:creator|influencer|campaign|collaboration|collab|partnership|sponsorship|brief|booking|opportunity|activation|promotion)\b.*$/i, "")
+    .replace(
+      /\b(?:creator|influencer|campaign|collaboration|collab|partnership|sponsorship|brief|booking|opportunity|activation|promotion)\b.*$/i,
+      "",
+    )
     .replace(/\s+(?:tiktok|instagram|youtube|ugc)\s*$/i, "")
     .replace(/^(?:the\s+)?(.+?)\s+app$/i, "$1")
     .replace(/\s+(?:for|with|from|by)$/i, "")
@@ -1359,7 +1452,10 @@ function cleanContactName(value) {
 }
 
 function cleanPosition(value) {
-  const cleaned = cleanEntityName(value).replace(/[|].*$/g, "").slice(0, 80).trim();
+  const cleaned = cleanEntityName(value)
+    .replace(/[|].*$/g, "")
+    .slice(0, 80)
+    .trim();
   if (!/[A-Za-z]{3}/.test(cleaned)) return "";
   return cleaned;
 }
@@ -1375,7 +1471,9 @@ function cleanEntityName(value) {
 }
 
 function rootDomainName(domain) {
-  const parts = String(domain ?? "").split(".").filter(Boolean);
+  const parts = String(domain ?? "")
+    .split(".")
+    .filter(Boolean);
   if (parts.length <= 2) return parts[0] ?? "";
   const secondLevel = parts.at(-2) ?? parts[0];
   const thirdLevel = parts.at(-3) ?? "";
@@ -1384,7 +1482,9 @@ function rootDomainName(domain) {
 }
 
 function slug(value) {
-  return normalizeKey(value).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return normalizeKey(value)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function compactKey(value) {
@@ -1404,7 +1504,11 @@ function toTitleCase(value) {
   return String(value ?? "")
     .split(/\s+/)
     .filter(Boolean)
-    .map((part) => (part.length <= 2 ? part.toUpperCase() : `${part[0].toUpperCase()}${part.slice(1).toLowerCase()}`))
+    .map((part) =>
+      part.length <= 2
+        ? part.toUpperCase()
+        : `${part[0].toUpperCase()}${part.slice(1).toLowerCase()}`,
+    )
     .join(" ");
 }
 
@@ -1519,7 +1623,9 @@ function printSummary(state, options) {
   if (state.extractionSamples.length > 0) {
     console.log("\nSample contacts:");
     for (const sample of state.extractionSamples.slice(0, 10)) {
-      console.log(`- ${sample.brandName} | ${sample.email} | ${sample.contactName || "No name"} | ${sample.position || "No position"}`);
+      console.log(
+        `- ${sample.brandName} | ${sample.email} | ${sample.contactName || "No name"} | ${sample.position || "No position"}`,
+      );
       console.log(`  Subject: ${sample.subject}`);
     }
   }
@@ -1540,7 +1646,11 @@ function printSummary(state, options) {
   if (options.dryRun) {
     console.log("\nDry run complete. No Contact Database rows were changed.");
   } else {
-    console.log(state.nextPageToken ? "\nCheckpoint saved. Run again to resume." : "\nNo next page token. Scan is complete for this query.");
+    console.log(
+      state.nextPageToken
+        ? "\nCheckpoint saved. Run again to resume."
+        : "\nNo next page token. Scan is complete for this query.",
+    );
   }
 }
 
@@ -1590,10 +1700,16 @@ function runSelfTest() {
   assert(extracted.ok, "Sample email should extract a contact.");
   assert(extracted.contact.brandName === "Dola AI", "Sample email should extract Dola AI.");
   assert(extracted.contact.email === "abc@katlasmedia.com", "Sample email should normalize email.");
-  assert(extracted.contact.contactName === "Alex Carter", "Sample email should extract sender name.");
+  assert(
+    extracted.contact.contactName === "Alex Carter",
+    "Sample email should extract sender name.",
+  );
 
   const row = contactToRow(extracted.contact);
-  assert(row.length === CONTACT_HEADERS.length, "Sheet row should match simplified Contact Database headers.");
+  assert(
+    row.length === CONTACT_HEADERS.length,
+    "Sheet row should match simplified Contact Database headers.",
+  );
   assert(row[0] === extracted.contact.id, "Sheet row should include stable ID.");
   assert(row[1] === "Dola AI", "Sheet row should include brandName.");
   assert(row[4] === "abc@katlasmedia.com", "Sheet row should include email.");
@@ -1607,7 +1723,10 @@ function runSelfTest() {
   };
   const brandXCreator = extractBrandContact(brandXCreatorEmail);
   assert(brandXCreator.ok, "Brand x creator subject should still extract the brand.");
-  assert(brandXCreator.contact.brandName === "Dongwon Tuna", "Brand x creator subject should keep the brand side.");
+  assert(
+    brandXCreator.contact.brandName === "Dongwon Tuna",
+    "Brand x creator subject should keep the brand side.",
+  );
 
   const creatorTargetedEmail = {
     id: "msg-3",
@@ -1648,7 +1767,10 @@ function runSelfTest() {
   };
   const paidCollabBracket = extractBrandContact(paidCollabBracketEmail);
   assert(paidCollabBracket.ok, "Paid collab bracket subject should extract the brand.");
-  assert(paidCollabBracket.contact.brandName === "Dr.Reju-All", "Paid collab bracket subject should extract Dr.Reju-All.");
+  assert(
+    paidCollabBracket.contact.brandName === "Dr.Reju-All",
+    "Paid collab bracket subject should extract Dr.Reju-All.",
+  );
 
   const teamXBrandEmail = {
     id: "msg-7",
@@ -1659,7 +1781,10 @@ function runSelfTest() {
   };
   const teamXBrand = extractBrandContact(teamXBrandEmail);
   assert(teamXBrand.ok, "Team x brand subject should extract the brand side.");
-  assert(teamXBrand.contact.brandName === "Table Rock", "Team x brand subject should extract Table Rock.");
+  assert(
+    teamXBrand.contact.brandName === "Table Rock",
+    "Team x brand subject should extract Table Rock.",
+  );
 
   const featuringSubjectEmail = {
     id: "msg-8",
@@ -1670,7 +1795,10 @@ function runSelfTest() {
   };
   const featuringSubject = extractBrandContact(featuringSubjectEmail);
   assert(featuringSubject.ok, "Featuring subject should still extract a brand.");
-  assert(featuringSubject.contact.brandName === "COSRX", "Featuring subject should clean down to COSRX.");
+  assert(
+    featuringSubject.contact.brandName === "COSRX",
+    "Featuring subject should clean down to COSRX.",
+  );
 
   const creatorOwnedEmail = {
     id: "msg-9",
@@ -1690,8 +1818,14 @@ function runSelfTest() {
     body: "Paid partnership for Dilshoda.",
   };
   const creatorSubject = extractBrandContact(creatorSubjectBrandDomain);
-  assert(creatorSubject.ok, "Creator-name subject from a brand domain should fall back to domain brand.");
-  assert(creatorSubject.contact.brandName === "Paulaschoice", "Creator-name subject should not save Dilshoda as the brand.");
+  assert(
+    creatorSubject.ok,
+    "Creator-name subject from a brand domain should fall back to domain brand.",
+  );
+  assert(
+    creatorSubject.contact.brandName === "Paulaschoice",
+    "Creator-name subject should not save Dilshoda as the brand.",
+  );
 
   const creatorHandleSuffix = {
     id: "msg-11",
@@ -1702,7 +1836,10 @@ function runSelfTest() {
   };
   const creatorHandle = extractBrandContact(creatorHandleSuffix);
   assert(creatorHandle.ok, "Brand plus creator handle should still extract the brand.");
-  assert(creatorHandle.contact.brandName === "Darry Ring", "Creator handle suffix should be removed from brand.");
+  assert(
+    creatorHandle.contact.brandName === "Darry Ring",
+    "Creator handle suffix should be removed from brand.",
+  );
 
   console.log("Brand contact scanner self-test passed.");
 }
@@ -1710,3 +1847,22 @@ function runSelfTest() {
 function assert(condition, message) {
   if (!condition) throw new Error(`Self-test failed: ${message}`);
 }
+
+export {
+  GENERIC_EMAIL_DOMAINS,
+  SOURCE_ORG_HINTS,
+  createGmailClient,
+  createGmailTokenProvider,
+  createSheetsClient,
+  createSheetsTokenProvider,
+  decodePayload,
+  domainFromEmail,
+  extractBrandContact,
+  inferBrandFromSenderDomain,
+  loadEnvFiles,
+  normalizeGmailMessage,
+  normalizeKey,
+  parseSender,
+  rootDomainName,
+  toTitleCase,
+};

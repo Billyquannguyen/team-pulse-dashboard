@@ -41,9 +41,46 @@ export type ActiveBrandsKnowledgeMatch = {
   score: number;
 };
 
+export type CreatorSourcingBrief = {
+  platforms: string;
+  creatorSize: string;
+  location: string;
+  language: string;
+  creatorAge: string;
+  gender: string;
+  niches: string;
+  creatorStyle: string;
+  audience: string;
+  briefDate: string;
+  sourceAgency: string;
+  sourceEmail: string;
+};
+
+export type ActiveBrandContact = {
+  contact: string;
+  lastActiveDate: string;
+  notes: string;
+};
+
+export type ActiveBrandAgency = {
+  name: string;
+  topContact: string;
+  topContactLastActiveDate: string;
+  contacts: ActiveBrandContact[];
+};
+
+export type ActiveBrand = {
+  name: string;
+  niche: string;
+  bestActiveDate: string;
+  brief: CreatorSourcingBrief;
+  agencies: ActiveBrandAgency[];
+};
+
 export type ActiveBrandsSheetData = {
   headers: string[];
   rows: string[][];
+  brands: ActiveBrand[];
   source: "google-sheet" | "fallback" | "error";
   error?: string;
   warning?: string;
@@ -86,6 +123,9 @@ export type ActiveBrandsDataFlowDiagnostics = {
 };
 
 export const ACTIVE_CONTACTS_TAB_NAME = "Active Contacts";
+export const ACTIVE_BRANDS_AGENCIES_TAB_NAME = "Agencies";
+export const ACTIVE_BRANDS_CONTACTS_TAB_NAME = "Contacts";
+export const ACTIVE_BRANDS_BRIEFS_TAB_NAME = "Briefs";
 export const ACTIVE_BRANDS_SPREADSHEET_ENV = "ACTIVE_BRANDS_SPREADSHEET_ID";
 
 const ACTIVE_BRANDS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -198,6 +238,148 @@ function trimEmptyTrailingColumns(headers: string[], rows: string[][]) {
   };
 }
 
+type SheetTable = ReturnType<typeof trimEmptyTrailingColumns>;
+
+function columnIndex(table: SheetTable, header: string) {
+  const wanted = normalizeKey(header);
+  return table.headers.findIndex((value) => normalizeKey(value) === wanted);
+}
+
+function tableValue(table: SheetTable, row: string[], header: string) {
+  const index = columnIndex(table, header);
+  return index >= 0 ? (row[index] ?? "").trim() : "";
+}
+
+function dateScore(value: string) {
+  const score = Date.parse(value);
+  return Number.isFinite(score) ? score : 0;
+}
+
+function latestDate(values: string[]) {
+  return values.filter(Boolean).sort((left, right) => dateScore(right) - dateScore(left))[0] ?? "";
+}
+
+function emptyBrief(): CreatorSourcingBrief {
+  return {
+    platforms: "",
+    creatorSize: "",
+    location: "",
+    language: "",
+    creatorAge: "",
+    gender: "",
+    niches: "",
+    creatorStyle: "",
+    audience: "",
+    briefDate: "",
+    sourceAgency: "",
+    sourceEmail: "",
+  };
+}
+
+function sameKey(left: string, right: string) {
+  return normalizeKey(left) === normalizeKey(right);
+}
+
+function shapeActiveBrands(
+  active: SheetTable,
+  agencies: SheetTable,
+  contacts: SheetTable,
+  briefs: SheetTable,
+): ActiveBrand[] {
+  const brandRows = active.rows.filter(
+    (row) => tableValue(active, row, "Record Type").toLowerCase() === "brand",
+  );
+
+  return brandRows
+    .map((brandRow) => {
+      const name = tableValue(active, brandRow, "Brand") || brandRow[0]?.trim() || "";
+      const brandContacts = contacts.rows
+        .filter((row) => sameKey(tableValue(contacts, row, "Brand"), name))
+        .map((row) => ({
+          agency: tableValue(contacts, row, "Agency"),
+          contact: tableValue(contacts, row, "Contact Email / WhatsApp"),
+          lastActiveDate: tableValue(contacts, row, "Last Active Date"),
+          notes: tableValue(contacts, row, "Notes"),
+        }));
+      const agencyRows = agencies.rows.filter((row) =>
+        sameKey(tableValue(agencies, row, "Brand"), name),
+      );
+      const uniqueAgencyNames = Array.from(
+        new Set([
+          ...agencyRows.map((row) => tableValue(agencies, row, "Agency")),
+          ...brandContacts.map((contact) => contact.agency),
+        ]),
+      );
+      const briefRow = briefs.rows.find((row) => sameKey(tableValue(briefs, row, "Brand"), name));
+      const brief = briefRow
+        ? {
+            platforms: tableValue(briefs, briefRow, "Platforms"),
+            creatorSize: tableValue(briefs, briefRow, "Creator Size"),
+            location: tableValue(briefs, briefRow, "Location"),
+            language: tableValue(briefs, briefRow, "Language"),
+            creatorAge: tableValue(briefs, briefRow, "Creator Age"),
+            gender: tableValue(briefs, briefRow, "Gender"),
+            niches: tableValue(briefs, briefRow, "Niches"),
+            creatorStyle: tableValue(briefs, briefRow, "Creator Style"),
+            audience: tableValue(briefs, briefRow, "Audience"),
+            briefDate: tableValue(briefs, briefRow, "Brief Date"),
+            sourceAgency: tableValue(briefs, briefRow, "Source Agency"),
+            sourceEmail: tableValue(briefs, briefRow, "Source Email"),
+          }
+        : emptyBrief();
+
+      const shapedAgencies = uniqueAgencyNames
+        .map((agencyName) => {
+          const agencyRow = agencyRows.find((row) =>
+            sameKey(tableValue(agencies, row, "Agency"), agencyName),
+          );
+          const agencyContacts = brandContacts
+            .filter((contact) => sameKey(contact.agency, agencyName))
+            .map(({ contact, lastActiveDate, notes }) => ({ contact, lastActiveDate, notes }))
+            .sort(
+              (left, right) => dateScore(right.lastActiveDate) - dateScore(left.lastActiveDate),
+            );
+          const topContact =
+            (agencyRow && tableValue(agencies, agencyRow, "Top Contact Email / WhatsApp")) ||
+            agencyContacts[0]?.contact ||
+            "";
+          const topContactLastActiveDate =
+            (agencyRow && tableValue(agencies, agencyRow, "Contact Active Date")) ||
+            agencyContacts.find((contact) => contact.contact === topContact)?.lastActiveDate ||
+            agencyContacts[0]?.lastActiveDate ||
+            "";
+
+          return {
+            name: agencyName,
+            topContact,
+            topContactLastActiveDate,
+            contacts: agencyContacts,
+          };
+        })
+        .sort(
+          (left, right) =>
+            dateScore(right.topContactLastActiveDate) - dateScore(left.topContactLastActiveDate) ||
+            left.name.localeCompare(right.name),
+        );
+
+      return {
+        name,
+        niche: tableValue(active, brandRow, "Niche"),
+        bestActiveDate:
+          latestDate(brandContacts.map((contact) => contact.lastActiveDate)) ||
+          tableValue(active, brandRow, "Best / Last Active"),
+        brief,
+        agencies: shapedAgencies,
+      };
+    })
+    .filter((brand) => brand.name)
+    .sort(
+      (left, right) =>
+        dateScore(right.bestActiveDate) - dateScore(left.bestActiveDate) ||
+        left.name.localeCompare(right.name),
+    );
+}
+
 async function readActiveBrandsSheetData(
   config: GoogleSheetsConfig,
   spreadsheetId: string,
@@ -213,24 +395,49 @@ async function readActiveBrandsSheetData(
   debug.configured = true;
   const tabs = await googleSheets.fetchSpreadsheetTabs(config, spreadsheetId);
   debug.availableTabs = tabs.map((tab) => tab.sheetName);
-  const expectedKey = normalizeSheetKey(ACTIVE_CONTACTS_TAB_NAME);
-  const matchedTab = tabs.find((tab) => normalizeSheetKey(tab.sheetName) === expectedKey);
+  const requiredTabNames = [
+    ACTIVE_CONTACTS_TAB_NAME,
+    ACTIVE_BRANDS_AGENCIES_TAB_NAME,
+    ACTIVE_BRANDS_CONTACTS_TAB_NAME,
+    ACTIVE_BRANDS_BRIEFS_TAB_NAME,
+  ] as const;
+  const matchedTabs = requiredTabNames.map((requiredName) =>
+    tabs.find((tab) => normalizeSheetKey(tab.sheetName) === normalizeSheetKey(requiredName)),
+  );
+  const matchedTab = matchedTabs[0];
 
-  if (!matchedTab) {
+  if (matchedTabs.some((tab) => !tab)) {
+    const missing = requiredTabNames.filter((_, index) => !matchedTabs[index]);
     throw new Error(
-      `Could not find a worksheet tab named "${ACTIVE_CONTACTS_TAB_NAME}" in ${ACTIVE_BRANDS_SPREADSHEET_ENV}.`,
+      `Could not find required worksheet tab${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`,
     );
   }
 
-  debug.foundTabName = matchedTab.sheetName;
-  const [sheetRows] = await googleSheets.fetchSheetRowsBatch(config, spreadsheetId, [
-    {
-      memberName: ACTIVE_CONTACTS_TAB_NAME,
-      sheetName: matchedTab.sheetName,
-      gid: matchedTab.gid,
-    },
-  ]);
-  const shaped = trimEmptyTrailingColumns(sheetRows?.headers ?? [], sheetRows?.rows ?? []);
+  debug.foundTabName = matchedTab?.sheetName ?? null;
+  const sheetResults = await googleSheets.fetchSheetRowsBatch(
+    config,
+    spreadsheetId,
+    requiredTabNames.map((memberName, index) => ({
+      memberName,
+      sheetName: matchedTabs[index]!.sheetName,
+      gid: matchedTabs[index]!.gid,
+    })),
+  );
+  const [activeResult, agenciesResult, contactsResult, briefsResult] = sheetResults;
+  const shaped = trimEmptyTrailingColumns(activeResult?.headers ?? [], activeResult?.rows ?? []);
+  const agencyTable = trimEmptyTrailingColumns(
+    agenciesResult?.headers ?? [],
+    agenciesResult?.rows ?? [],
+  );
+  const contactTable = trimEmptyTrailingColumns(
+    contactsResult?.headers ?? [],
+    contactsResult?.rows ?? [],
+  );
+  const briefTable = trimEmptyTrailingColumns(
+    briefsResult?.headers ?? [],
+    briefsResult?.rows ?? [],
+  );
+  const brands = shapeActiveBrands(shaped, agencyTable, contactTable, briefTable);
   debug.headerCount = shaped.headers.length;
   debug.rowCount = shaped.rows.length;
 
@@ -239,14 +446,16 @@ async function readActiveBrandsSheetData(
   }
 
   logActiveBrands("active brands loaded from google sheets", {
-    sheetName: matchedTab.sheetName,
+    sheetName: matchedTab!.sheetName,
     headerCount: shaped.headers.length,
     rowCount: shaped.rows.length,
+    brandCount: brands.length,
   });
 
   return {
     headers: shaped.headers,
     rows: shaped.rows,
+    brands,
     source: "google-sheet",
     links,
     updatedAt: new Date().toISOString(),
@@ -260,6 +469,7 @@ function fallbackActiveBrandsData(
   return {
     headers: [],
     rows: [],
+    brands: [],
     source: "fallback",
     error,
     warning: "Local development fallback: Active Brands could not be loaded from Google Sheets.",
@@ -275,6 +485,7 @@ function emptyActiveBrandsData(
   return {
     headers: [],
     rows: [],
+    brands: [],
     source: "error",
     error,
     links,
@@ -493,29 +704,52 @@ export async function getActiveBrandsKnowledgeMatches(
       allowStaleCache: true,
     });
 
-    if (result.data.source === "error" || result.data.rows.length === 0) {
+    if (result.data.source === "error" || result.data.brands.length === 0) {
       return [];
     }
 
-    return result.data.rows
-      .map((row) => {
-        const labelledCells = result.data.headers
-          .map((header, index) => {
-            const value = row[index]?.trim();
-            return value ? `${header || `Column ${index + 1}`}: ${value}` : "";
-          })
-          .filter(Boolean);
-        const text = labelledCells.join(" | ");
+    return result.data.brands
+      .map((brand) => {
+        const brief = brand.brief;
+        const contactText = brand.agencies
+          .flatMap((agency) =>
+            agency.contacts.map(
+              (contact) =>
+                `${agency.name || "Agency not identified"}: ${contact.contact} (${contact.lastActiveDate})`,
+            ),
+          )
+          .join(" | ");
+        const briefText = [
+          brief.platforms && `Platforms: ${brief.platforms}`,
+          brief.creatorSize && `Creator size: ${brief.creatorSize}`,
+          brief.location && `Location: ${brief.location}`,
+          brief.language && `Language: ${brief.language}`,
+          brief.creatorAge && `Creator age: ${brief.creatorAge}`,
+          brief.gender && `Gender: ${brief.gender}`,
+          brief.niches && `Niches: ${brief.niches}`,
+          brief.creatorStyle && `Creator style: ${brief.creatorStyle}`,
+          brief.audience && `Audience: ${brief.audience}`,
+        ]
+          .filter(Boolean)
+          .join(" | ");
+        const text = [
+          `Brand: ${brand.name}`,
+          `Niche: ${brand.niche}`,
+          `Best active date: ${brand.bestActiveDate}`,
+          briefText,
+          contactText,
+        ]
+          .filter(Boolean)
+          .join(" | ");
         const normalizedText = normalizeKey(text);
         const score = queryTerms.reduce(
           (total, term) => total + (normalizedText.includes(term) ? 1 : 0),
           0,
         );
-        const title = row.find((cell) => cell.trim())?.trim() || "Active brand row";
 
         return {
           source: "sheets" as const,
-          title,
+          title: brand.name,
           text,
           score,
         };
@@ -532,7 +766,7 @@ export async function getActiveBrandsKnowledgeMatches(
 }
 
 export const activeBrandsQuery = {
-  queryKey: ["team-billion-active-brands", "active-contacts-v1"],
+  queryKey: ["team-billion-active-brands", "active-contacts-v2"],
   queryFn: () => fetchActiveBrandsData(),
   refetchInterval: QUERY_REFETCH_INTERVAL_MS,
   staleTime: QUERY_STALE_TIME_MS,

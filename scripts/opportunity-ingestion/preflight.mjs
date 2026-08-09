@@ -6,7 +6,7 @@ import path from "node:path";
 import process from "node:process";
 
 const DEFAULT_QUERY =
-  'in:anywhere -in:spam -in:trash -from:quan@stride-social.com {campaign brief creator collaboration partnership affiliate song "music promotion" UGC whitelisting "paid usage" ambassador gifted PR influencer creators sponsorship collab "paid collaboration" partnership sponsorship KOL whitelisting "Spark Ads"}';
+  'in:inbox -in:spam -in:trash -from:quan@stride-social.com newer_than:45d {campaign brief creator collaboration partnership affiliate song "music promotion" UGC whitelisting "paid usage" ambassador gifted PR influencer creators sponsorship collab "paid collaboration" partnership sponsorship KOL whitelisting "Spark Ads"}';
 
 const REQUIRED_TABS = [
   "Opportunities",
@@ -58,6 +58,10 @@ async function main() {
   const sheets = createSheetsClient(config.spreadsheetId, googleTokenProvider);
 
   let spreadsheetMetadata = null;
+
+  await runCheck(checks, "OpenRouter configuration present", async () => {
+    return `Default model: ${config.openRouterDefaultModel}; API key loaded: ${config.openRouterApiKey ? "yes" : "no"}`;
+  });
 
   await runCheck(checks, "Gmail auth valid", async () => {
     const profile = await gmail.profile();
@@ -226,6 +230,8 @@ function loadConfig(options) {
     serviceAccountEmail: env("GOOGLE_SERVICE_ACCOUNT_EMAIL", missing),
     privateKey: normalizePrivateKey(env("GOOGLE_PRIVATE_KEY", missing)),
     spreadsheetId: env("OPPORTUNITY_DATABASE_SPREADSHEET_ID", missing),
+    openRouterApiKey: env("OPENROUTER_API_KEY", missing),
+    openRouterDefaultModel: env("OPENROUTER_DEFAULT_MODEL", missing),
     query: options.query,
   };
 

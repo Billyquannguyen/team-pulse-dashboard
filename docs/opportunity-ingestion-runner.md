@@ -40,7 +40,13 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your_service_account_email
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 
 OPPORTUNITY_DATABASE_SPREADSHEET_ID=1T6jjHFb5ujsIqw2GvZ26lIVhHf9mPkAU6fihosqonZQ
+
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_DEFAULT_MODEL=your_structured_output_model
+OPENROUTER_FALLBACK_MODEL=your_optional_fallback_model
 ```
+
+OpenRouter is only called when deterministic extraction cannot confidently separate the brand, source organization, and creators. An AI result needs at least 82% confidence and must pass the same deterministic safety rules before it can create Sheet rows. API failures and low-confidence results go to `Extraction Review`.
 
 ## Gmail OAuth Setup
 

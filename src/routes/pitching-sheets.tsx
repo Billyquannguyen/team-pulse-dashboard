@@ -182,13 +182,13 @@ function safeFilename(value: string) {
     .replace(/^-|-$/g, "");
 }
 
-function excelHyperlinkFormula(value: string) {
+function excelHyperlinkValue(value: string) {
   const url = value.trim();
   if (!/^https?:\/\//i.test(url)) return null;
-  const escaped = url.replace(/"/g, '""');
   return {
-    formula: `HYPERLINK("${escaped}","${escaped}")`,
-    result: url,
+    text: url,
+    hyperlink: url,
+    tooltip: "Open link",
   };
 }
 
@@ -566,7 +566,6 @@ function PitchingSheetsPage() {
     const worksheet = workbook.addWorksheet("Creator Shortlist", {
       properties: { tabColor: { argb: "FFFF6B5F" } },
       views: [{ state: "frozen", ySplit: 1 }],
-      pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1 },
     });
 
     const widthFor = (label: string) => {
@@ -630,7 +629,7 @@ function PitchingSheetsPage() {
         if (column?.label.includes("Following")) cell.numFmt = "#,##0";
         const hyperlink =
           hyperlinkKeys.has(column?.key) && typeof rawValue === "string"
-            ? excelHyperlinkFormula(rawValue)
+            ? excelHyperlinkValue(rawValue)
             : null;
         if (hyperlink) {
           cell.value = hyperlink;
@@ -642,28 +641,22 @@ function PitchingSheetsPage() {
         interestedCell.value = "☐";
         interestedCell.font = { name: "Segoe UI Symbol", size: 15, color: { argb: "FF334155" } };
         interestedCell.alignment = { horizontal: "center", vertical: "middle" };
-        interestedCell.dataValidation = {
+      }
+    });
+
+    if (interestedIndex > 0 && rows.length > 0) {
+      worksheet.dataValidations.add(
+        `${worksheet.getColumn(interestedIndex).letter}2:${worksheet.getColumn(interestedIndex).letter}${rows.length + 1}`,
+        {
           type: "list",
           allowBlank: false,
           formulae: ['"☐,☑"'],
           showErrorMessage: true,
           errorTitle: "Choose a checkbox value",
           error: "Select either unchecked or checked.",
-        };
-      }
-    });
-
-    worksheet.addConditionalFormatting({
-      ref: `${worksheet.getColumn(interestedIndex).letter}2:${worksheet.getColumn(interestedIndex).letter}${Math.max(2, rows.length + 1)}`,
-      rules: [
-        {
-          type: "containsText",
-          operator: "containsText",
-          text: "☑",
-          style: { fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } } },
         },
-      ],
-    });
+      );
+    }
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([new Uint8Array(buffer)], {

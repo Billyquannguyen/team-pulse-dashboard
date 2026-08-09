@@ -254,6 +254,7 @@ const GENERIC_NAMES = new Set([
 ]);
 
 const KNOWN_POLLUTED_NAMES = new Set([
+  "ai. additionally",
   "aching out",
   "a while",
   "ai-related content at the moment",
@@ -262,6 +263,8 @@ const KNOWN_POLLUTED_NAMES = new Set([
   "china. as you know",
   "completing this task",
   "direct communication",
+  "daniel cropley",
+  "dr �",
   "feedback. on sat",
   "getting back to me",
   "getting back to us",
@@ -270,11 +273,13 @@ const KNOWN_POLLUTED_NAMES = new Set([
   "limited margins",
   "mureka or other brands",
   "my side",
+  "musaandstellaa",
   "now",
   "not getting back earlier",
   "sending that over",
   "sharing her rate with us",
   "sharing this",
+  "sharing that",
   "talented creators like you",
   "a creator like you",
   "creators whose content celebrates beauty",
@@ -297,6 +302,16 @@ const KNOWN_POLLUTED_NAMES = new Set([
   "very tight margins",
   "you in future projects",
 ]);
+
+const KNOWN_AGENCY_BRAND_MIXUPS = [
+  "ahacreators",
+  "aquamindagency",
+  "etctalent",
+  "famesters",
+  "schoolofinfluence",
+  "tatam",
+  "tec-do",
+];
 
 const SUSPICIOUS_NAME_PATTERNS = [
   /\b(getting back|not getting|thank(s| you)|following up|reaching out|reply|respond|heard back)\b/i,
@@ -634,10 +649,15 @@ function buildOpportunityExport(table, options) {
 
 function evaluateOpportunityRow(row, headerMap, options) {
   const opportunityId = getCell(row, headerMap, "Opportunity ID");
-  const brandName = getCell(row, headerMap, "Brand Name");
+  const subject = getCell(row, headerMap, "Source Email Subject");
+  const campaignSummary = getCell(row, headerMap, "Campaign Summary");
+  const originalBrandName = getCell(row, headerMap, "Brand Name");
+  const brandName = recoverBrandFromEvidence(
+    originalBrandName,
+    `${subject}\n${campaignSummary}`,
+  );
   const sourceOrganizationName = getCell(row, headerMap, "Source Organization Name");
   const sourceOrganizationType = getCell(row, headerMap, "Source Organization Type");
-  const subject = getCell(row, headerMap, "Source Email Subject");
   const confidenceScore = numberCell(row, headerMap, "Confidence Score");
   const needsReview = truthy(getCell(row, headerMap, "Needs Human Review"));
   const status = getCell(row, headerMap, "Opportunity Status");
@@ -654,7 +674,6 @@ function evaluateOpportunityRow(row, headerMap, options) {
   const opportunityType = getCell(row, headerMap, "Opportunity Type");
   const budgetFloorConcern = getCell(row, headerMap, "Budget Floor Concern") || getCell(row, headerMap, "Minimum Budget Concern");
   const disqualifierFlags = getCell(row, headerMap, "Disqualifier Flags");
-  const campaignSummary = getCell(row, headerMap, "Campaign Summary");
   const affiliateCommission = getCell(row, headerMap, "Affiliate Commission");
 
   const brandReviewReasons = brandNameReviewReasons(brandName, { subject });
@@ -770,8 +789,29 @@ function evaluateOpportunityRow(row, headerMap, options) {
       "GPT Export Tier": tier,
       "GPT Match Use": matchUse,
       "GPT Export Notes": notes.join(" "),
+      "Brand Name": brandName,
+      "Opportunity Name": `${brandName} ${opportunityType}`,
     }),
   };
+}
+
+function canonicalizeBrandName(value) {
+  if (/\bcapcut\b/i.test(value)) return "CapCut";
+  if (/\bxtool\b/i.test(value)) return "xTool";
+  return value;
+}
+
+function recoverBrandFromEvidence(value, text) {
+  const patterns = [
+    /on behalf of\s+([A-Z][A-Za-z0-9&'.-]*(?:\s+[A-Z][A-Za-z0-9&'.-]*){0,3})/,
+    /great fit for\s+([A-Z][A-Za-z0-9&'.-]*(?:\s+[A-Z][A-Za-z0-9&'.-]*){0,2})/,
+    /partnering directly with\s+([A-Z][A-Za-z0-9&'.-]*(?:\s+[A-Z][A-Za-z0-9&'.-]*){0,2})/,
+  ];
+  for (const pattern of patterns) {
+    const match = String(text ?? "").match(pattern);
+    if (match?.[1]) return canonicalizeBrandName(match[1].replace(/[.,:;!?]+$/, ""));
+  }
+  return canonicalizeBrandName(value);
 }
 
 function buildReviewResult(row, headerMap, { score, reason, audit }) {
@@ -928,7 +968,11 @@ function buildMatchingIntelligenceRows(opportunities, { brandRows, agencyRows, s
     if (brand && brandNameReviewReasons(brand, { subject: row["Source Email Subject"] }).length === 0) {
       addMatchingRecord(brandGroups, brand, row);
     }
-    if (agency && isUsefulSource(agency, row["Source Organization Type"])) {
+    if (
+      agency &&
+      isAgencySourceType(row["Source Organization Type"]) &&
+      isUsefulSource(agency, row["Source Organization Type"])
+    ) {
       addMatchingRecord(agencyGroups, agency, row);
     }
   }
@@ -1415,11 +1459,26 @@ function buildEntityGroups(opportunities) {
     if (brand && brandNameReviewReasons(brand, { subject: row["Source Email Subject"] }).length === 0) {
       addMatchingRecord(brandGroups, brand, row);
     }
-    if (agency && isUsefulSource(agency, row["Source Organization Type"])) {
+    if (
+      agency &&
+      isAgencySourceType(row["Source Organization Type"]) &&
+      isUsefulSource(agency, row["Source Organization Type"])
+    ) {
       addMatchingRecord(agencyGroups, agency, row);
     }
   }
   return { brandGroups, agencyGroups };
+}
+
+function isAgencySourceType(value) {
+  return new Set([
+    "agency",
+    "pr agency",
+    "talent platform",
+    "platform",
+    "record label",
+    "affiliate network",
+  ]).has(normalize(value));
 }
 
 function commercialMetrics(records) {
@@ -1700,6 +1759,23 @@ function brandNameReviewReasons(brandName, { subject } = {}) {
   }
   if (/\b(agency|mcn|media|marketing|talent|creator)\b/i.test(brandName) && !/\b(beauty|games|app|ai|shop|official)\b/i.test(brandName)) {
     reasons.push("Brand name looks like an agency/source, not a brand.");
+  }
+  if (KNOWN_AGENCY_BRAND_MIXUPS.some((name) => normalized.startsWith(name))) {
+    reasons.push("Brand name is a known agency/source, not a brand.");
+  }
+  if (/\uFFFD|�/.test(brandName)) reasons.push("Brand name contains damaged text.");
+  if (/^(youtube|instagram|tiktok|facebook|u\.s|usa)$/i.test(String(brandName).trim())) {
+    reasons.push("Brand name is a platform or country label, not a company.");
+  }
+  if (
+    /^[^A-Za-z0-9]/.test(String(brandName).trim()) ||
+    /!$/.test(String(brandName).trim()) ||
+    /\b(collab(?:oration)?|campaign|pitch competition|opportunity|invitation|invite|for you|versions of)\b/i.test(brandName) ||
+    /\b(sending over|invoice|who|up for grabs)\b/i.test(brandName) ||
+    /^a\s+(founder|strong|new|potential|paid|creator|brand)\b/i.test(brandName) ||
+    /^ai\s+(healthcare|dating|chat|photo|video|productivity)\s+app$/i.test(brandName)
+  ) {
+    reasons.push("Brand name looks like an email phrase, not a named company.");
   }
   if (subject && compact.length > 5 && compactKey(subject).includes(compact) && wordCount(brandName) > 3) {
     reasons.push("Brand name looks copied from the email subject.");

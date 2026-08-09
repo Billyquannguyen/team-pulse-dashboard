@@ -244,6 +244,10 @@ Run date: ${new Date().toISOString()}
 - New agencies discovered: ${formatMetric(decisionMetrics.newAgenciesDiscoveredCount)}
 - Review-before-use export rows: ${formatMetric(outputCounts.reviewCandidates)}
 
+### Actionable New Opportunities
+
+${formatRankedList(decisionMetrics.actionableOpportunities, (item) => `${item.brand}: ${item.opportunityType}; ${item.contactName} <${item.contactEmail}>; ${item.budget}; ${item.deadline}; ${item.sourceLink}`)}
+
 ### Top 20 New Brands Discovered
 
 ${formatRankedList(decisionMetrics.topNewBrands, (item) => `${item.name} (${item.notes})`)}
@@ -298,6 +302,9 @@ async function buildDecisionMetrics({ exportDir, backupManifest, metrics }) {
   const priorityRows = await readCsvIfExists(
     path.join(exportDir, "opportunity-priority-intelligence.csv"),
   );
+  const opportunityRows = await readCsvIfExists(
+    path.join(exportDir, "creator-brand-opportunities.csv"),
+  );
   const oldNames = backupManifest
     ? await readBackupEntitySets(backupManifest)
     : emptyBackupEntitySets();
@@ -319,19 +326,72 @@ async function buildDecisionMetrics({ exportDir, backupManifest, metrics }) {
       id && !oldOpportunityIds.has(compactKey(id)) && (priorityScore >= 80 || tier === "Tier 1")
     );
   });
+  const priorityById = new Map(
+    priorityRows.map((row) => [compactKey(row["Opportunity ID"]), row]),
+  );
+  const actionableOpportunities = opportunityRows
+    .filter((row) => {
+      const id = row["Opportunity ID"]?.trim();
+      return id && !oldOpportunityIds.has(compactKey(id)) && isActionableOpportunity(row);
+    })
+    .map((row) => toActionableOpportunity(row, priorityById.get(compactKey(row["Opportunity ID"]))))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 8);
 
   return {
-    newBrandsDiscoveredCount: Number.isFinite(metrics.brandsCreated)
-      ? metrics.brandsCreated
-      : newBrands.length,
-    newAgenciesDiscoveredCount: Number.isFinite(metrics.agenciesCreated)
-      ? metrics.agenciesCreated
-      : newAgencies.length,
+    newBrandsDiscoveredCount: newBrands.length,
+    newAgenciesDiscoveredCount: newAgencies.length,
     priorityAAddedCount: priorityAAdded.length,
     reviewMovedCount: metrics.reviewItemsCreated,
     topNewBrands: topEntities(newBrands, "Brand"),
     topNewAgencies: topEntities(newAgencies, "Agency"),
+    actionableOpportunities,
   };
+}
+
+function isActionableOpportunity(row) {
+  const brand = row["Brand Name"]?.trim();
+  const contactEmail = row["Contact Email"]?.trim();
+  const sourceLink = row["Source Email Link"]?.trim();
+  const needsReview = normalizeText(row["Needs Human Review"]);
+  const status = normalizeText(row["Opportunity Status"]);
+  const relevance = normalizeText(row["Opportunity Relevance Type"]);
+  return (
+    brand &&
+    contactEmail &&
+    contactEmail !== "Unknown" &&
+    sourceLink &&
+    needsReview !== "true" &&
+    (relevance.includes("active") || ["open", "negotiating"].includes(status)) &&
+    !["expired", "closed", "lost"].includes(status) &&
+    !/review before use/i.test(row["GPT Export Tier"] ?? "")
+  );
+}
+
+function toActionableOpportunity(row, priorityRow = {}) {
+  const budget = [row["Budget Currency"], row["Budget Amount"]]
+    .filter((value) => value && value !== "Unknown")
+    .join(" ");
+  return {
+    brand: row["Brand Name"]?.trim() || "Unknown brand",
+    contactName: row["Contact Name"]?.trim() || "Unknown contact",
+    contactEmail: row["Contact Email"]?.trim() || "Unknown",
+    sourceOrganization: row["Source Organization Name"]?.trim() || "Unknown source",
+    opportunityType: row["Opportunity Type"]?.trim() || "Opportunity",
+    summary: row["Campaign Summary"]?.trim() || row["Source Email Subject"]?.trim() || "No summary captured",
+    budget: budget || row["Budget Notes"]?.trim() || "budget not stated",
+    deadline: cleanDeadline(row["Timeline / Deadline"]),
+    sourceLink: row["Source Email Link"]?.trim() || "",
+    score: Number(priorityRow?.["Priority Score"]) || Number(row["Confidence Score"]) || 0,
+  };
+}
+
+function cleanDeadline(value) {
+  const text = String(value ?? "").replace(/&(?:#39|apos);/g, "'").replace(/\s+/g, " ").trim();
+  if (!text || text.length > 90) return "deadline not stated";
+  const hasDate = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\s+\d{1,2}/i.test(text);
+  const hasBoundedWindow = /\b(?:by|before|deadline|due|within)\b.{0,45}\b(?:\d{1,2}[\/.\-]\d{1,2}|\d+\s+(?:hours?|days?|weeks?))\b/i.test(text);
+  return hasDate || hasBoundedWindow ? text : "deadline not stated";
 }
 
 function emptyBackupEntitySets() {
@@ -670,29 +730,30 @@ function buildDiscordMessage(artifact) {
   const tierCounts = artifact.tierCounts ?? {};
   const runUrl = githubRunUrl();
 
-  return [
-    "**Team Billion Opportunity Intelligence monthly refresh is ready**",
-    "",
-    `Emails scanned: ${formatMetric(metrics.emailsScanned)}`,
-    `New opportunities: ${formatMetric(metrics.opportunitiesCreated)}`,
-    `Updated opportunities: ${formatMetric(metrics.opportunitiesUpdated)}`,
-    `Priority A added: ${formatMetric(decision.priorityAAddedCount)}`,
-    `Moved to review: ${formatMetric(decision.reviewMovedCount)}`,
-    `New brands: ${formatMetric(decision.newBrandsDiscoveredCount)}`,
-    `New agencies: ${formatMetric(decision.newAgenciesDiscoveredCount)}`,
-    "",
-    "**Priority distribution**",
-    compactCounts(tierCounts),
-    "",
-    "**Top new brands**",
-    compactEntityList(decision.topNewBrands),
-    "",
-    "**Top new agencies**",
-    compactEntityList(decision.topNewAgencies),
-    "",
-    "No files are attached in Discord. Billy gets the ZIP + full summary by email.",
-    `Run: ${runUrl}`,
-  ].join("\n");
+  for (let itemLimit = 4; itemLimit >= 1; itemLimit -= 1) {
+    const message = [
+      "**Team Billion Opportunity Intelligence monthly refresh is ready**",
+      "",
+      `Emails scanned: ${formatMetric(metrics.emailsScanned)}`,
+      `New opportunities: ${formatMetric(metrics.opportunitiesCreated)}`,
+      `Updated opportunities: ${formatMetric(metrics.opportunitiesUpdated)}`,
+      `Priority A added: ${formatMetric(decision.priorityAAddedCount)}`,
+      `Moved to review: ${formatMetric(decision.reviewMovedCount)}`,
+      `New brands: ${formatMetric(decision.newBrandsDiscoveredCount)}`,
+      `New agencies: ${formatMetric(decision.newAgenciesDiscoveredCount)}`,
+      "",
+      "**Priority distribution**",
+      compactCounts(tierCounts),
+      "",
+      "**Actionable new opportunities**",
+      compactOpportunityList(decision.actionableOpportunities, itemLimit),
+      "",
+      "No files are attached in Discord. Billy gets the ZIP + full summary by email.",
+      `Run: ${runUrl}`,
+    ].join("\n");
+    if (message.length <= 1950) return message;
+  }
+  return `Monthly Opportunity Intelligence refresh is ready. The full actionable summary was emailed to Billy. Run: ${runUrl}`;
 }
 
 function compactCounts(counts) {
@@ -706,6 +767,17 @@ function compactEntityList(items) {
   return items
     .slice(0, 8)
     .map((item, index) => `${index + 1}. ${item.name}`)
+    .join("\n");
+}
+
+function compactOpportunityList(items, limit = 4) {
+  if (!items?.length) return "No verified new opportunity with a contact email was captured this run.";
+  return items
+    .slice(0, limit)
+    .map((item, index) => {
+      const summary = String(item.summary).replace(/\s+/g, " ").slice(0, 100);
+      return `${index + 1}. **${item.brand}**: ${item.opportunityType} via ${item.contactName} (${item.contactEmail}) at ${item.sourceOrganization}. ${summary}. Budget: ${item.budget}; deadline: ${item.deadline}. [Open email](${item.sourceLink})`;
+    })
     .join("\n");
 }
 

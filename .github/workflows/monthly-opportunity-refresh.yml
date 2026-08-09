@@ -30,6 +30,9 @@ jobs:
       GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
       GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
       OPPORTUNITY_DATABASE_SPREADSHEET_ID: ${{ secrets.OPPORTUNITY_DATABASE_SPREADSHEET_ID }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_DEFAULT_MODEL: ${{ secrets.OPENROUTER_DEFAULT_MODEL }}
+      OPENROUTER_FALLBACK_MODEL: ${{ secrets.OPENROUTER_FALLBACK_MODEL }}
       EMAIL_PROVIDER_API_KEY: ${{ secrets.EMAIL_PROVIDER_API_KEY }}
       MONTHLY_REFRESH_EMAIL_TO: ${{ secrets.MONTHLY_REFRESH_EMAIL_TO }}
       MONTHLY_REFRESH_EMAIL_FROM: ${{ secrets.MONTHLY_REFRESH_EMAIL_FROM }}
@@ -112,6 +115,7 @@ jobs:
             echo "::endgroup::"
           }
 
+          run_stage "Extraction safety tests" npm run opportunity:self-test
           run_stage "Credential validation" npm run opportunity:validate-credentials
           run_stage "Preflight checks" npm run opportunity:preflight
           run_stage "Create backup" npm run opportunity:create-backup
