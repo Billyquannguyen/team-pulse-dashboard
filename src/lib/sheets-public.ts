@@ -1,5 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { IGNORED_OUTREACH_TAB_NAMES, SIGNED_CREATORS_TAB_NAME } from "@/data/sheetConfig";
+import {
+  CREATOR_ROSTER_ASSET_OWNER_NAMES,
+  IGNORED_OUTREACH_TAB_NAMES,
+  SIGNED_CREATORS_TAB_NAME,
+} from "@/data/sheetConfig";
 import { team as fallbackTeam, type Teammate } from "@/data/team";
 import {
   deals as fallbackDeals,
@@ -312,6 +316,20 @@ function getSystemTabSkipReason(sheetName: string) {
 
 function memberMatchKey(value: string) {
   return canonicalMemberName(value).toLowerCase();
+}
+
+function isCreatorRosterAssetOwner(value: string) {
+  const normalized = normalizeSheetLabel(value);
+
+  return CREATOR_ROSTER_ASSET_OWNER_NAMES.some(
+    (ownerName) => normalized === normalizeSheetLabel(ownerName),
+  );
+}
+
+function shouldIncludeCreatorRosterRow(creator: Creator, activeMemberNames: Set<string>) {
+  const ownerName = canonicalMemberName(creator.owner);
+
+  return activeMemberNames.has(ownerName) || isCreatorRosterAssetOwner(ownerName);
 }
 
 function getInitials(name: string) {
@@ -1072,7 +1090,7 @@ async function readCreatorSourcingData(
   const creators = normalizeCreatorRows([
     signedCreatorsRows.headers,
     ...signedCreatorsRows.rows,
-  ]).filter((creator) => activeMemberNames.has(canonicalMemberName(creator.owner)));
+  ]).filter((creator) => shouldIncludeCreatorRosterRow(creator, activeMemberNames));
 
   logDashboardDataFlow("creator sourcing rows normalized", {
     outreachSheets: readableOutreachSheets.map((sheet) => ({

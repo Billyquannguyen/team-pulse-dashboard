@@ -5,6 +5,7 @@ import {
   Check,
   Copy,
   Database,
+  Eye,
   Loader2,
   RotateCcw,
   Search,
@@ -16,6 +17,15 @@ import {
 import { AppHeader } from "@/components/layout/AppHeader";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { enrichApolloContacts, searchApolloContacts, type ApolloContactResult } from "@/lib/apollo";
 import { contactDatabaseQuery, upsertContactDatabaseContacts } from "@/lib/contact-database";
 import type { ContactDatabaseContact } from "@/lib/contact-database";
@@ -561,8 +571,9 @@ function findDuplicateContact(contact: ContactRow, contacts: ContactDatabaseCont
   const sameBrandFirstNameMatches = contacts.filter(
     (databaseContact) =>
       compactKey(databaseContact.brandName) === compactKey(contact.brandName) &&
-      compactKey(contactFirstName(databaseContact.contactName, databaseContact.contactFirstName)) ===
-        firstName,
+      compactKey(
+        contactFirstName(databaseContact.contactName, databaseContact.contactFirstName),
+      ) === firstName,
   );
 
   return sameBrandFirstNameMatches.length === 1 ? sameBrandFirstNameMatches[0] : undefined;
@@ -759,6 +770,8 @@ function BrandFinderPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [isDirectSearching, setIsDirectSearching] = useState(false);
   const [isCreatingDrafts, setIsCreatingDrafts] = useState(false);
+  const [draftPreviewOpen, setDraftPreviewOpen] = useState(false);
+  const [draftPreviewContactId, setDraftPreviewContactId] = useState("");
   const [searchMessage, setSearchMessage] = useState("");
   const [searchError, setSearchError] = useState("");
   const [uploadMessage, setUploadMessage] = useState("");
@@ -816,6 +829,10 @@ function BrandFinderPage() {
     () => selectedDraftCandidates.filter((contact) => contact.email),
     [selectedDraftCandidates],
   );
+  const draftPreviewContact =
+    selectedContacts.find((contact) => contact.id === draftPreviewContactId) ??
+    selectedContacts[0] ??
+    null;
   const skippedNoEmailCount = selectedDraftCandidates.length - selectedContacts.length;
   const duplicateContactCount = contacts.filter((contact) =>
     Boolean(contactDuplicateLabel(contact, databaseContacts)),
@@ -1188,6 +1205,15 @@ function BrandFinderPage() {
     } finally {
       setIsCreatingDrafts(false);
     }
+  };
+
+  const openDraftPreview = () => {
+    if (selectedContacts.length === 0) return;
+
+    setDraftPreviewContactId((current) =>
+      selectedContacts.some((contact) => contact.id === current) ? current : selectedContacts[0].id,
+    );
+    setDraftPreviewOpen(true);
   };
 
   const resetWorkspace = () => {
@@ -1602,7 +1628,6 @@ function BrandFinderPage() {
                 </button>
               </div>
             </details>
-
           </Panel>
 
           <Panel title="Email Template" subtitle={subjectTemplate || "No subject set"}>
@@ -1658,23 +1683,34 @@ function BrandFinderPage() {
                 ready for Gmail
                 {skippedNoEmailCount > 0 ? `, ${skippedNoEmailCount} need enrich` : ""}.
               </div>
-              <button
-                type="button"
-                disabled={isCreatingDrafts || selectedContacts.length === 0}
-                onClick={() => void createDrafts()}
-                className="tb-action inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isCreatingDrafts ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                {selectedContacts.length > 0
-                  ? `Create ${selectedContacts.length} Gmail draft${
-                      selectedContacts.length === 1 ? "" : "s"
-                    }`
-                  : "Create Gmail drafts"}
-              </button>
+              <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+                <button
+                  type="button"
+                  disabled={selectedContacts.length === 0}
+                  onClick={openDraftPreview}
+                  className="tb-action inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-border bg-background px-4 text-sm font-bold text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Eye className="h-4 w-4" />
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  disabled={isCreatingDrafts || selectedContacts.length === 0}
+                  onClick={() => void createDrafts()}
+                  className="tb-action inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isCreatingDrafts ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  {selectedContacts.length > 0
+                    ? `Create ${selectedContacts.length} Gmail draft${
+                        selectedContacts.length === 1 ? "" : "s"
+                      }`
+                    : "Create Gmail drafts"}
+                </button>
+              </div>
             </div>
           </Panel>
 
@@ -1693,6 +1729,80 @@ function BrandFinderPage() {
           </Panel>
         </div>
       </section>
+
+      <Dialog open={draftPreviewOpen} onOpenChange={setDraftPreviewOpen}>
+        <DialogContent className="max-h-[88vh] w-[calc(100%-2rem)] max-w-2xl overflow-hidden rounded-3xl border-border p-0 sm:rounded-3xl">
+          <DialogHeader className="border-b border-border px-5 pb-4 pt-5 pr-12 sm:px-6 sm:pt-6">
+            <DialogTitle>Gmail draft preview</DialogTitle>
+            <DialogDescription>
+              Check the personalized draft for each selected contact before creating anything.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="min-h-0 overflow-y-auto px-5 sm:px-6">
+            {draftPreviewContact && (
+              <div className="space-y-4 pb-2">
+                <label className="block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                  Preview contact
+                  <select
+                    value={draftPreviewContact.id}
+                    onChange={(event) => setDraftPreviewContactId(event.target.value)}
+                    className="mt-2 h-11 w-full rounded-2xl border border-border bg-card px-3 text-sm font-semibold normal-case tracking-normal text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    {selectedContacts.map((contact) => (
+                      <option key={contact.id} value={contact.id}>
+                        {contact.contactName || contact.email} · {contact.brandName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
+                  <div className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-3 gap-y-2 border-b border-border px-4 py-4 text-sm sm:px-5">
+                    <span className="font-semibold text-muted-foreground">To</span>
+                    <span className="min-w-0 break-words font-medium">
+                      {draftPreviewContact.email}
+                    </span>
+                    <span className="font-semibold text-muted-foreground">Subject</span>
+                    <span className="min-w-0 break-words font-semibold">
+                      {fillTemplate(subjectTemplate, draftPreviewContact)}
+                    </span>
+                  </div>
+
+                  <div className="px-4 py-5 sm:px-5">
+                    <div className="whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
+                      {fillTemplate(bodyTemplate, draftPreviewContact).trim()}
+                    </div>
+                    <div className="mt-2 border-t border-dashed border-border pt-3">
+                      <div className="text-xs font-bold text-muted-foreground">Gmail signature</div>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        The connected Gmail account&apos;s default signature will be inserted
+                        directly below the message.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-center text-xs font-medium text-muted-foreground">
+                  Previewing {selectedContacts.indexOf(draftPreviewContact) + 1} of{" "}
+                  {selectedContacts.length}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t border-border bg-muted/30 px-5 py-4 sm:px-6">
+            <DialogClose asChild>
+              <button
+                type="button"
+                className="tb-action inline-flex h-10 items-center justify-center rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground hover:opacity-90"
+              >
+                Done
+              </button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -52,6 +52,10 @@ import {
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
 import { addNativeExcelCheckboxes } from "@/lib/excel-native-checkboxes";
+import {
+  pitchingSheetExportFont,
+  pitchingSheetExportPalette,
+} from "@/lib/pitching-sheet-export-style";
 
 export const Route = createFileRoute("/pitching-sheets")({
   head: () => ({
@@ -569,16 +573,8 @@ function PitchingSheetsPage() {
 
   const downloadRows = async (rows: PitchRow[], columns: PreviewColumn<PitchRow>[]) => {
     const ExcelJS = await import("exceljs");
-    const exportPalette = {
-      navy: "FF29496D",
-      aqua: "FFBDFBFF",
-      aquaSoft: "FFE8FAFC",
-      rowAlt: "FFF6FBFD",
-      white: "FFFFFFFF",
-      grid: "FFD8E6EC",
-      text: "FF1F2E3D",
-      link: "FF1F6FAE",
-    };
+    const exportFont = pitchingSheetExportFont;
+    const exportPalette = pitchingSheetExportPalette;
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Team Billion";
     workbook.created = new Date();
@@ -605,14 +601,16 @@ function PitchingSheetsPage() {
       from: { row: 1, column: 1 },
       to: { row: Math.max(1, rows.length + 1), column: columns.length },
     };
+    worksheet.properties.defaultRowHeight = 34;
     const header = worksheet.getRow(1);
     header.height = 40;
-    header.eachCell((cell) => {
+    for (let columnNumber = 1; columnNumber <= columns.length; columnNumber += 1) {
+      const cell = header.getCell(columnNumber);
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: exportPalette.navy } };
-      cell.font = { name: "Aptos", size: 14, bold: true, color: { argb: exportPalette.white } };
+      cell.font = { ...exportFont, bold: true, color: { argb: exportPalette.white } };
       cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
       cell.border = { bottom: { style: "medium", color: { argb: exportPalette.aqua } } };
-    });
+    }
 
     const interestedIndex = columns.findIndex((column) => column.key === "interested") + 1;
     const editableKeys = new Set(["interested", "rate", "deliverables", "comments"]);
@@ -620,13 +618,14 @@ function PitchingSheetsPage() {
       columns.filter((column) => column.label.includes("Link")).map((column) => column.key),
     );
 
-    worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
+    for (let rowNumber = 2; rowNumber <= rows.length + 1; rowNumber += 1) {
+      const row = worksheet.getRow(rowNumber);
       row.height = 34;
-      row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+      for (let columnNumber = 1; columnNumber <= columns.length; columnNumber += 1) {
+        const cell = row.getCell(columnNumber);
         const column = columns[columnNumber - 1];
         const rawValue = column?.value(rows[rowNumber - 2]);
-        cell.font = { name: "Aptos", size: 14, color: { argb: exportPalette.text } };
+        cell.font = { ...exportFont, color: { argb: exportPalette.text } };
         cell.alignment = {
           vertical: "middle",
           horizontal:
@@ -653,20 +652,19 @@ function PitchingSheetsPage() {
         if (hyperlink) {
           cell.value = hyperlink;
           cell.font = {
-            name: "Aptos",
-            size: 14,
+            ...exportFont,
             color: { argb: exportPalette.link },
             underline: true,
           };
         }
-      });
+      }
       if (interestedIndex > 0) {
         const interestedCell = row.getCell(interestedIndex);
         interestedCell.value = false;
-        interestedCell.font = { name: "Aptos", size: 14, color: { argb: exportPalette.text } };
+        interestedCell.font = { ...exportFont, color: { argb: exportPalette.text } };
         interestedCell.alignment = { horizontal: "center", vertical: "middle" };
       }
-    });
+    }
 
     const buffer = await workbook.xlsx.writeBuffer();
     const exportBuffer =

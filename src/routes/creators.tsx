@@ -6,7 +6,6 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { OutreachSummaryCard } from "@/components/dashboard/OutreachSummaryCard";
 import { DashboardSelectField } from "@/components/ui/dashboard-select";
 import { creators, type CreatorRelationship } from "@/data/creators";
-import { team as fallbackTeam } from "@/data/team";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
 
@@ -41,10 +40,6 @@ function CreatorsPage() {
     () => (data ? data.creators : canUseLocalFallback ? creators : []),
     [canUseLocalFallback, data],
   );
-  const team = useMemo(
-    () => data?.team ?? (canUseLocalFallback ? fallbackTeam : []),
-    [canUseLocalFallback, data?.team],
-  );
   const sourceLabel =
     data?.source === "error"
       ? "Google Sheets connection error"
@@ -54,8 +49,8 @@ function CreatorsPage() {
           ? "Demo fallback data"
           : "Loading Sheet";
   const owners = useMemo(
-    () => ["All owners", ...uniqueSorted(team.map((member) => member.name))],
-    [team],
+    () => ["All owners", ...uniqueSorted(liveCreators.map((creator) => creator.owner))],
+    [liveCreators],
   );
   const platforms = useMemo(
     () => ["All platforms", ...uniqueSorted(liveCreators.map((creator) => creator.platform))],

@@ -1,5 +1,6 @@
 export const SIGNED_CREATORS_TAB_NAME = "Signed creators ";
 export const IGNORED_OUTREACH_TAB_NAMES = ["Ex-managers", "Signed creators"];
+export const CREATOR_ROSTER_ASSET_OWNER_NAMES = ["Stride non-exclusive"];
 export const SHEET_HEADER_ROW_NUMBER = 1;
 
 export type DashboardDealField =

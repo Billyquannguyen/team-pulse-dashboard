@@ -140,8 +140,8 @@ function signatureToPlainText(value: string) {
 function buildRawMessage(draft: GmailDraftInput, signatureHtml: string) {
   const boundary = `tb-brand-finder-${crypto.randomUUID()}`;
   const textSignature = signatureToPlainText(signatureHtml);
-  const plainTextBody = `${draft.body.trim()}\n\n${textSignature}`;
-  const htmlBody = `${plainTextToHtml(draft.body.trim())}<br><br>${signatureHtml}`;
+  const plainTextBody = `${draft.body.trim()}\n${textSignature}`;
+  const htmlBody = `${plainTextToHtml(draft.body.trim())}<div>${signatureHtml}</div>`;
   const message = [
     `To: ${sanitizeHeader(draft.to)}`,
     `Subject: ${sanitizeHeader(draft.subject)}`,

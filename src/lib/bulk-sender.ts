@@ -290,6 +290,34 @@ function sanitizeEmailHtml(value: string) {
     .replace(/\s(href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\2/gi, ' $1="#"');
 }
 
+function trimTrailingEmailSpacing(value: string) {
+  let result = value.trim();
+  let previous = "";
+  while (result !== previous) {
+    previous = result;
+    result = result
+      .replace(/(?:\s|&nbsp;|<br\s*\/?>)+$/gi, "")
+      .replace(/<(div|p)(?:\s[^>]*)?>\s*(?:&nbsp;|<br\s*\/?>|\s)*<\/\1>\s*$/gi, "")
+      .trim();
+  }
+  return result;
+}
+
+function signatureToPlainText(value: string) {
+  return value
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .replace(/<\/(div|p|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;/gi, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function base64Url(value: string) {
   return Buffer.from(value, "utf8")
     .toString("base64")
@@ -300,7 +328,9 @@ function base64Url(value: string) {
 
 function buildMimeMessage(draft: DraftInput, signatureHtml: string) {
   const boundary = `tb-bulk-${crypto.randomUUID()}`;
-  const html = `${sanitizeEmailHtml(draft.htmlBody)}<br><br>${signatureHtml}`;
+  const messageHtml = trimTrailingEmailSpacing(sanitizeEmailHtml(draft.htmlBody));
+  const html = `${messageHtml}<div>${signatureHtml}</div>`;
+  const text = `${draft.textBody.trimEnd()}\n${signatureToPlainText(signatureHtml)}`;
   const message = [
     `To: ${sanitizeHeader(draft.to)}`,
     `Subject: ${sanitizeHeader(draft.subject)}`,
@@ -311,7 +341,7 @@ function buildMimeMessage(draft: DraftInput, signatureHtml: string) {
     'Content-Type: text/plain; charset="UTF-8"',
     "Content-Transfer-Encoding: 8bit",
     "",
-    draft.textBody,
+    text,
     "",
     `--${boundary}`,
     'Content-Type: text/html; charset="UTF-8"',
