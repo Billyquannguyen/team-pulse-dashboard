@@ -438,6 +438,9 @@ async function readActiveBrandsSheetData(
     briefsResult?.rows ?? [],
   );
   const brands = shapeActiveBrands(shaped, agencyTable, contactTable, briefTable);
+  const recordedUpdatedAt = shaped.rows
+    .map((row) => tableValue(shaped, row, "Data Last Updated"))
+    .find(Boolean);
   debug.headerCount = shaped.headers.length;
   debug.rowCount = shaped.rows.length;
 
@@ -458,7 +461,10 @@ async function readActiveBrandsSheetData(
     brands,
     source: "google-sheet",
     links,
-    updatedAt: new Date().toISOString(),
+    updatedAt:
+      recordedUpdatedAt && Number.isFinite(Date.parse(recordedUpdatedAt))
+        ? new Date(recordedUpdatedAt).toISOString()
+        : new Date().toISOString(),
   };
 }
 

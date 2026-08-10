@@ -87,6 +87,17 @@ function formatDate(value: string) {
   }).format(date);
 }
 
+function formatLastUpdated(value: string) {
+  if (!value) return "Update date unavailable";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Update date unavailable";
+  return `Last updated ${new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Europe/Paris",
+  }).format(date)}`;
+}
+
 function agencyKey(brandName: string, agencyName: string) {
   return `${brandName}::${agencyName || "unknown"}`;
 }
@@ -270,6 +281,14 @@ function ActiveBrandsPage() {
             <div>
               <div className="text-sm font-bold">Brand contact system</div>
               <div className="text-xs text-muted-foreground">{sourceLabel}</div>
+              <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
+                <CalendarDays className="h-3 w-3" aria-hidden="true" />
+                <span>
+                  {data?.source === "google-sheet"
+                    ? formatLastUpdated(data.updatedAt)
+                    : "Update date unavailable"}
+                </span>
+              </div>
             </div>
           </div>
           {data?.links.activeBrandsSheetUrl && (

@@ -44,9 +44,14 @@ import {
   type CreatorProfile,
   type CreatorProfileType,
 } from "@/lib/creator-profiles";
-import { matchCurrentRosterExclusiveProfileIds } from "@/lib/creator-roster-matching";
+import {
+  diagnoseRosterExclusiveProfileConflicts,
+  diagnoseUnmatchedRosterExclusives,
+  matchCurrentRosterExclusiveProfileIds,
+} from "@/lib/creator-roster-matching";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
+import { addNativeExcelCheckboxes } from "@/lib/excel-native-checkboxes";
 
 export const Route = createFileRoute("/pitching-sheets")({
   head: () => ({
@@ -277,10 +282,6 @@ function PitchingSheetsPage() {
     () => (rosterReady ? (rosterData?.creators ?? []) : []),
     [rosterData?.creators, rosterReady],
   );
-  const currentRosterExclusiveCount = useMemo(
-    () => currentRosterCreators.filter((creator) => creator.relationship === "Exclusive").length,
-    [currentRosterCreators],
-  );
   const rosterExclusiveProfileIds = useMemo(
     () => matchCurrentRosterExclusiveProfileIds(profiles, currentRosterCreators),
     [currentRosterCreators, profiles],
@@ -288,6 +289,14 @@ function PitchingSheetsPage() {
   const rosterExclusiveProfiles = useMemo(
     () => profiles.filter((profile) => rosterExclusiveProfileIds.has(profile.creatorId)),
     [profiles, rosterExclusiveProfileIds],
+  );
+  const unmatchedRosterExclusives = useMemo(
+    () => diagnoseUnmatchedRosterExclusives(profiles, currentRosterCreators),
+    [currentRosterCreators, profiles],
+  );
+  const rosterExclusiveProfileConflicts = useMemo(
+    () => diagnoseRosterExclusiveProfileConflicts(profiles, currentRosterCreators),
+    [currentRosterCreators, profiles],
   );
 
   const [workflowOpen, setWorkflowOpen] = useState(false);
@@ -436,7 +445,7 @@ function PitchingSheetsPage() {
       {
         key: "interested",
         label: "Interested?",
-        value: () => "☐",
+        value: () => "",
         sortable: false,
         align: "center",
       },
@@ -560,11 +569,21 @@ function PitchingSheetsPage() {
 
   const downloadRows = async (rows: PitchRow[], columns: PreviewColumn<PitchRow>[]) => {
     const ExcelJS = await import("exceljs");
+    const exportPalette = {
+      navy: "FF29496D",
+      aqua: "FFBDFBFF",
+      aquaSoft: "FFE8FAFC",
+      rowAlt: "FFF6FBFD",
+      white: "FFFFFFFF",
+      grid: "FFD8E6EC",
+      text: "FF1F2E3D",
+      link: "FF1F6FAE",
+    };
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Team Billion";
     workbook.created = new Date();
     const worksheet = workbook.addWorksheet("Creator Shortlist", {
-      properties: { tabColor: { argb: "FFFF6B5F" } },
+      properties: { tabColor: { argb: exportPalette.navy } },
       views: [{ state: "frozen", ySplit: 1 }],
     });
 
@@ -587,12 +606,12 @@ function PitchingSheetsPage() {
       to: { row: Math.max(1, rows.length + 1), column: columns.length },
     };
     const header = worksheet.getRow(1);
-    header.height = 34;
+    header.height = 40;
     header.eachCell((cell) => {
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF6B5F" } };
-      cell.font = { name: "Aptos", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: exportPalette.navy } };
+      cell.font = { name: "Aptos", size: 14, bold: true, color: { argb: exportPalette.white } };
       cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-      cell.border = { bottom: { style: "medium", color: { argb: "FFE14E43" } } };
+      cell.border = { bottom: { style: "medium", color: { argb: exportPalette.aqua } } };
     });
 
     const interestedIndex = columns.findIndex((column) => column.key === "interested") + 1;
@@ -603,27 +622,27 @@ function PitchingSheetsPage() {
 
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return;
-      row.height = 28;
+      row.height = 34;
       row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
         const column = columns[columnNumber - 1];
         const rawValue = column?.value(rows[rowNumber - 2]);
-        cell.font = { name: "Aptos", size: 10, color: { argb: "FF23232A" } };
+        cell.font = { name: "Aptos", size: 14, color: { argb: exportPalette.text } };
         cell.alignment = {
           vertical: "middle",
           horizontal:
             column?.align === "center" ? "center" : column?.align === "right" ? "right" : "left",
           wrapText: column?.key === "niche" || column?.key === "comments",
         };
-        cell.border = { bottom: { style: "thin", color: { argb: "FFE8E2DC" } } };
+        cell.border = { bottom: { style: "thin", color: { argb: exportPalette.grid } } };
         cell.fill = {
           type: "pattern",
           pattern: "solid",
           fgColor: {
             argb: editableKeys.has(column?.key)
-              ? "FFFFF7D6"
+              ? exportPalette.aquaSoft
               : rowNumber % 2 === 0
-                ? "FFFFFCF9"
-                : "FFFFFFFF",
+                ? exportPalette.rowAlt
+                : exportPalette.white,
           },
         };
         if (column?.label.includes("Following")) cell.numFmt = "#,##0";
@@ -633,33 +652,32 @@ function PitchingSheetsPage() {
             : null;
         if (hyperlink) {
           cell.value = hyperlink;
-          cell.font = { name: "Aptos", size: 10, color: { argb: "FF2767C6" }, underline: true };
+          cell.font = {
+            name: "Aptos",
+            size: 14,
+            color: { argb: exportPalette.link },
+            underline: true,
+          };
         }
       });
       if (interestedIndex > 0) {
         const interestedCell = row.getCell(interestedIndex);
-        interestedCell.value = "☐";
-        interestedCell.font = { name: "Segoe UI Symbol", size: 15, color: { argb: "FF334155" } };
+        interestedCell.value = false;
+        interestedCell.font = { name: "Aptos", size: 14, color: { argb: exportPalette.text } };
         interestedCell.alignment = { horizontal: "center", vertical: "middle" };
       }
     });
 
-    if (interestedIndex > 0 && rows.length > 0) {
-      worksheet.dataValidations.add(
-        `${worksheet.getColumn(interestedIndex).letter}2:${worksheet.getColumn(interestedIndex).letter}${rows.length + 1}`,
-        {
-          type: "list",
-          allowBlank: false,
-          formulae: ['"☐,☑"'],
-          showErrorMessage: true,
-          errorTitle: "Choose a checkbox value",
-          error: "Select either unchecked or checked.",
-        },
-      );
-    }
-
     const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([new Uint8Array(buffer)], {
+    const exportBuffer =
+      interestedIndex > 0 && rows.length > 0
+        ? await addNativeExcelCheckboxes(new Uint8Array(buffer), {
+            columnLetter: worksheet.getColumn(interestedIndex).letter,
+            firstRow: 2,
+            lastRow: rows.length + 1,
+          })
+        : new Uint8Array(buffer);
+    const blob = new Blob([exportBuffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
     const url = URL.createObjectURL(blob);
@@ -846,16 +864,32 @@ function PitchingSheetsPage() {
           Current roster reminders are unavailable because the Creators sheet is not connected.
           Generating a pitching sheet is paused so exclusives cannot be missed silently.
         </div>
-      ) : currentRosterExclusiveCount > rosterExclusiveProfiles.length ? (
+      ) : unmatchedRosterExclusives.length > 0 || rosterExclusiveProfileConflicts.length > 0 ? (
         <div
           role="status"
           className="rounded-3xl bg-amber-50 px-5 py-4 text-sm text-amber-900 ring-1 ring-amber-200"
         >
-          {currentRosterExclusiveCount - rosterExclusiveProfiles.length} current roster exclusive
-          {currentRosterExclusiveCount - rosterExclusiveProfiles.length === 1
-            ? " needs"
-            : "s need"}{" "}
-          a matching social link in Creator Profiles.
+          <div className="font-semibold">Creator profile matching needs attention</div>
+          <div className="mt-3 space-y-2">
+            {unmatchedRosterExclusives.map((creator) => (
+              <div key={creator.creatorId} className="rounded-xl bg-white/60 px-3 py-2">
+                <span className="font-semibold">{creator.creatorName}</span>
+                <span className="text-amber-800">
+                  {creator.reason === "missing-social-link"
+                    ? " · No TikTok, Instagram or YouTube link is filled in on the Creators sheet."
+                    : " · Their roster social link does not match any Creator Profiles record."}
+                </span>
+              </div>
+            ))}
+            {rosterExclusiveProfileConflicts.map((conflict) => (
+              <div key={conflict.profileId} className="rounded-xl bg-white/60 px-3 py-2">
+                <span className="font-semibold">{conflict.rosterCreatorNames.join(" and ")}</span>
+                <span className="text-amber-800">
+                  {` · Both match the Creator Profiles record “${conflict.profileName}”. Correct or split that profile's social links so each creator has their own record.`}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 

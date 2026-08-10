@@ -33,6 +33,69 @@ function profileSocialKeys(profile: CreatorProfile) {
   ].filter(Boolean);
 }
 
+export type UnmatchedRosterExclusive = {
+  creatorId: string;
+  creatorName: string;
+  reason: "missing-social-link" | "no-matching-profile";
+};
+
+export type RosterExclusiveProfileConflict = {
+  profileId: string;
+  profileName: string;
+  rosterCreatorNames: string[];
+};
+
+export function diagnoseUnmatchedRosterExclusives(
+  profiles: CreatorProfile[],
+  currentCreators: Creator[],
+): UnmatchedRosterExclusive[] {
+  const profileKeys = new Set(profiles.flatMap(profileSocialKeys));
+
+  return currentCreators
+    .filter((creator) => creator.relationship === "Exclusive")
+    .flatMap((creator) => {
+      const socialKeys = creatorSocialKeys(creator);
+      if (socialKeys.some((key) => profileKeys.has(key))) return [];
+
+      return [
+        {
+          creatorId: creator.id,
+          creatorName: creator.handle || creator.id,
+          reason: socialKeys.length === 0 ? "missing-social-link" : "no-matching-profile",
+        } satisfies UnmatchedRosterExclusive,
+      ];
+    });
+}
+
+export function diagnoseRosterExclusiveProfileConflicts(
+  profiles: CreatorProfile[],
+  currentCreators: Creator[],
+): RosterExclusiveProfileConflict[] {
+  const exclusiveCreators = currentCreators.filter(
+    (creator) => creator.relationship === "Exclusive",
+  );
+
+  return profiles.flatMap((profile) => {
+    const profileKeys = profileSocialKeys(profile);
+    const matchedRosterNames = Array.from(
+      new Set(
+        exclusiveCreators
+          .filter((creator) => creatorSocialKeys(creator).some((key) => profileKeys.includes(key)))
+          .map((creator) => creator.handle || creator.id),
+      ),
+    );
+
+    if (matchedRosterNames.length < 2) return [];
+    return [
+      {
+        profileId: profile.creatorId,
+        profileName: profile.creatorName,
+        rosterCreatorNames: matchedRosterNames,
+      },
+    ];
+  });
+}
+
 export function matchCurrentRosterExclusiveProfileIds(
   profiles: CreatorProfile[],
   currentCreators: Creator[],

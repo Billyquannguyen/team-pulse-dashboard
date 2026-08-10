@@ -21,6 +21,7 @@ const ACTIVE_HEADERS = [
   "Record Type",
   "Brand",
   "Agency",
+  "Data Last Updated",
 ];
 const AGENCY_HEADERS = ["Brand", "Agency", "Top Contact Email / WhatsApp", "Contact Active Date"];
 const CONTACT_HEADERS = [
@@ -68,7 +69,7 @@ for (const title of TITLES) {
   if (!byTitle.has(title)) throw new Error(`Missing required sheet: ${title}`);
 }
 
-const active = buildActiveRows(result.brands);
+const active = buildActiveRows(result.brands, result.report?.scannedAt ?? new Date().toISOString());
 const agencyRows = [
   AGENCY_HEADERS,
   ...result.agencies.map((agency) => [
@@ -157,13 +158,13 @@ for (let index = (activeSheet.conditionalFormats?.length ?? 0) - 1; index >= 0; 
 await sheets.batchUpdate(structuralRequests);
 
 await Promise.all([
-  sheets.valuesClear("'Active Contacts'!A:H"),
+  sheets.valuesClear("'Active Contacts'!A:I"),
   sheets.valuesClear("'Agencies'!A:D"),
   sheets.valuesClear("'Contacts'!A:E"),
   sheets.valuesClear("'Briefs'!A:M"),
 ]);
 await sheets.valuesBatchUpdate([
-  { range: `'Active Contacts'!A1:H${active.rows.length}`, majorDimension: "ROWS", values: active.rows },
+  { range: `'Active Contacts'!A1:I${active.rows.length}`, majorDimension: "ROWS", values: active.rows },
   { range: `'Agencies'!A1:D${agencyRows.length}`, majorDimension: "ROWS", values: agencyRows },
   { range: `'Contacts'!A1:E${contactRows.length}`, majorDimension: "ROWS", values: contactRows },
   { range: `'Briefs'!A1:M${briefRows.length}`, majorDimension: "ROWS", values: briefRows },
@@ -183,11 +184,12 @@ await batchRequests(
 
 console.log(JSON.stringify({ ...plan, status: "updated" }, null, 2));
 
-function buildActiveRows(brands) {
+function buildActiveRows(brands, updatedAt) {
   const rows = [ACTIVE_HEADERS];
   const outerGroups = [];
   const innerGroups = [];
   const sheetId = byTitle.get("Active Contacts").properties.sheetId;
+  let updateTimestampWritten = false;
   for (const brand of brands) {
     const brandRowIndex = rows.length;
     rows.push([
@@ -199,7 +201,9 @@ function buildActiveRows(brands) {
       "Brand",
       brand.name,
       "",
+      updateTimestampWritten ? "" : updatedAt,
     ]);
+    updateTimestampWritten = true;
     for (const agency of brand.agencies) {
       const agencyRowIndex = rows.length;
       rows.push([
@@ -321,7 +325,7 @@ function formatRequests(sheetMap, counts) {
     dimensionSize(activeId, "COLUMNS", 4, 5, 190),
     {
       updateDimensionProperties: {
-        range: { sheetId: activeId, dimension: "COLUMNS", startIndex: 5, endIndex: 8 },
+        range: { sheetId: activeId, dimension: "COLUMNS", startIndex: 5, endIndex: 9 },
         properties: { hiddenByUser: true },
         fields: "hiddenByUser",
       },
@@ -357,7 +361,7 @@ function conditionalRule(sheetId, rowCount, formula, format) {
     addConditionalFormatRule: {
       index: 0,
       rule: {
-        ranges: [{ sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: 8 }],
+        ranges: [{ sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: 9 }],
         booleanRule: { condition: { type: "CUSTOM_FORMULA", values: [{ userEnteredValue: formula }] }, format },
       },
     },
@@ -430,5 +434,5 @@ function hasBrief(brief) {
 }
 
 function columnCount(title) {
-  return { "Active Contacts": 8, Agencies: 4, Contacts: 5, Briefs: 13 }[title];
+  return { "Active Contacts": 9, Agencies: 4, Contacts: 5, Briefs: 13 }[title];
 }
