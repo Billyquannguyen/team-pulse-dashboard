@@ -59,13 +59,15 @@ export type SlackLinkAlertResult = {
   alertsSent: number;
   initializedChannels: number;
   matchedMembers: string[];
+  unresolvedMembers: string[];
   error: string | null;
 };
 
 const SLACK_API_URL = "https://slack.com/api";
 const REDIS_KEY_PREFIX = "team-billion:slack-link-alerts:checkpoint";
 const LINK_PATTERN = /(?:https?:\/\/|<https?:\/\/)[^\s<>]+/i;
-const UK_ALERT_HOURS = new Set([10, 12, 13, 17]);
+const UK_ALERT_HOURS = new Set([10, 12, 13, 17, 20]);
+const INITIAL_LOOKBACK_SECONDS = 48 * 60 * 60;
 
 export function isUkSlackLinkAlertHour(date = new Date()) {
   const hour = Number(
@@ -235,25 +237,49 @@ async function resolveConfiguredMembers() {
   const requestedNames = configuredMemberNames();
   const users = await fetchAllSlackUsers();
   const matches = new Map<string, string>();
+  const unresolvedNames: string[] = [];
 
   for (const requestedName of requestedNames) {
     const normalizedRequestedName = normalizeSlackName(requestedName);
-    const matchingUsers = users.filter((user) =>
+    const exactMatches = users.filter((user) =>
       slackUserNames(user).some((name) => normalizeSlackName(name) === normalizedRequestedName),
     );
+    let matchingUsers = exactMatches;
 
     if (matchingUsers.length === 0) {
-      throw new Error(`Could not find Slack member named "${requestedName}".`);
+      const requestedFirstName = normalizedRequestedName.split(" ")[0];
+      matchingUsers = users.filter((user) =>
+        slackUserNames(user).some(
+          (name) => normalizeSlackName(name).split(" ")[0] === requestedFirstName,
+        ),
+      );
+
+      if (matchingUsers.length === 1) {
+        console.warn("[slack-link-alerts] member resolved by unique first name", {
+          requestedName,
+          matchedName: slackUserDisplayName(matchingUsers[0]),
+        });
+      }
     }
-    if (matchingUsers.length > 1) {
-      throw new Error(`More than one Slack member matches "${requestedName}".`);
+
+    if (matchingUsers.length !== 1) {
+      unresolvedNames.push(requestedName);
+      console.warn("[slack-link-alerts] member could not be resolved uniquely", {
+        requestedName,
+        candidateCount: matchingUsers.length,
+      });
+      continue;
     }
 
     const user = matchingUsers[0];
     matches.set(user.id!, slackUserDisplayName(user));
   }
 
-  return matches;
+  if (matches.size === 0) {
+    throw new Error("None of the configured Slack members could be resolved.");
+  }
+
+  return { matches, unresolvedNames };
 }
 
 async function fetchAccessibleConversations(priorityMemberIds: Set<string>) {
@@ -345,10 +371,14 @@ async function postDiscordAlert({
 
 export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
   const initialCheckpoint = (Date.now() / 1000).toFixed(6);
+  const initialLookbackCheckpoint = (
+    Number(initialCheckpoint) - INITIAL_LOOKBACK_SECONDS
+  ).toFixed(6);
   let alertsSent = 0;
   let initializedChannels = 0;
   let checkedChannels = 0;
   let matchedMembers: string[] = [];
+  let unresolvedMembers: string[] = [];
 
   console.info("[slack-link-alerts] sync started", {
     configuredMemberCount: configuredMemberNames().length,
@@ -358,7 +388,9 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
     requiredEnv("SLACK_USER_TOKEN");
     requiredEnv("SLACK_LINK_ALERT_DISCORD_WEBHOOK_URL");
     redisConfig();
-    const memberNamesById = await resolveConfiguredMembers();
+    const memberResolution = await resolveConfiguredMembers();
+    const memberNamesById = memberResolution.matches;
+    unresolvedMembers = memberResolution.unresolvedNames;
     const memberIds = new Set(memberNamesById.keys());
     const conversations = await fetchAccessibleConversations(memberIds);
     matchedMembers = Array.from(memberNamesById.values());
@@ -366,11 +398,10 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
 
     for (const conversation of conversations) {
       const channelId = conversation.id;
-      const checkpoint = await readCheckpoint(channelId);
-      if (!checkpoint) {
-        await writeCheckpoint(channelId, initialCheckpoint);
+      const storedCheckpoint = await readCheckpoint(channelId);
+      const checkpoint = storedCheckpoint ?? initialLookbackCheckpoint;
+      if (!storedCheckpoint) {
         initializedChannels += 1;
-        continue;
       }
 
       const messages = await messagesAfter(channelId, checkpoint);
@@ -393,6 +424,10 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
 
         await writeCheckpoint(channelId, message.ts);
       }
+
+      if (messages.length === 0) {
+        await writeCheckpoint(channelId, initialCheckpoint);
+      }
     }
 
     const result: SlackLinkAlertResult = {
@@ -401,6 +436,7 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
       alertsSent,
       initializedChannels,
       matchedMembers,
+      unresolvedMembers,
       error: null,
     };
     console.info("[slack-link-alerts] sync completed", {
@@ -408,6 +444,7 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
       alertsSent,
       initializedChannels,
       matchedMemberCount: matchedMembers.length,
+      unresolvedMemberCount: unresolvedMembers.length,
     });
     return result;
   } catch (error) {
@@ -425,6 +462,7 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
       alertsSent,
       initializedChannels,
       matchedMembers,
+      unresolvedMembers,
       error: errorMessage,
     };
   }

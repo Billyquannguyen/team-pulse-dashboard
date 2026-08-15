@@ -25,8 +25,10 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiWeeklyGmailOutreachReportRouteImport } from './routes/api/weekly-gmail-outreach-report'
 import { Route as ApiSlackLinkAlertsRouteImport } from './routes/api/slack-link-alerts'
 import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
+import { Route as ApiBulkFollowUpWorkerRouteImport } from './routes/api/bulk-follow-up-worker'
 import { Route as ApiSlackLinkAlertsSlotRouteImport } from './routes/api/slack-link-alerts.$slot'
 import { Route as ApiCalendlyRemindersWebhookRouteImport } from './routes/api/calendly-reminders/webhook'
+import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
 import { Route as ApiAiPersonalReportRouteImport } from './routes/api/ai/personal-report'
 
 const TeamMembersRoute = TeamMembersRouteImport.update({
@@ -110,6 +112,11 @@ const ApiSlackFollowupsRoute = ApiSlackFollowupsRouteImport.update({
   path: '/api/slack-followups',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiBulkFollowUpWorkerRoute = ApiBulkFollowUpWorkerRouteImport.update({
+  id: '/api/bulk-follow-up-worker',
+  path: '/api/bulk-follow-up-worker',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSlackLinkAlertsSlotRoute = ApiSlackLinkAlertsSlotRouteImport.update({
   id: '/$slot',
   path: '/$slot',
@@ -121,6 +128,11 @@ const ApiCalendlyRemindersWebhookRoute =
     path: '/api/calendly-reminders/webhook',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiAuthCallbackRoute = ApiAuthCallbackRouteImport.update({
+  id: '/api/auth/callback',
+  path: '/api/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAiPersonalReportRoute = ApiAiPersonalReportRouteImport.update({
   id: '/api/ai/personal-report',
   path: '/api/ai/personal-report',
@@ -141,10 +153,12 @@ export interface FileRoutesByFullPath {
   '/leaderboard': typeof LeaderboardRoute
   '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
+  '/api/bulk-follow-up-worker': typeof ApiBulkFollowUpWorkerRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
   '/api/ai/personal-report': typeof ApiAiPersonalReportRoute
+  '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
   '/api/slack-link-alerts/$slot': typeof ApiSlackLinkAlertsSlotRoute
 }
@@ -162,10 +176,12 @@ export interface FileRoutesByTo {
   '/leaderboard': typeof LeaderboardRoute
   '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
+  '/api/bulk-follow-up-worker': typeof ApiBulkFollowUpWorkerRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
   '/api/ai/personal-report': typeof ApiAiPersonalReportRoute
+  '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
   '/api/slack-link-alerts/$slot': typeof ApiSlackLinkAlertsSlotRoute
 }
@@ -184,10 +200,12 @@ export interface FileRoutesById {
   '/leaderboard': typeof LeaderboardRoute
   '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
+  '/api/bulk-follow-up-worker': typeof ApiBulkFollowUpWorkerRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
   '/api/ai/personal-report': typeof ApiAiPersonalReportRoute
+  '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/calendly-reminders/webhook': typeof ApiCalendlyRemindersWebhookRoute
   '/api/slack-link-alerts/$slot': typeof ApiSlackLinkAlertsSlotRoute
 }
@@ -207,10 +225,12 @@ export interface FileRouteTypes {
     | '/leaderboard'
     | '/pitching-sheets'
     | '/team-members'
+    | '/api/bulk-follow-up-worker'
     | '/api/slack-followups'
     | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
     | '/api/ai/personal-report'
+    | '/api/auth/callback'
     | '/api/calendly-reminders/webhook'
     | '/api/slack-link-alerts/$slot'
   fileRoutesByTo: FileRoutesByTo
@@ -228,10 +248,12 @@ export interface FileRouteTypes {
     | '/leaderboard'
     | '/pitching-sheets'
     | '/team-members'
+    | '/api/bulk-follow-up-worker'
     | '/api/slack-followups'
     | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
     | '/api/ai/personal-report'
+    | '/api/auth/callback'
     | '/api/calendly-reminders/webhook'
     | '/api/slack-link-alerts/$slot'
   id:
@@ -249,10 +271,12 @@ export interface FileRouteTypes {
     | '/leaderboard'
     | '/pitching-sheets'
     | '/team-members'
+    | '/api/bulk-follow-up-worker'
     | '/api/slack-followups'
     | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
     | '/api/ai/personal-report'
+    | '/api/auth/callback'
     | '/api/calendly-reminders/webhook'
     | '/api/slack-link-alerts/$slot'
   fileRoutesById: FileRoutesById
@@ -271,10 +295,12 @@ export interface RootRouteChildren {
   LeaderboardRoute: typeof LeaderboardRoute
   PitchingSheetsRoute: typeof PitchingSheetsRoute
   TeamMembersRoute: typeof TeamMembersRoute
+  ApiBulkFollowUpWorkerRoute: typeof ApiBulkFollowUpWorkerRoute
   ApiSlackFollowupsRoute: typeof ApiSlackFollowupsRoute
   ApiSlackLinkAlertsRoute: typeof ApiSlackLinkAlertsRouteWithChildren
   ApiWeeklyGmailOutreachReportRoute: typeof ApiWeeklyGmailOutreachReportRoute
   ApiAiPersonalReportRoute: typeof ApiAiPersonalReportRoute
+  ApiAuthCallbackRoute: typeof ApiAuthCallbackRoute
   ApiCalendlyRemindersWebhookRoute: typeof ApiCalendlyRemindersWebhookRoute
 }
 
@@ -392,6 +418,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSlackFollowupsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/bulk-follow-up-worker': {
+      id: '/api/bulk-follow-up-worker'
+      path: '/api/bulk-follow-up-worker'
+      fullPath: '/api/bulk-follow-up-worker'
+      preLoaderRoute: typeof ApiBulkFollowUpWorkerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/slack-link-alerts/$slot': {
       id: '/api/slack-link-alerts/$slot'
       path: '/$slot'
@@ -404,6 +437,13 @@ declare module '@tanstack/react-router' {
       path: '/api/calendly-reminders/webhook'
       fullPath: '/api/calendly-reminders/webhook'
       preLoaderRoute: typeof ApiCalendlyRemindersWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/callback': {
+      id: '/api/auth/callback'
+      path: '/api/auth/callback'
+      fullPath: '/api/auth/callback'
+      preLoaderRoute: typeof ApiAuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/ai/personal-report': {
@@ -441,10 +481,12 @@ const rootRouteChildren: RootRouteChildren = {
   LeaderboardRoute: LeaderboardRoute,
   PitchingSheetsRoute: PitchingSheetsRoute,
   TeamMembersRoute: TeamMembersRoute,
+  ApiBulkFollowUpWorkerRoute: ApiBulkFollowUpWorkerRoute,
   ApiSlackFollowupsRoute: ApiSlackFollowupsRoute,
   ApiSlackLinkAlertsRoute: ApiSlackLinkAlertsRouteWithChildren,
   ApiWeeklyGmailOutreachReportRoute: ApiWeeklyGmailOutreachReportRoute,
   ApiAiPersonalReportRoute: ApiAiPersonalReportRoute,
+  ApiAuthCallbackRoute: ApiAuthCallbackRoute,
   ApiCalendlyRemindersWebhookRoute: ApiCalendlyRemindersWebhookRoute,
 }
 export const routeTree = rootRouteImport

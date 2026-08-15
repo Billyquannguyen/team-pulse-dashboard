@@ -531,6 +531,37 @@ export async function appendSheetRow(
   });
 }
 
+export async function appendSheetRowRaw(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  sheet: GoogleSheetRef,
+  values: string[],
+) {
+  if (!sheet.sheetName) {
+    throw new Error(`No sheet name was available for ${sheet.memberName}`);
+  }
+
+  const range = quoteSheetName(sheet.sheetName);
+  const url = new URL(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
+      range,
+    )}:append`,
+  );
+  url.searchParams.set("valueInputOption", "RAW");
+  url.searchParams.set("insertDataOption", "INSERT_ROWS");
+
+  await googleSheetsFetch<ValuesWriteResponse>(config, url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ majorDimension: "ROWS", values: [values] }),
+  });
+
+  logGoogleSheets("raw sheet row appended", {
+    sheetName: sheet.sheetName,
+    valueCount: values.length,
+  });
+}
+
 export async function updateSheetRow(
   config: GoogleSheetsConfig,
   spreadsheetId: string,
@@ -567,6 +598,42 @@ export async function updateSheetRow(
   });
 
   logGoogleSheets("sheet row updated", {
+    sheetName: sheet.sheetName,
+    rowNumber,
+    valueCount: values.length,
+  });
+}
+
+export async function updateSheetRowRaw(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  sheet: GoogleSheetRef,
+  rowNumber: number,
+  values: string[],
+) {
+  if (!sheet.sheetName) {
+    throw new Error(`No sheet name was available for ${sheet.memberName}`);
+  }
+  if (!Number.isInteger(rowNumber) || rowNumber < 1) {
+    throw new Error("Invalid row number for Google Sheets update.");
+  }
+
+  const endColumn = columnName(Math.max(values.length - 1, 0));
+  const range = `${quoteSheetName(sheet.sheetName)}!A${rowNumber}:${endColumn}${rowNumber}`;
+  const url = new URL(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
+      range,
+    )}`,
+  );
+  url.searchParams.set("valueInputOption", "RAW");
+
+  await googleSheetsFetch<ValuesWriteResponse>(config, url, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ majorDimension: "ROWS", values: [values] }),
+  });
+
+  logGoogleSheets("raw sheet row updated", {
     sheetName: sheet.sheetName,
     rowNumber,
     valueCount: values.length,
@@ -645,4 +712,38 @@ export async function createSheetTab(
   logGoogleSheets("sheet tab created", {
     sheetName,
   });
+}
+
+export async function deleteSheetRow(
+  config: GoogleSheetsConfig,
+  spreadsheetId: string,
+  sheet: GoogleSheetRef,
+  rowNumber: number,
+) {
+  if (!sheet.gid) throw new Error(`No sheet ID was available for ${sheet.memberName}`);
+  if (!Number.isInteger(rowNumber) || rowNumber < 2) {
+    throw new Error("Invalid data row number for Google Sheets deletion.");
+  }
+
+  const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`);
+  await googleSheetsFetch<BatchUpdateResponse>(config, url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId: Number(sheet.gid),
+              dimension: "ROWS",
+              startIndex: rowNumber - 1,
+              endIndex: rowNumber,
+            },
+          },
+        },
+      ],
+    }),
+  });
+
+  logGoogleSheets("sheet row deleted", { sheetName: sheet.sheetName, rowNumber });
 }

@@ -1,4 +1,4 @@
-import { Link, createFileRoute, getRouteApi, useRouter } from "@tanstack/react-router";
+import { Link, createFileRoute, getRouteApi } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useMemo, useState } from "react";
 import {
@@ -14,7 +14,6 @@ import {
 import { AppHeader } from "@/components/layout/AppHeader";
 import { AssetCard } from "@/components/assets/AssetCard";
 import type { AssetLink } from "@/data/assets";
-import { loginToDashboard } from "@/lib/auth";
 import {
   addTeamAssetLink,
   removeTeamAssetLink,
@@ -72,15 +71,9 @@ function draftFromAsset(asset: AssetLink): ManageDraft | null {
 
 function AssetsPage() {
   const auth = rootRoute.useLoaderData();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const { data } = useQuery(teamAssetsQuery);
   const assets = useMemo(() => data?.assets ?? [], [data?.assets]);
-  const [adminUnlocked, setAdminUnlocked] = useState(auth.isAdmin);
-  const [unlockOpen, setUnlockOpen] = useState(false);
-  const [password, setPassword] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-  const [isUnlocking, setIsUnlocking] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [cardForm, setCardForm] = useState<SimpleCardForm>(() => emptyCardForm());
@@ -89,7 +82,7 @@ function AssetsPage() {
   const [savingRow, setSavingRow] = useState<number | null>(null);
   const [removingRow, setRemovingRow] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<ManageDraft[]>([]);
-  const isAdminReady = auth.isAdmin || adminUnlocked;
+  const isAdminReady = auth.isAdmin;
   const sourceLabel =
     data?.source === "google-sheet"
       ? "Live Team Assets Sheet"
@@ -114,7 +107,6 @@ function AssetsPage() {
 
   const requireAdminThen = (action: "add" | "manage") => {
     setFormError("");
-    setPasswordError("");
 
     if (isAdminReady) {
       if (action === "add") {
@@ -126,37 +118,7 @@ function AssetsPage() {
       return;
     }
 
-    setUnlockOpen(true);
-  };
-
-  const submitPassword = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setPasswordError("");
-    setIsUnlocking(true);
-
-    try {
-      const result = await loginToDashboard({ data: { password } });
-
-      if (!result.ok) {
-        setPasswordError(result.message);
-        return;
-      }
-
-      if (result.role !== "admin") {
-        setPasswordError("That password opens team view only. Enter the admin password to edit.");
-        return;
-      }
-
-      setPassword("");
-      setAdminUnlocked(true);
-      setUnlockOpen(false);
-      setAddOpen(true);
-      await router.invalidate();
-    } catch {
-      setPasswordError("Admin unlock failed. Try again in a moment.");
-    } finally {
-      setIsUnlocking(false);
-    }
+    setFormError("This action requires an approved admin account.");
   };
 
   const closeAdd = () => {
@@ -323,67 +285,6 @@ function AssetsPage() {
         <div className="rounded-3xl border border-destructive/30 bg-destructive/10 p-6 text-sm font-semibold text-destructive">
           Team Assets could not be loaded from Google Sheets yet. Click Add Asset Card to unlock
           admin editing and see the setup error when saving.
-        </div>
-      )}
-
-      {unlockOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border">
-            <div className="shrink-0 border-b border-border p-5 md:p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h4 className="text-base font-semibold">Admin unlock</h4>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Enter the admin password to add or manage asset cards.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setUnlockOpen(false)}
-                  className="tb-action rounded-full p-2 hover:bg-accent"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            <form onSubmit={submitPassword} className="flex min-h-0 flex-1 flex-col">
-              <div className="min-h-0 flex-1 overflow-y-auto p-5 md:p-6">
-                <input
-                  autoFocus
-                  type="password"
-                  value={password}
-                  onChange={(event) => {
-                    setPassword(event.target.value);
-                    setPasswordError("");
-                  }}
-                  placeholder="Admin password"
-                  disabled={isUnlocking}
-                  className="tb-search h-11 w-full rounded-2xl border border-border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                />
-                {passwordError && (
-                  <p className="mt-2 text-sm font-semibold text-destructive">{passwordError}</p>
-                )}
-              </div>
-
-              <div className="grid shrink-0 gap-2 border-t border-border bg-card p-5 sm:grid-cols-2 md:p-6">
-                <button
-                  type="button"
-                  onClick={() => setUnlockOpen(false)}
-                  className="tb-action inline-flex h-11 items-center justify-center rounded-2xl bg-muted px-4 text-sm font-semibold hover:bg-accent"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isUnlocking || password.length === 0}
-                  className="tb-action inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isUnlocking ? "Checking..." : "Unlock"}
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
       )}
 

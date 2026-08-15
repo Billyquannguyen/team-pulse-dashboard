@@ -15,6 +15,8 @@ import { AssistantPanel } from "@/components/assistant/AssistantPanel";
 import { TeamLoginScreen } from "@/components/auth/TeamLoginScreen";
 import { DataSourceBanner } from "@/components/layout/DataSourceBanner";
 import { getAuthState } from "@/lib/auth";
+import { MemberAccessScreen } from "@/components/auth/MemberAccessScreen";
+import { z } from "zod";
 
 function NotFoundComponent() {
   return (
@@ -58,6 +60,11 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  validateSearch: z.object({
+    authMode: z.string().optional(),
+    authMessage: z.string().optional(),
+    authError: z.string().optional(),
+  }),
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -101,10 +108,20 @@ function RootShell({ children }: { children: React.ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const auth = Route.useLoaderData();
+  const search = Route.useSearch();
+  const isPasswordRecovery = search.authMode === "update-password";
+  const initialError =
+    search.authError === "expired_link"
+      ? "This email link has expired or was already used. Request another link."
+      : search.authError === "missing_code"
+        ? "This email link is incomplete. Request another link."
+        : "";
 
   return (
     <QueryClientProvider client={queryClient}>
-      {auth.isAuthenticated ? (
+      {isPasswordRecovery ? (
+        <TeamLoginScreen auth={auth} initialMode="update-password" initialError={initialError} />
+      ) : auth.isAuthenticated ? (
         <div className="min-h-screen bg-background text-foreground">
           <div className="mx-auto flex w-full max-w-[1500px]">
             <AppSidebar />
@@ -116,8 +133,18 @@ function RootComponent() {
           <MobileNav />
           <AssistantPanel authRole={auth.role} />
         </div>
+      ) : auth.isSignedIn ? (
+        <MemberAccessScreen auth={auth} />
       ) : (
-        <TeamLoginScreen auth={auth} />
+        <TeamLoginScreen
+          auth={auth}
+          initialMessage={
+            search.authMessage === "verified"
+              ? "Email verified. Sign in to check your approval status."
+              : ""
+          }
+          initialError={initialError}
+        />
       )}
     </QueryClientProvider>
   );

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRouteApi, useRouter } from "@tanstack/react-router";
+import { getRouteApi } from "@tanstack/react-router";
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 import {
   Camera,
@@ -23,7 +23,7 @@ import {
 import { AppHeader } from "@/components/layout/AppHeader";
 import { DashboardSelect } from "@/components/ui/dashboard-select";
 import { TeamAvatar } from "@/components/ui/team-avatar";
-import { loginToDashboard } from "@/lib/auth";
+import { MemberApprovalPanel } from "@/components/auth/MemberApprovalPanel";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import {
   addTeamMember,
@@ -129,7 +129,6 @@ function draftFromMember(member: TeamMemberConfig): MemberDraft {
 }
 
 function TeamMembersPage() {
-  const router = useRouter();
   const auth = rootRoute.useLoaderData();
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery(teamMembersQuery);
@@ -138,10 +137,6 @@ function TeamMembersPage() {
   const [isManageOpen, setIsManageOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [savingKey, setSavingKey] = useState<string | null>(null);
-  const [adminAction, setAdminAction] = useState<AdminAction | null>(null);
-  const [adminPassword, setAdminPassword] = useState("");
-  const [adminError, setAdminError] = useState("");
-  const [isUnlocking, setIsUnlocking] = useState(false);
   const members = useMemo(() => data?.members ?? [], [data?.members]);
   const activeMembers = useMemo(
     () => members.filter((member) => member.status === "active"),
@@ -197,41 +192,7 @@ function TeamMembersPage() {
       return;
     }
 
-    setAdminPassword("");
-    setAdminError("");
-    setAdminAction(action);
-  };
-
-  const submitAdminPassword = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!adminAction) return;
-
-    setAdminError("");
-    setIsUnlocking(true);
-
-    try {
-      const result = await loginToDashboard({ data: { password: adminPassword } });
-
-      if (!result.ok) {
-        setAdminError(result.message);
-        return;
-      }
-
-      if (result.role !== "admin") {
-        setAdminError("That unlocks team view only. Enter the admin password to edit members.");
-        return;
-      }
-
-      const action = adminAction;
-      setAdminAction(null);
-      setAdminPassword("");
-      await router.invalidate();
-      runAdminAction(action);
-    } catch {
-      setAdminError("Admin unlock failed. Try again in a moment.");
-    } finally {
-      setIsUnlocking(false);
-    }
+    setMessage("This action requires an approved admin account.");
   };
 
   const updateModalDraft = (patch: Partial<MemberDraft>) => {
@@ -347,6 +308,8 @@ function TeamMembersPage() {
   return (
     <div className="space-y-6">
       <AppHeader title="Team Members" subtitle="Control who appears in active dashboard views." />
+
+      {auth.isAdmin && auth.user && <MemberApprovalPanel currentUserId={auth.user.id} />}
 
       <section className="rounded-3xl bg-card p-5 shadow-sm ring-1 ring-border md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -522,20 +485,6 @@ function TeamMembersPage() {
           onChange={updateModalDraft}
           onClose={() => setModal(null)}
           onSubmit={saveModal}
-        />
-      )}
-
-      {adminAction && (
-        <AdminUnlockModal
-          password={adminPassword}
-          error={adminError}
-          unlocking={isUnlocking}
-          onPasswordChange={(value) => {
-            setAdminPassword(value);
-            setAdminError("");
-          }}
-          onClose={() => setAdminAction(null)}
-          onSubmit={submitAdminPassword}
         />
       )}
     </div>
@@ -905,85 +854,6 @@ function MemberModal({
           >
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
             Save
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function AdminUnlockModal({
-  password,
-  error,
-  unlocking,
-  onPasswordChange,
-  onClose,
-  onSubmit,
-}: {
-  password: string;
-  error: string;
-  unlocking: boolean;
-  onPasswordChange: (value: string) => void;
-  onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-lg overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-border"
-      >
-        <div className="flex items-start justify-between gap-4 border-b border-border p-5">
-          <div>
-            <h2 className="text-base font-black">Unlock member editing</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Enter the admin password to add members or edit member details.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="tb-action rounded-full p-2 hover:bg-accent"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="p-5">
-          <label>
-            <span className="text-xs font-bold text-muted-foreground">Admin password</span>
-            <input
-              autoFocus
-              type="password"
-              value={password}
-              disabled={unlocking}
-              onChange={(event) => onPasswordChange(event.target.value)}
-              className="tb-search mt-1 h-11 w-full rounded-2xl border border-border bg-background px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/30"
-              placeholder="Enter admin password"
-            />
-          </label>
-          {error && <p className="mt-2 text-sm font-bold text-destructive">{error}</p>}
-        </div>
-
-        <div className="flex justify-end gap-2 border-t border-border p-5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="tb-action h-10 rounded-2xl bg-muted px-4 text-sm font-bold hover:bg-accent"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={unlocking || !password}
-            className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
-          >
-            {unlocking ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Lock className="h-4 w-4" />
-            )}
-            Unlock
           </button>
         </div>
       </form>

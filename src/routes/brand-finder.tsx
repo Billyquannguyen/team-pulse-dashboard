@@ -51,17 +51,9 @@ const DREAM_SHEET_ACCEPT = [
   ".tsv",
   ".txt",
   ".xlsx",
-  ".xls",
-  ".xlsm",
-  ".ods",
-  ".pdf",
   "text/csv",
   "text/tab-separated-values",
   "text/plain",
-  "application/pdf",
-  "application/vnd.ms-excel",
-  "application/vnd.ms-excel.sheet.macroEnabled.12",
-  "application/vnd.oasis.opendocument.spreadsheet",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ].join(",");
 const DEFAULT_SUBJECT_TEMPLATE = "Creator partnership for {{brand_name}}";
@@ -398,11 +390,7 @@ function fileExtension(file: File) {
 
 function isSpreadsheetUpload(file: File) {
   const extension = fileExtension(file);
-  return ["xlsx", "xls", "xlsm", "ods"].includes(extension);
-}
-
-function isPdfUpload(file: File) {
-  return file.type === "application/pdf" || fileExtension(file) === "pdf";
+  return extension === "xlsx";
 }
 
 function spreadsheetRowsToText(rows: unknown[][]) {
@@ -413,70 +401,26 @@ function spreadsheetRowsToText(rows: unknown[][]) {
 }
 
 async function readSpreadsheetUpload(file: File) {
-  const XLSX = await import("xlsx");
-  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-  const firstSheetName = workbook.SheetNames[0];
-
-  if (!firstSheetName) {
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(await file.arrayBuffer());
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) {
     throw new Error("This spreadsheet does not contain any sheets.");
   }
-
-  const worksheet = workbook.Sheets[firstSheetName];
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
-    blankrows: false,
-    defval: "",
-    header: 1,
-    raw: false,
-  });
-
-  return spreadsheetRowsToText(rows);
-}
-
-async function readPdfUpload(file: File) {
-  const pdfjs = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.mjs",
-    import.meta.url,
-  ).toString();
-
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
-  const pages: string[] = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    const lines: string[] = [];
-    let line = "";
-
-    content.items.forEach((item) => {
-      if (!("str" in item)) return;
-
-      const text = item.str.trim();
-      if (text) line = [line, text].filter(Boolean).join("\t");
-      if ("hasEOL" in item && item.hasEOL && line) {
-        lines.push(line);
-        line = "";
-      }
+  const rows: unknown[][] = [];
+  worksheet.eachRow({ includeEmpty: false }, (row) => {
+    const values: unknown[] = [];
+    row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+      values[columnNumber - 1] = cell.text;
     });
-
-    if (line) lines.push(line);
-    pages.push(lines.join("\n"));
-  }
-
-  const text = pages.join("\n").trim();
-
-  if (!text) {
-    throw new Error(
-      "This PDF does not have readable text. Try exporting the sheet as CSV or Excel.",
-    );
-  }
-
-  return text;
+    rows.push(values);
+  });
+  return spreadsheetRowsToText(rows);
 }
 
 async function readDreamSheetUpload(file: File) {
   if (isSpreadsheetUpload(file)) return readSpreadsheetUpload(file);
-  if (isPdfUpload(file)) return readPdfUpload(file);
   return file.text();
 }
 

@@ -1,4 +1,4 @@
-import { createFileRoute, getRouteApi, useRouter } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -44,7 +44,7 @@ import {
   getTeamMonthlyGoal,
 } from "@/lib/goal-targets";
 import { cn } from "@/lib/utils";
-import { loginToDashboard, type AuthRole } from "@/lib/auth";
+import type { AuthRole } from "@/lib/auth";
 import { normalizeDealMonthKey } from "@/lib/sheet-normalizer";
 
 const rootRoute = getRouteApi("__root__");
@@ -924,12 +924,8 @@ function AdminGoalControls({
   onChange: (settings: GoalSettings) => void;
   authRole: AuthRole | null;
 }) {
-  const router = useRouter();
   const isAdmin = authRole === "admin";
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [password, setPassword] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-  const [isUnlocking, setIsUnlocking] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
 
   const setField = (
@@ -977,45 +973,15 @@ function AdminGoalControls({
     });
   };
 
-  const submitPassword = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setPasswordError("");
-    setIsUnlocking(true);
-
-    try {
-      const result = await loginToDashboard({ data: { password } });
-
-      if (!result.ok) {
-        setPasswordError(result.message);
-        return;
-      }
-
-      if (result.role !== "admin") {
-        setPasswordError("That unlocks team view only. Enter the admin password to edit goals.");
-        return;
-      }
-
-      setPassword("");
-      await router.invalidate();
-    } catch {
-      setPasswordError("Admin unlock failed. Try again in a moment.");
-    } finally {
-      setIsUnlocking(false);
-    }
-  };
-
   const openEditDialog = () => {
+    if (!isAdmin) return;
     setCustomOpen(false);
-    setPassword("");
-    setPasswordError("");
     setEditDialogOpen(true);
   };
 
   const closeEditDialog = () => {
     setEditDialogOpen(false);
     setCustomOpen(false);
-    setPassword("");
-    setPasswordError("");
   };
 
   return (
@@ -1041,13 +1007,14 @@ function AdminGoalControls({
               <div className="text-xs text-muted-foreground">
                 {isAdmin
                   ? "Click edit to change targets."
-                  : "Click edit and enter the admin password to change targets."}
+                  : "An approved admin account is required to change targets."}
               </div>
             </div>
             <button
               type="button"
               onClick={openEditDialog}
-              className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"
+              disabled={!isAdmin}
+              className="tb-action inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Lock className="h-4 w-4" />
               Edit goals
@@ -1059,248 +1026,198 @@ function AdminGoalControls({
       {editDialogOpen && (
         <GoalModal
           title="Edit goals"
-          description={
-            isAdmin
-              ? "Change the targets below. Values save to the shared dashboard sheet."
-              : "Enter the admin password to unlock goal editing."
-          }
+          description="Change the targets below. Values save to the shared dashboard sheet."
           onClose={closeEditDialog}
         >
-          {!isAdmin ? (
-            <form onSubmit={submitPassword} className="flex min-h-0 flex-1 flex-col">
-              <div className="min-h-0 flex-1 overflow-y-auto p-5 md:p-6">
-                <div className="rounded-3xl border border-border bg-background/75 p-4 shadow-sm">
-                  <label className="block">
-                    <span className="text-xs font-semibold text-muted-foreground">
-                      Admin password
-                    </span>
-                    <input
-                      autoFocus
-                      type="password"
-                      value={password}
-                      onChange={(event) => {
-                        setPassword(event.target.value);
-                        setPasswordError("");
-                      }}
-                      placeholder="Enter admin password"
-                      disabled={isUnlocking}
-                      className="tb-search mt-1 h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 md:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-border bg-muted/40 p-3">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs font-semibold text-muted-foreground ring-1 ring-border">
+                  <Check className="h-3.5 w-3.5" />
+                  Admin unlocked
+                </div>
+                <div className="text-xs font-medium text-muted-foreground">
+                  Shared goals update for every team member after their dashboard refreshes.
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <GoalEditCard
+                  icon={Target}
+                  title="Monthly commission"
+                  description="Compare monthly targets against deals closed in the current month."
+                >
+                  <div className="grid gap-3">
+                    <NumberInput
+                      label="Team monthly goal"
+                      value={settings.teamMonthlyGoal}
+                      onChange={(value) => setField("teamMonthlyGoal", value)}
                     />
-                  </label>
-                  {passwordError && (
-                    <p className="mt-2 text-sm font-medium text-destructive">{passwordError}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid shrink-0 gap-2 border-t border-border bg-card p-5 sm:grid-cols-2 md:p-6">
-                <button
-                  type="button"
-                  onClick={closeEditDialog}
-                  className="tb-action inline-flex h-11 items-center justify-center rounded-2xl bg-muted px-4 text-sm font-semibold hover:bg-accent"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isUnlocking || password.length === 0}
-                  className="tb-action inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"
-                >
-                  {isUnlocking ? "Checking..." : "Unlock editing"}
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 md:p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-border bg-muted/40 p-3">
-                  <div className="inline-flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs font-semibold text-muted-foreground ring-1 ring-border">
-                    <Check className="h-3.5 w-3.5" />
-                    Admin unlocked
+                    <NumberInput
+                      label="Member monthly goal"
+                      value={settings.memberMonthlyGoal}
+                      onChange={(value) => setField("memberMonthlyGoal", value)}
+                    />
                   </div>
-                  <div className="text-xs font-medium text-muted-foreground">
-                    Shared goals update for every team member after their dashboard refreshes.
-                  </div>
-                </div>
+                </GoalEditCard>
 
-                <div className="grid gap-4 md:grid-cols-2">
+                <GoalEditCard
+                  icon={UserCheck}
+                  title="Creator signing"
+                  description="Set exclusive creator targets for the team and each member."
+                >
+                  <div className="grid gap-3">
+                    <NumberInput
+                      label="Team exclusive creator goal"
+                      value={settings.teamExclusiveCreatorGoal}
+                      onChange={(value) => setField("teamExclusiveCreatorGoal", value)}
+                      prefix=""
+                    />
+                    <NumberInput
+                      label="Member exclusive creator goal"
+                      value={settings.memberExclusiveCreatorGoal}
+                      onChange={(value) => setField("memberExclusiveCreatorGoal", value)}
+                      prefix=""
+                    />
+                  </div>
+                </GoalEditCard>
+
+                <div className="md:col-span-2">
                   <GoalEditCard
-                    icon={Target}
-                    title="Monthly commission"
-                    description="Compare monthly targets against deals closed in the current month."
+                    icon={TrendingUp}
+                    title="Long-term progression"
+                    description="Uses paid commission to track when a member is ready for the next commission level."
                   >
-                    <div className="grid gap-3">
+                    <div className="max-w-sm">
                       <NumberInput
-                        label="Team monthly goal"
-                        value={settings.teamMonthlyGoal}
-                        onChange={(value) => setField("teamMonthlyGoal", value)}
-                      />
-                      <NumberInput
-                        label="Member monthly goal"
-                        value={settings.memberMonthlyGoal}
-                        onChange={(value) => setField("memberMonthlyGoal", value)}
+                        label="Long-term progression goal"
+                        value={settings.progressionGoal}
+                        onChange={(value) => setField("progressionGoal", value)}
                       />
                     </div>
                   </GoalEditCard>
+                </div>
+              </div>
 
-                  <GoalEditCard
-                    icon={UserCheck}
-                    title="Creator signing"
-                    description="Set exclusive creator targets for the team and each member."
-                  >
-                    <div className="grid gap-3">
-                      <NumberInput
-                        label="Team exclusive creator goal"
-                        value={settings.teamExclusiveCreatorGoal}
-                        onChange={(value) => setField("teamExclusiveCreatorGoal", value)}
-                        prefix=""
-                      />
-                      <NumberInput
-                        label="Member exclusive creator goal"
-                        value={settings.memberExclusiveCreatorGoal}
-                        onChange={(value) => setField("memberExclusiveCreatorGoal", value)}
-                        prefix=""
-                      />
+              <section className="rounded-3xl border border-border bg-background/75 p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-muted">
+                      <Users className="h-4 w-4" />
                     </div>
-                  </GoalEditCard>
-
-                  <div className="md:col-span-2">
-                    <GoalEditCard
-                      icon={TrendingUp}
-                      title="Long-term progression"
-                      description="Uses paid commission to track when a member is ready for the next commission level."
-                    >
-                      <div className="max-w-sm">
-                        <NumberInput
-                          label="Long-term progression goal"
-                          value={settings.progressionGoal}
-                          onChange={(value) => setField("progressionGoal", value)}
-                        />
-                      </div>
-                    </GoalEditCard>
+                    <div>
+                      <h5 className="text-sm font-bold">Custom member goals</h5>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        Only use this when one member needs a different target from everyone else.
+                      </p>
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setCustomOpen((value) => !value)}
+                    className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-4 text-sm font-semibold hover:bg-accent"
+                  >
+                    {customOpen ? (
+                      <X className="h-4 w-4" />
+                    ) : (
+                      <SlidersHorizontal className="h-4 w-4" />
+                    )}
+                    {customOpen ? "Hide custom goals" : "Open custom goals"}
+                  </button>
                 </div>
 
-                <section className="rounded-3xl border border-border bg-background/75 p-4 shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-muted">
-                        <Users className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <h5 className="text-sm font-bold">Custom member goals</h5>
-                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          Only use this when one member needs a different target from everyone else.
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setCustomOpen((value) => !value)}
-                      className="tb-action inline-flex h-10 items-center gap-2 rounded-2xl bg-muted px-4 text-sm font-semibold hover:bg-accent"
-                    >
-                      {customOpen ? (
-                        <X className="h-4 w-4" />
-                      ) : (
-                        <SlidersHorizontal className="h-4 w-4" />
-                      )}
-                      {customOpen ? "Hide custom goals" : "Open custom goals"}
-                    </button>
-                  </div>
+                {customOpen && (
+                  <div className="mt-4 grid max-h-[34vh] gap-3 overflow-y-auto pr-1">
+                    {members.map((member) => {
+                      const hasMonthlyCustom =
+                        settings.customMemberMonthlyGoals[member.id] !== undefined;
+                      const hasProgressionCustom =
+                        settings.customProgressionGoals[member.id] !== undefined;
+                      const hasExclusiveCreatorCustom =
+                        settings.customExclusiveCreatorGoals[member.id] !== undefined;
 
-                  {customOpen && (
-                    <div className="mt-4 grid max-h-[34vh] gap-3 overflow-y-auto pr-1">
-                      {members.map((member) => {
-                        const hasMonthlyCustom =
-                          settings.customMemberMonthlyGoals[member.id] !== undefined;
-                        const hasProgressionCustom =
-                          settings.customProgressionGoals[member.id] !== undefined;
-                        const hasExclusiveCreatorCustom =
-                          settings.customExclusiveCreatorGoals[member.id] !== undefined;
-
-                        return (
-                          <div
-                            key={member.id}
-                            className="rounded-2xl border border-border bg-card p-3"
-                          >
-                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                              <div>
-                                <div className="text-sm font-bold">{member.name}</div>
-                                <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                  <span>
-                                    Current month closed {formatMoney(member.monthCommission)}
-                                  </span>
-                                  <span>
-                                    Paid commission {formatMoney(getPaidCommission(member))}
-                                  </span>
-                                  <span>Exclusive {formatCount(member.exclusiveCreators)}</span>
-                                </div>
+                      return (
+                        <div
+                          key={member.id}
+                          className="rounded-2xl border border-border bg-card p-3"
+                        >
+                          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-sm font-bold">{member.name}</div>
+                              <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                <span>
+                                  Current month closed {formatMoney(member.monthCommission)}
+                                </span>
+                                <span>
+                                  Paid commission {formatMoney(getPaidCommission(member))}
+                                </span>
+                                <span>Exclusive {formatCount(member.exclusiveCreators)}</span>
                               </div>
-                              <button
-                                type="button"
-                                disabled={
-                                  !hasMonthlyCustom &&
-                                  !hasProgressionCustom &&
-                                  !hasExclusiveCreatorCustom
-                                }
-                                onClick={() => resetCustomGoals(member.id)}
-                                className="tb-action rounded-xl bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Use default
-                              </button>
                             </div>
-                            <div className="grid gap-3 md:grid-cols-3">
-                              <NumberInput
-                                label="Monthly"
-                                value={
-                                  settings.customMemberMonthlyGoals[member.id] ??
-                                  settings.memberMonthlyGoal
-                                }
-                                onChange={(value) =>
-                                  setCustomGoal("customMemberMonthlyGoals", member.id, value)
-                                }
-                              />
-                              <NumberInput
-                                label="Progression"
-                                value={
-                                  settings.customProgressionGoals[member.id] ??
-                                  settings.progressionGoal
-                                }
-                                onChange={(value) =>
-                                  setCustomGoal("customProgressionGoals", member.id, value)
-                                }
-                              />
-                              <NumberInput
-                                label="Exclusive"
-                                value={
-                                  settings.customExclusiveCreatorGoals[member.id] ??
-                                  settings.memberExclusiveCreatorGoal
-                                }
-                                onChange={(value) =>
-                                  setCustomGoal("customExclusiveCreatorGoals", member.id, value)
-                                }
-                                prefix=""
-                              />
-                            </div>
+                            <button
+                              type="button"
+                              disabled={
+                                !hasMonthlyCustom &&
+                                !hasProgressionCustom &&
+                                !hasExclusiveCreatorCustom
+                              }
+                              onClick={() => resetCustomGoals(member.id)}
+                              className="tb-action rounded-xl bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Use default
+                            </button>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-              </div>
-
-              <div className="flex shrink-0 justify-end border-t border-border bg-card p-5 md:p-6">
-                <button
-                  type="button"
-                  onClick={closeEditDialog}
-                  className="tb-action inline-flex h-11 min-w-32 items-center justify-center rounded-2xl bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90"
-                >
-                  Done
-                </button>
-              </div>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <NumberInput
+                              label="Monthly"
+                              value={
+                                settings.customMemberMonthlyGoals[member.id] ??
+                                settings.memberMonthlyGoal
+                              }
+                              onChange={(value) =>
+                                setCustomGoal("customMemberMonthlyGoals", member.id, value)
+                              }
+                            />
+                            <NumberInput
+                              label="Progression"
+                              value={
+                                settings.customProgressionGoals[member.id] ??
+                                settings.progressionGoal
+                              }
+                              onChange={(value) =>
+                                setCustomGoal("customProgressionGoals", member.id, value)
+                              }
+                            />
+                            <NumberInput
+                              label="Exclusive"
+                              value={
+                                settings.customExclusiveCreatorGoals[member.id] ??
+                                settings.memberExclusiveCreatorGoal
+                              }
+                              onChange={(value) =>
+                                setCustomGoal("customExclusiveCreatorGoals", member.id, value)
+                              }
+                              prefix=""
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
             </div>
-          )}
+
+            <div className="flex shrink-0 justify-end border-t border-border bg-card p-5 md:p-6">
+              <button
+                type="button"
+                onClick={closeEditDialog}
+                className="tb-action inline-flex h-11 min-w-32 items-center justify-center rounded-2xl bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+              >
+                Done
+              </button>
+            </div>
+          </div>
         </GoalModal>
       )}
     </>

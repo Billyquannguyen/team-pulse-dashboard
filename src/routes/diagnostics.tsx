@@ -801,8 +801,8 @@ function BillyAssistantHubDiagnosticsCard({
         <div className="mt-4 rounded-2xl border border-fun-yellow/60 bg-fun-yellow/20 p-4 text-sm">
           <div className="font-bold">Meeting memory setup note</div>
           <p className="mt-1 text-xs font-semibold text-muted-foreground">
-            Production meeting topics need TEAM_ASSETS_SPREADSHEET_ID and the Meeting Content
-            Memory worksheet.
+            Production meeting topics need TEAM_ASSETS_SPREADSHEET_ID and the Meeting Content Memory
+            worksheet.
           </p>
         </div>
       )}
@@ -1111,7 +1111,7 @@ function DiagnosticsPage() {
       <div className="space-y-6">
         <AppHeader title="Diagnostics" subtitle="Google Sheets connection checks are admin-only." />
         <div className="rounded-3xl border border-destructive/30 bg-destructive/10 p-6 text-sm font-semibold text-destructive">
-          Log in with the admin password to view diagnostics.
+          Sign in with an approved admin account to view diagnostics.
         </div>
       </div>
     );

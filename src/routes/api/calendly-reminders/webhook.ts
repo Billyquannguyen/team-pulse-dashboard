@@ -20,7 +20,7 @@ function jsonResponse(data: unknown, status = 200) {
 
 function isAuthorizedWebhook(request: Request) {
   const secret = process.env.CALENDLY_WEBHOOK_SECRET?.trim();
-  if (!secret) return true;
+  if (!secret) return false;
 
   const url = new URL(request.url);
   return (

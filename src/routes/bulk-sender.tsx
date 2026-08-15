@@ -51,6 +51,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { advanceBulkSenderQueue, submitBulkSenderJob, type BulkSenderJob } from "@/lib/bulk-sender";
 import { cn } from "@/lib/utils";
+import { BulkFollowUpPanel } from "@/components/bulk-sender/BulkFollowUpPanel";
 
 export const Route = createFileRoute("/bulk-sender")({
   head: () => ({
@@ -90,8 +91,7 @@ type SavedWorkspace = {
 };
 
 const STORAGE_KEY = "team-billion-bulk-sender-workspace-v1";
-const MEMBER_KEY = "team-billion-bulk-sender-member-v1";
-const MAX_DRAFTS_PER_RUN = 50;
+const MAX_DRAFTS_PER_RUN = 100;
 const MIN_VISIBLE_ROWS = 8;
 
 const DEFAULT_COLUMNS: Column[] = [
@@ -209,6 +209,64 @@ function ToolbarButton({
 }
 
 function BulkSenderPage() {
+  const [activeTool, setActiveTool] = useState<"bulk-drafts" | "bulk-follow-up">("bulk-drafts");
+
+  return (
+    <div className="space-y-6">
+      <AppHeader
+        title="Bulk Sender"
+        subtitle="Create personalized drafts or prepare safe follow-ups for unanswered outreach."
+      />
+      <div
+        className="mx-auto grid w-full max-w-md grid-cols-2 rounded-[22px] border border-white/10 bg-foreground p-1.5 text-background shadow-sm"
+        role="tablist"
+        aria-label="Bulk Sender tools"
+      >
+        <button
+          type="button"
+          id="bulk-drafts-tab"
+          role="tab"
+          aria-controls="bulk-sender-panel"
+          aria-selected={activeTool === "bulk-drafts"}
+          onClick={() => setActiveTool("bulk-drafts")}
+          className={cn(
+            "rounded-[17px] px-5 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-foreground",
+            activeTool === "bulk-drafts"
+              ? "border border-white/20 bg-background/10 text-background shadow-sm"
+              : "border border-transparent text-background/55 hover:bg-white/5 hover:text-background",
+          )}
+        >
+          Bulk drafts
+        </button>
+        <button
+          type="button"
+          id="bulk-follow-up-tab"
+          role="tab"
+          aria-controls="bulk-sender-panel"
+          aria-selected={activeTool === "bulk-follow-up"}
+          onClick={() => setActiveTool("bulk-follow-up")}
+          className={cn(
+            "rounded-[17px] px-5 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-foreground",
+            activeTool === "bulk-follow-up"
+              ? "border border-white/20 bg-background/10 text-background shadow-sm"
+              : "border border-transparent text-background/55 hover:bg-white/5 hover:text-background",
+          )}
+        >
+          Bulk follow-up
+        </button>
+      </div>
+      <div
+        id="bulk-sender-panel"
+        role="tabpanel"
+        aria-labelledby={activeTool === "bulk-drafts" ? "bulk-drafts-tab" : "bulk-follow-up-tab"}
+      >
+        {activeTool === "bulk-drafts" ? <BulkDraftCreator /> : <BulkFollowUpPanel />}
+      </div>
+    </div>
+  );
+}
+
+function BulkDraftCreator() {
   const [columns, setColumns] = useState<Column[]>(DEFAULT_COLUMNS);
   const [rows, setRows] = useState<SenderRow[]>(starterRows);
   const [subject, setSubject] = useState(DEFAULT_SUBJECT);
@@ -292,14 +350,6 @@ function BulkSenderPage() {
     }
   }, [bodyHtml]);
 
-  const memberId = () => {
-    const existing = window.localStorage.getItem(MEMBER_KEY);
-    if (existing) return existing;
-    const created = crypto.randomUUID();
-    window.localStorage.setItem(MEMBER_KEY, created);
-    return created;
-  };
-
   const applyJobResults = (completedJob: BulkSenderJob) => {
     const results = new Map(completedJob.results.map((result) => [result.rowId, result]));
     setRows((current) =>
@@ -352,7 +402,7 @@ function BulkSenderPage() {
         };
       });
       const response = await submitBulkSenderJob({
-        data: { memberId: memberId(), drafts },
+        data: { drafts },
       });
       setJob(response.job);
       setIsSubmitting(false);
@@ -513,11 +563,6 @@ function BulkSenderPage() {
 
   return (
     <div className="space-y-6">
-      <AppHeader
-        title="Bulk Sender"
-        subtitle="Paste recipients, personalize one template, and create review-ready Gmail drafts."
-      />
-
       <section className="rounded-3xl bg-card p-4 shadow-sm ring-1 ring-border md:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>

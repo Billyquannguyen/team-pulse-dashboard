@@ -7,11 +7,13 @@ const draftInputSchema = z.object({
   subject: z.string().min(1).max(500),
   htmlBody: z.string().min(1).max(60_000),
   textBody: z.string().min(1).max(20_000),
+  threadId: z.string().min(1).max(220).optional(),
+  inReplyTo: z.string().min(1).max(1000).optional(),
+  references: z.string().min(1).max(5000).optional(),
 });
 
 const submitJobSchema = z.object({
-  memberId: z.string().min(1).max(120),
-  drafts: z.array(draftInputSchema).min(1).max(50),
+  drafts: z.array(draftInputSchema).min(1).max(100),
 });
 
 const jobRequestSchema = z.object({
@@ -334,6 +336,8 @@ function buildMimeMessage(draft: DraftInput, signatureHtml: string) {
   const message = [
     `To: ${sanitizeHeader(draft.to)}`,
     `Subject: ${sanitizeHeader(draft.subject)}`,
+    ...(draft.inReplyTo ? [`In-Reply-To: ${sanitizeHeader(draft.inReplyTo)}`] : []),
+    ...(draft.references ? [`References: ${sanitizeHeader(draft.references)}`] : []),
     "MIME-Version: 1.0",
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     "",
@@ -355,7 +359,7 @@ function buildMimeMessage(draft: DraftInput, signatureHtml: string) {
 }
 
 async function fingerprintDraft(draft: DraftInput) {
-  const source = `${draft.to.toLowerCase()}\n${draft.subject}\n${draft.htmlBody}`;
+  const source = `${draft.threadId ?? "new"}\n${draft.to.toLowerCase()}\n${draft.subject}\n${draft.htmlBody}`;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
   return Array.from(new Uint8Array(digest))
     .map((value) => value.toString(16).padStart(2, "0"))
@@ -381,7 +385,12 @@ async function createDraft(accessToken: string, draft: DraftInput, signatureHtml
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ message: { raw: buildMimeMessage(draft, signatureHtml) } }),
+      body: JSON.stringify({
+        message: {
+          raw: buildMimeMessage(draft, signatureHtml),
+          ...(draft.threadId ? { threadId: draft.threadId } : {}),
+        },
+      }),
     });
     const payload = (await response.json().catch(() => null)) as {
       id?: string;
@@ -497,15 +506,17 @@ export const submitBulkSenderJob = createServerFn({ method: "POST" })
   .inputValidator(submitJobSchema)
   .handler(async ({ data }): Promise<{ job: BulkSenderJob }> => {
     const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
-    await requireWritableDashboardAuth();
-    if (!(await claimCooldown(data.memberId))) {
+    const auth = await requireWritableDashboardAuth();
+    const memberId = auth.user?.id;
+    if (!memberId) throw new Error("Your member identity could not be verified.");
+    if (!(await claimCooldown(memberId))) {
       throw new Error("Please wait 10 seconds before creating another batch.");
     }
 
     const now = new Date().toISOString();
     const job: StoredJob = {
       id: crypto.randomUUID(),
-      memberId: data.memberId,
+      memberId,
       status: "queued",
       total: data.drafts.length,
       processed: 0,
@@ -527,7 +538,10 @@ export const advanceBulkSenderQueue = createServerFn({ method: "POST" })
   .inputValidator(jobRequestSchema)
   .handler(async ({ data }): Promise<{ job: BulkSenderJob }> => {
     const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
-    await requireWritableDashboardAuth();
+    const auth = await requireWritableDashboardAuth();
+    const requestedJob = await readJob(data.jobId);
+    if (!requestedJob) throw new Error("This Bulk Sender job expired or could not be found.");
+    if (requestedJob.memberId !== auth.user?.id && !auth.isAdmin) throw new Error("Unauthorized");
     await processQueueChunk();
     const job = await readJob(data.jobId);
     if (!job) throw new Error("This Bulk Sender job expired or could not be found.");
@@ -538,8 +552,9 @@ export const getBulkSenderJob = createServerFn({ method: "GET" })
   .inputValidator(jobRequestSchema)
   .handler(async ({ data }): Promise<{ job: BulkSenderJob }> => {
     const { requireDashboardAuth } = await import("@/lib/auth.server");
-    await requireDashboardAuth();
+    const auth = await requireDashboardAuth();
     const job = await readJob(data.jobId);
     if (!job) throw new Error("This Bulk Sender job expired or could not be found.");
+    if (job.memberId !== auth.user?.id && !auth.isAdmin) throw new Error("Unauthorized");
     return { job: publicJob(job) };
   });

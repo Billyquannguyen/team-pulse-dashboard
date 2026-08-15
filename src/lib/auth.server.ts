@@ -1,214 +1,227 @@
-/* eslint-disable react-hooks/rules-of-hooks */
-import { useSession } from "@tanstack/react-start/server";
-import {
-  ADMIN_SESSION_MAX_AGE_SECONDS,
-  AUTH_COOKIE_NAME,
-  COOKIE_MAX_AGE_SECONDS,
-  TEAM_SESSION_MAX_AGE_SECONDS,
-  type AuthRole,
-  type AuthSessionData,
-  type AuthState,
-} from "@/lib/auth";
+import "@tanstack/react-start/server-only";
 
-function readAuthEnv() {
-  const teamPassword = process.env.TEAM_DASHBOARD_PASSWORD ?? "";
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "";
-  const hermesPassword = process.env.HERMES_DASHBOARD_PASSWORD ?? "";
+import { getRequestUrl } from "@tanstack/react-start/server";
+import type { AuthRole, AuthState, DashboardMemberAccess, MemberAccessStatus } from "@/lib/auth";
+import { createDashboardSupabaseServerClient, readSupabaseEnv } from "@/lib/supabase.server";
 
-  if (!teamPassword || !adminPassword) {
-    const location = process.env.VERCEL === "1" ? "in Vercel" : "for this environment";
+type MemberRow = {
+  user_id: string;
+  email: string;
+  display_name: string;
+  status: MemberAccessStatus;
+  role: AuthRole;
+  created_at: string;
+  approved_at: string | null;
+};
 
-    return {
-      teamPassword,
-      adminPassword,
-      hermesPassword,
-      setupReady: false,
-      setupIssue: `Missing TEAM_DASHBOARD_PASSWORD or ADMIN_PASSWORD environment variables ${location}.`,
-    };
+function safeOrigin() {
+  try {
+    return new URL(getRequestUrl()).origin;
+  } catch {
+    return process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : "http://localhost:3000";
   }
+}
 
-  if (teamPassword === adminPassword) {
-    return {
-      teamPassword,
-      adminPassword,
-      hermesPassword,
-      setupReady: false,
-      setupIssue: "Team and admin passwords must be different.",
-    };
-  }
+function callbackUrl(next: "confirmed" | "recovery") {
+  const url = new URL("/api/auth/callback", safeOrigin());
+  url.searchParams.set("next", next);
+  return url.toString();
+}
 
+function mapMember(row: MemberRow): DashboardMemberAccess {
   return {
-    teamPassword,
-    adminPassword,
-    hermesPassword,
-    setupReady: true,
-    setupIssue: null,
+    userId: row.user_id,
+    email: row.email,
+    displayName: row.display_name,
+    status: row.status,
+    role: row.role,
+    createdAt: row.created_at,
+    approvedAt: row.approved_at,
   };
-}
-
-async function sha256Bytes(value: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return new Uint8Array(digest);
-}
-
-function timingSafeEqualBytes(left: Uint8Array, right: Uint8Array) {
-  let difference = left.length ^ right.length;
-  const length = Math.max(left.length, right.length);
-
-  for (let index = 0; index < length; index += 1) {
-    difference |= (left[index] ?? 0) ^ (right[index] ?? 0);
-  }
-
-  return difference === 0;
-}
-
-async function passwordMatches(candidate: string, expected: string) {
-  if (!expected) return false;
-  const [candidateHash, expectedHash] = await Promise.all([
-    sha256Bytes(candidate),
-    sha256Bytes(expected),
-  ]);
-
-  return timingSafeEqualBytes(candidateHash, expectedHash);
-}
-
-async function sessionSecret() {
-  const { teamPassword, adminPassword } = readAuthEnv();
-  const bytes = await sha256Bytes(
-    `team-billion-dashboard-auth:v1:${teamPassword}:${adminPassword}`,
-  );
-
-  return Array.from(bytes)
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-async function useAuthSession() {
-  return useSession<AuthSessionData>({
-    name: AUTH_COOKIE_NAME,
-    password: await sessionSecret(),
-    maxAge: COOKIE_MAX_AGE_SECONDS,
-    cookie: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: COOKIE_MAX_AGE_SECONDS,
-    },
-  });
-}
-
-function normalizeRole(value: unknown): AuthRole | null {
-  return value === "team" || value === "admin" || value === "hermes_readonly" ? value : null;
-}
-
-function getRoleSessionMaxAge(role: AuthRole) {
-  return role === "admin" ? ADMIN_SESSION_MAX_AGE_SECONDS : TEAM_SESSION_MAX_AGE_SECONDS;
-}
-
-function getSessionExpiry(role: AuthRole) {
-  return Date.now() + getRoleSessionMaxAge(role) * 1000;
-}
-
-function isValidExpiry(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) && value > Date.now();
 }
 
 export async function readAuthStateServer(): Promise<AuthState> {
-  const session = await useAuthSession();
-  const role = normalizeRole(session.data.role);
-  const sessionExpired = role !== null && !isValidExpiry(session.data.expiresAt);
-  const { setupReady, setupIssue } = readAuthEnv();
+  const env = readSupabaseEnv();
+  const base: AuthState = {
+    isAuthenticated: false,
+    isSignedIn: false,
+    isAdmin: false,
+    role: null,
+    accessStatus: null,
+    user: null,
+    setupReady: env.setupReady,
+    setupIssue: env.setupIssue,
+  };
 
-  if (sessionExpired) {
-    await session.clear();
+  if (!env.setupReady) return base;
+
+  const supabase = createDashboardSupabaseServerClient();
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const user = userData.user;
+  if (userError || !user) return base;
+
+  const { data: memberData, error: memberError } = await supabase
+    .from("dashboard_members")
+    .select("user_id,email,display_name,status,role,created_at,approved_at")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (memberError) {
+    return {
+      ...base,
+      isSignedIn: true,
+      user: { id: user.id, email: user.email ?? "", displayName: "" },
+      setupIssue: "Your account exists, but its dashboard access record could not be loaded.",
+    };
   }
 
-  const activeRole = sessionExpired ? null : role;
+  const member = memberData as MemberRow | null;
+  const accessStatus = member?.status ?? "pending";
+  const role = member?.role ?? "member";
+  const approved = accessStatus === "approved";
 
   return {
-    isAuthenticated: activeRole !== null,
-    isAdmin: activeRole === "admin",
-    isHermesReadOnly: activeRole === "hermes_readonly",
-    role: activeRole,
-    setupReady,
-    setupIssue,
+    ...base,
+    isAuthenticated: approved,
+    isSignedIn: true,
+    isAdmin: approved && role === "admin",
+    role: approved ? role : null,
+    accessStatus,
+    user: {
+      id: user.id,
+      email: user.email ?? member?.email ?? "",
+      displayName: member?.display_name ?? "",
+    },
   };
 }
 
-export async function loginToDashboardServer(password: string) {
-  const env = readAuthEnv();
-
-  if (!env.setupReady) {
-    return {
-      ok: false as const,
-      message: env.setupIssue ?? "Login is not configured yet.",
-    };
+export async function signUpToDashboardServer(input: {
+  email: string;
+  password: string;
+  displayName: string;
+}) {
+  const { claimAuthAttempt } = await import("@/lib/rate-limit.server");
+  if (!(await claimAuthAttempt("sign-up", input.email, 5, 60 * 60))) {
+    return { ok: false as const, message: "Too many attempts. Try again later." };
   }
+  const supabase = createDashboardSupabaseServerClient();
+  const { data, error } = await supabase.auth.signUp({
+    email: input.email,
+    password: input.password,
+    options: {
+      data: { display_name: input.displayName },
+      emailRedirectTo: callbackUrl("confirmed"),
+    },
+  });
 
-  let role: AuthRole | null = null;
-
-  // Passwords are checked only on the server. The client never receives the
-  // configured passwords, only the role saved in the signed session cookie.
-  if (await passwordMatches(password, env.adminPassword)) {
-    role = "admin";
-  } else if (await passwordMatches(password, env.teamPassword)) {
-    role = "team";
-  } else if (await passwordMatches(password, env.hermesPassword)) {
-    // Hermes gets its own read-only role so it can inspect analytics without
-    // being allowed to create drafts, edit sheets, or trigger admin actions.
-    role = "hermes_readonly";
-  }
-
-  if (!role) {
-    return {
-      ok: false as const,
-      message: "That password did not match.",
-    };
-  }
-
-  const session = await useAuthSession();
-  await session.update({ role, expiresAt: getSessionExpiry(role) });
+  if (error) return { ok: false as const, message: error.message };
 
   return {
     ok: true as const,
-    role,
+    signedIn: Boolean(data.session),
+    message:
+      "If this is a new account, check your email to verify it. After verification, your access will wait for admin approval.",
   };
 }
 
-export async function logoutFromDashboardServer() {
-  const session = await useAuthSession();
-  await session.clear();
+export async function signInToDashboardServer(input: { email: string; password: string }) {
+  const { claimAuthAttempt } = await import("@/lib/rate-limit.server");
+  if (!(await claimAuthAttempt("sign-in", input.email, 10, 10 * 60))) {
+    return { ok: false as const, message: "Too many attempts. Try again later." };
+  }
+  const supabase = createDashboardSupabaseServerClient();
+  const { error } = await supabase.auth.signInWithPassword(input);
 
+  if (error) return { ok: false as const, message: error.message };
+  return { ok: true as const };
+}
+
+export async function requestDashboardPasswordResetServer(email: string) {
+  const { claimAuthAttempt } = await import("@/lib/rate-limit.server");
+  if (!(await claimAuthAttempt("password-reset", email, 5, 60 * 60))) {
+    return {
+      ok: true as const,
+      message: "If an account exists for this email, a password-reset link has been sent.",
+    };
+  }
+  const supabase = createDashboardSupabaseServerClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: callbackUrl("recovery"),
+  });
+
+  if (error) return { ok: false as const, message: error.message };
+  return {
+    ok: true as const,
+    message: "If an account exists for this email, a password-reset link has been sent.",
+  };
+}
+
+export async function updateDashboardPasswordServer(password: string) {
+  const supabase = createDashboardSupabaseServerClient();
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { ok: false as const, message: error.message };
+  return { ok: true as const, message: "Your password has been updated." };
+}
+
+export async function logoutFromDashboardServer() {
+  const supabase = createDashboardSupabaseServerClient();
+  await supabase.auth.signOut();
   return { ok: true as const };
 }
 
 export async function requireDashboardAuth() {
   const auth = await readAuthStateServer();
-
-  if (!auth.role) {
-    throw new Error("Unauthorized");
-  }
-
+  if (!auth.isAuthenticated || !auth.role || !auth.user) throw new Error("Unauthorized");
   return auth;
 }
 
 export async function requireAdminAuth() {
   const auth = await requireDashboardAuth();
-
-  if (auth.role !== "admin") {
-    throw new Error("Admin access required");
-  }
-
+  if (auth.role !== "admin") throw new Error("Admin access required");
   return auth;
 }
 
 export async function requireWritableDashboardAuth() {
-  const auth = await requireDashboardAuth();
+  return requireDashboardAuth();
+}
 
-  if (auth.role === "hermes_readonly") {
-    throw new Error("Read-only access cannot modify dashboard data");
+export async function listDashboardMemberAccessServer(): Promise<DashboardMemberAccess[]> {
+  await requireAdminAuth();
+  const supabase = createDashboardSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("dashboard_members")
+    .select("user_id,email,display_name,status,role,created_at,approved_at")
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as MemberRow[]).map(mapMember);
+}
+
+export async function updateDashboardMemberAccessServer(input: {
+  userId: string;
+  status: MemberAccessStatus;
+  role: AuthRole;
+}) {
+  const auth = await requireAdminAuth();
+  if (input.userId === auth.user?.id && input.status !== "approved") {
+    return { ok: false as const, message: "You cannot remove your own dashboard access." };
   }
 
-  return auth;
+  const supabase = createDashboardSupabaseServerClient();
+  const approved = input.status === "approved";
+  const { error } = await supabase
+    .from("dashboard_members")
+    .update({
+      status: input.status,
+      role: input.role,
+      approved_at: approved ? new Date().toISOString() : null,
+      approved_by: approved ? (auth.user?.id ?? null) : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", input.userId);
+
+  if (error) return { ok: false as const, message: error.message };
+  return { ok: true as const };
 }

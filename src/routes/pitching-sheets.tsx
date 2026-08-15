@@ -404,13 +404,30 @@ function PitchingSheetsPage() {
   );
 
   const selectedPlatforms = formValues.platforms as Platform[];
+  const selectedCountries = formValues.countries as string[];
+  const selectedNiches = formValues.niches as string[];
+  const selectedGender = String(formValues.gender || "All genders");
   const outputColumns = useMemo<PreviewColumn<PitchRow>[]>(() => {
     const result: PreviewColumn<PitchRow>[] = [
       { key: "creatorName", label: "Creator Name", value: (row) => row.profile.creatorName },
-      { key: "location", label: "Location", value: (row) => row.profile.location },
-      { key: "niche", label: "Niche", value: (row) => row.profile.nicheTags },
-      { key: "mainPlatform", label: "Main Platform", value: (row) => row.profile.mainPlatform },
     ];
+
+    if (selectedCountries.length > 0) {
+      result.push({ key: "location", label: "Location", value: (row) => row.profile.location });
+    }
+
+    if (selectedNiches.length > 0) {
+      result.push({ key: "niche", label: "Niche", value: (row) => row.profile.nicheTags });
+    }
+
+    if (selectedPlatforms.length > 1) {
+      result.push({
+        key: "mainPlatform",
+        label: "Main Platform",
+        value: (row) => row.profile.mainPlatform,
+      });
+    }
+
     if (selectedPlatforms.includes("TikTok")) {
       result.push(
         {
@@ -444,8 +461,12 @@ function PitchingSheetsPage() {
         { key: "ytLink", label: "YT Link", value: (row) => row.profile.ytLink },
       );
     }
+
+    if (selectedGender !== "All genders") {
+      result.push({ key: "gender", label: "Gender", value: (row) => row.profile.gender });
+    }
+
     result.push(
-      { key: "gender", label: "Gender", value: (row) => row.profile.gender },
       {
         key: "interested",
         label: "Interested?",
@@ -470,7 +491,7 @@ function PitchingSheetsPage() {
       },
     );
     return result;
-  }, [selectedPlatforms]);
+  }, [selectedCountries.length, selectedGender, selectedNiches.length, selectedPlatforms]);
 
   const preparedRows = useMemo<PitchRow[]>(() => {
     const selectedExclusives = rosterExclusiveProfiles.filter((profile) =>
