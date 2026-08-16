@@ -28,7 +28,12 @@ import {
 import { AppHeader } from "@/components/layout/AppHeader";
 import { TopExclusiveCreators } from "@/components/goals/TopExclusiveCreators";
 import { creators as fallbackCreators } from "@/data/creators";
-import { deals as fallbackDeals, isClosedCommissionDeal, type Deal } from "@/data/deals";
+import {
+  deals as fallbackDeals,
+  isActiveDashboardDeal,
+  isClosedCommissionDeal,
+  type Deal,
+} from "@/data/deals";
 import {
   team as fallbackTeam,
   totalCommission,
@@ -36,7 +41,7 @@ import {
   totalMonthCommission,
   type Teammate,
 } from "@/data/team";
-import { dashboardSheetQuery } from "@/lib/sheets-public";
+import { dashboardSheetQuery, memberIdentityMatches } from "@/lib/sheets-public";
 import { type GoalSettings, useGoalSettings } from "@/lib/goal-settings";
 import {
   getMemberExclusiveCreatorGoal,
@@ -47,7 +52,7 @@ import {
 } from "@/lib/goal-targets";
 import { cn } from "@/lib/utils";
 import type { AuthRole } from "@/lib/auth";
-import { normalizeDealMonthKey } from "@/lib/sheet-normalizer";
+import { getCurrentDealMonthKey, normalizeDealMonthKey } from "@/lib/sheet-normalizer";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -1411,15 +1416,23 @@ function PersonalGoalsAnalytics({
   const monthlyTarget = getMemberMonthlyGoal(settings, member);
   const progressionTarget = getMemberProgressionGoal(settings, member);
   const creatorTarget = getMemberExclusiveCreatorGoal(settings, member);
-  const totalDealValue = deals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
-  const totalProfit = deals.reduce(
-    (sum, deal) => sum + Math.max(0, deal.totalPricingGbp - deal.creatorTotalGbp),
-    0,
-  );
-  const averageDealValue = deals.length > 0 ? totalDealValue / deals.length : 0;
   const personalExclusiveCreators = creators.filter(
     (creator) => creator.relationship === "Exclusive",
   );
+  const memberDeals = deals.filter(
+    (deal) => memberIdentityMatches(deal.manager, member) && isActiveDashboardDeal(deal),
+  );
+  const currentMonthKey = getCurrentDealMonthKey();
+  const currentMonthDeals = memberDeals.filter(
+    (deal) => normalizeDealMonthKey(deal.month) === currentMonthKey,
+  );
+  const totalDealValue = currentMonthDeals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
+  const totalProfit = currentMonthDeals.reduce(
+    (sum, deal) => sum + Math.max(0, deal.totalPricingGbp - deal.creatorTotalGbp),
+    0,
+  );
+  const averageDealValue =
+    currentMonthDeals.length > 0 ? totalDealValue / currentMonthDeals.length : 0;
 
   return (
     <div className="space-y-6">
@@ -1495,7 +1508,7 @@ function PersonalGoalsAnalytics({
             <span className="block text-xs font-bold uppercase tracking-wide text-muted-foreground">
               Personal milestone
             </span>
-            <span className="mt-2 block text-xl font-black">See your next creator milestone</span>
+            <span className="mt-2 block text-xl font-black">Here’s a little motivation</span>
           </span>
         </button>
       </section>
@@ -1507,14 +1520,15 @@ function PersonalGoalsAnalytics({
           </div>
           <h2 className="mt-1 text-2xl font-black tracking-tight">Your creator portfolio</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Only creators and deals connected to your member profile are included.
+            Monthly deal metrics include every valid deal on your sheet, including non-exclusive
+            creators.
           </p>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[
             ["Exclusive creators", formatCount(personalExclusiveCreators.length)],
-            ["Matched deals", formatCount(deals.length)],
+            ["Deals this month", formatCount(currentMonthDeals.length)],
             ["Total deal value", formatMoney(totalDealValue)],
             ["Average deal value", formatMoney(averageDealValue)],
           ].map(([label, value], index) => (
@@ -1540,7 +1554,7 @@ function PersonalGoalsAnalytics({
 
         <TopExclusiveCreators
           creators={personalExclusiveCreators}
-          deals={deals}
+          deals={memberDeals}
           title={`${member.name}'s Top Creators`}
           description="Your exclusive creators ranked by the value of deals connected to your own portfolio."
         />

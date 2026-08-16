@@ -1162,7 +1162,7 @@ function calculateTotals(team: Teammate[], deals: Deal[]) {
   };
 }
 
-function memberIdentityMatches(
+export function memberIdentityMatches(
   value: string,
   member: Pick<Teammate, "name" | "worksheetName" | "id">,
 ) {

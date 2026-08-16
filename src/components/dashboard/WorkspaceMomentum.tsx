@@ -1,15 +1,4 @@
-import { useEffect, useState } from "react";
-import { Player } from "@remotion/player";
-import {
-  AbsoluteFill,
-  Easing,
-  Interactive,
-  interpolate,
-  useCurrentFrame,
-  useVideoConfig,
-} from "remotion";
-
-type MomentumSceneProps = {
+type MomentumProps = {
   current: number;
   target: number;
   memberCount: number;
@@ -20,263 +9,56 @@ function formatMoney(value: number) {
   return `£${Math.round(value).toLocaleString()}`;
 }
 
-export function MomentumScene({ current, target, memberCount, personal }: MomentumSceneProps) {
-  const frame = useCurrentFrame();
-  const { durationInFrames, fps } = useVideoConfig();
+export function WorkspaceMomentum({ current, target, memberCount, personal }: MomentumProps) {
   const progress = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
 
   return (
-    <AbsoluteFill
-      style={{
-        background: "linear-gradient(120deg, #10131b 0%, #171d2c 48%, #241629 100%)",
-        color: "white",
-        fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-        isolation: "isolate",
-        overflow: "hidden",
-      }}
+    <section
+      className="relative isolate min-h-[270px] overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(120deg,#10131b_0%,#171d2c_48%,#241629_100%)] px-6 py-7 text-white shadow-[0_28px_80px_rgba(22,18,35,.16)] sm:min-h-[290px] sm:px-10 sm:py-9 lg:min-h-[300px] lg:px-12"
+      aria-label={`${personal ? "Personal" : "Team"} momentum: ${progress}% of goal`}
     >
-      <Interactive.Div
-        name="Blue orbit glow"
-        style={{
-          position: "absolute",
-          width: 640,
-          height: 640,
-          borderRadius: 999,
-          border: "2px solid rgba(133, 220, 255, 0.18)",
-          left: 920,
-          top: -120,
-          zIndex: 0,
-          rotate: interpolate(frame, [0, durationInFrames], ["0deg", "360deg"], {
-            extrapolateLeft: "clamp",
-            extrapolateRight: "clamp",
-            easing: Easing.linear,
-          }),
-        }}
+      <div
+        aria-hidden="true"
+        className="tb-momentum-orbit pointer-events-none absolute -right-16 -top-28 h-[27rem] w-[27rem] rounded-full border border-fun-blue/20 sm:-right-6 sm:h-[31rem] sm:w-[31rem]"
       >
-        <Interactive.Div
-          name="Blue orbiting dot"
-          style={{
-            position: "absolute",
-            width: 54,
-            height: 54,
-            borderRadius: 999,
-            background: "linear-gradient(135deg, #9ce7ff, #80a8ff)",
-            boxShadow: "0 0 60px rgba(127, 214, 255, .55)",
-            left: 62,
-            top: 62,
-          }}
-        />
-      </Interactive.Div>
-
-      <Interactive.Div
-        name="Pink ambient glow"
-        style={{
-          position: "absolute",
-          width: 520,
-          height: 520,
-          borderRadius: 999,
-          background:
-            "radial-gradient(circle, rgba(255, 134, 177, .26), rgba(255, 134, 177, 0) 68%)",
-          right: -80,
-          bottom: -260,
-          zIndex: 0,
-          scale: interpolate(frame, [0, 2 * fps, 4 * fps], [0.96, 1.08, 0.96], {
-            extrapolateLeft: "clamp",
-            extrapolateRight: "clamp",
-            easing: Easing.bezier(0.16, 1, 0.3, 1),
-            output: "perceptual-scale",
-          }),
-        }}
+        <span className="absolute left-12 top-14 h-9 w-9 rounded-full bg-gradient-to-br from-[#9ce7ff] to-[#80a8ff] shadow-[0_0_55px_rgba(127,214,255,.55)]" />
+      </div>
+      <div
+        aria-hidden="true"
+        className="tb-momentum-glow pointer-events-none absolute -bottom-64 -right-20 h-[32rem] w-[32rem] rounded-full bg-[radial-gradient(circle,rgba(255,134,177,.26),rgba(255,134,177,0)_68%)]"
       />
 
-      <Interactive.Div
-        name="Momentum copy"
-        style={{
-          position: "absolute",
-          left: 76,
-          top: 54,
-          width: 800,
-          zIndex: 2,
-          opacity: interpolate(frame, [0, 0.8 * fps], [0, 1], {
-            extrapolateLeft: "clamp",
-            extrapolateRight: "clamp",
-            easing: Easing.bezier(0.16, 1, 0.3, 1),
-          }),
-          translate: interpolate(frame, [0, 0.8 * fps], ["0px 28px", "0px 0px"], {
-            extrapolateLeft: "clamp",
-            extrapolateRight: "clamp",
-            easing: Easing.bezier(0.16, 1, 0.3, 1),
-          }),
-        }}
-      >
-        <Interactive.Div
-          name="Momentum eyebrow"
-          style={{
-            color: "rgba(255,255,255,.58)",
-            fontSize: 22,
-            fontWeight: 800,
-            letterSpacing: 4,
-            textTransform: "uppercase",
-          }}
-        >
+      <div className="tb-momentum-copy relative z-10 max-w-[48rem] pr-28 sm:pr-44">
+        <div className="text-xs font-extrabold uppercase tracking-[0.22em] text-white/60 sm:text-sm">
           {personal ? "Your momentum" : "Team momentum"}
-        </Interactive.Div>
-        <Interactive.Div
-          name="Momentum headline"
-          style={{
-            fontSize: 64,
-            fontWeight: 900,
-            letterSpacing: -3.5,
-            lineHeight: 0.98,
-            marginTop: 14,
-          }}
-        >
+        </div>
+        <h2 className="mt-3 text-3xl font-black leading-[0.98] tracking-[-0.045em] sm:text-4xl lg:text-5xl">
           Keep the streak moving.
-        </Interactive.Div>
-        <Interactive.Div
-          name="Momentum supporting text"
-          style={{
-            color: "rgba(255,255,255,.62)",
-            fontSize: 24,
-            fontWeight: 600,
-            lineHeight: 1.35,
-            marginTop: 16,
-            maxWidth: 760,
-          }}
-        >
+        </h2>
+        <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-white/60 sm:text-base">
           Live progress from the workspace, turned into one clear daily pulse.
-        </Interactive.Div>
-      </Interactive.Div>
+        </p>
+      </div>
 
-      <Interactive.Div
-        name="Progress capsule"
-        style={{
-          position: "absolute",
-          alignItems: "center",
-          background: "rgba(255,255,255,.08)",
-          border: "1px solid rgba(255,255,255,.12)",
-          borderRadius: 32,
-          bottom: 32,
-          display: "flex",
-          gap: 24,
-          left: 76,
-          padding: "16px 24px",
-          width: 780,
-          zIndex: 2,
-          opacity: interpolate(frame, [0.5 * fps, 1.3 * fps], [0, 1], {
-            extrapolateLeft: "clamp",
-            extrapolateRight: "clamp",
-            easing: Easing.bezier(0.16, 1, 0.3, 1),
-          }),
-        }}
-      >
-        <Interactive.Div
-          name="Progress percent"
-          style={{ flexShrink: 0, fontSize: 38, fontWeight: 900, lineHeight: 1 }}
-        >
-          {progress}%
-        </Interactive.Div>
-        <Interactive.Div
-          name="Progress track"
-          style={{
-            background: "rgba(255,255,255,.1)",
-            borderRadius: 99,
-            flex: 1,
-            height: 16,
-            minWidth: 260,
-            overflow: "hidden",
-          }}
-        >
-          <Interactive.Div
-            name="Progress fill"
-            style={{
-              background: "linear-gradient(90deg, #a6f04d, #ffe036, #ff8c66)",
-              borderRadius: 99,
-              height: 16,
-              width: `${progress}%`,
-              scale: interpolate(frame, [0.8 * fps, 2 * fps], [0, 1], {
-                extrapolateLeft: "clamp",
-                extrapolateRight: "clamp",
-                easing: Easing.spring({ damping: 200 }),
-                output: "perceptual-scale",
-              }),
-              transformOrigin: "left center",
-            }}
-          />
-        </Interactive.Div>
-        <Interactive.Div
-          name="Progress value"
-          style={{ flexShrink: 0, fontSize: 23, fontWeight: 800, whiteSpace: "nowrap" }}
-        >
-          {formatMoney(current)} / {formatMoney(target)}
-        </Interactive.Div>
-      </Interactive.Div>
-
-      <Interactive.Div
-        name="Active members badge"
-        style={{
-          alignItems: "center",
-          background: "rgba(255,255,255,.92)",
-          borderRadius: 34,
-          color: "#131722",
-          display: "flex",
-          fontSize: 25,
-          fontWeight: 900,
-          gap: 14,
-          padding: "18px 24px",
-          position: "absolute",
-          right: 72,
-          top: 68,
-          zIndex: 2,
-          translate: interpolate(frame, [0.2 * fps, 1.1 * fps], ["30px 0px", "0px 0px"], {
-            extrapolateLeft: "clamp",
-            extrapolateRight: "clamp",
-            easing: Easing.spring({ damping: 200 }),
-          }),
-        }}
-      >
-        <Interactive.Div
-          name="Live status dot"
-          style={{
-            background: "#a6f04d",
-            borderRadius: 99,
-            boxShadow: "0 0 22px rgba(166, 240, 77, .7)",
-            height: 18,
-            width: 18,
-          }}
-        />
+      <div className="tb-momentum-badge absolute right-5 top-5 z-10 flex items-center gap-2 rounded-full bg-white/95 px-3 py-2 text-xs font-black text-[#131722] shadow-sm sm:right-8 sm:top-8 sm:px-4 sm:text-sm">
+        <span className="h-2.5 w-2.5 rounded-full bg-fun-lime shadow-[0_0_18px_rgba(166,240,77,.7)]" />
         {memberCount} active member{memberCount === 1 ? "" : "s"}
-      </Interactive.Div>
-    </AbsoluteFill>
-  );
-}
+      </div>
 
-export function WorkspaceMomentum({ current, target, memberCount, personal }: MomentumSceneProps) {
-  const [reduceMotion, setReduceMotion] = useState(false);
-
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => setReduceMotion(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
-
-  return (
-    <section className="relative isolate overflow-hidden rounded-[2rem] border border-white/10 bg-[#10131b] shadow-[0_28px_80px_rgba(22,18,35,.16)]">
-      <Player
-        component={MomentumScene}
-        inputProps={{ current, target, memberCount, personal }}
-        durationInFrames={120}
-        compositionWidth={1600}
-        compositionHeight={420}
-        fps={30}
-        autoPlay={!reduceMotion}
-        loop={!reduceMotion}
-        controls={false}
-        clickToPlay={false}
-        style={{ display: "block", width: "100%", aspectRatio: "1600 / 420" }}
-      />
+      <div className="absolute bottom-6 left-6 right-6 z-10 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 sm:bottom-8 sm:left-10 sm:right-auto sm:w-[min(49rem,calc(100%-5rem))] sm:gap-5 sm:px-5 lg:left-12 lg:w-[49rem]">
+        <strong className="shrink-0 text-2xl font-black leading-none sm:text-3xl">
+          {progress}%
+        </strong>
+        <div className="h-2.5 min-w-12 flex-1 overflow-hidden rounded-full bg-white/10 sm:h-3">
+          <div
+            className="tb-momentum-progress h-full origin-left rounded-full bg-gradient-to-r from-fun-lime via-fun-yellow to-fun-orange"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <strong className="shrink-0 whitespace-nowrap text-xs font-extrabold sm:text-sm">
+          {formatMoney(current)} / {formatMoney(target)}
+        </strong>
+      </div>
     </section>
   );
 }

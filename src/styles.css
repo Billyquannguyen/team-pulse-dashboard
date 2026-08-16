@@ -301,6 +301,53 @@
     }
   }
 
+  @keyframes tb-momentum-orbit {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes tb-momentum-glow {
+    0%,
+    100% {
+      transform: scale(0.96);
+    }
+
+    50% {
+      transform: scale(1.08);
+    }
+  }
+
+  @keyframes tb-momentum-progress {
+    from {
+      transform: scaleX(0.08);
+    }
+
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  @keyframes tb-momentum-enter {
+    from {
+      transform: translateY(8px);
+    }
+
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes tb-momentum-badge-enter {
+    from {
+      transform: translateX(10px);
+    }
+
+    to {
+      transform: translateX(0);
+    }
+  }
+
   .tb-workspace-shell {
     background:
       radial-gradient(
@@ -341,6 +388,26 @@
 
   .tb-page-enter {
     animation: tb-page-arrive 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .tb-momentum-orbit {
+    animation: tb-momentum-orbit 18s linear infinite;
+  }
+
+  .tb-momentum-glow {
+    animation: tb-momentum-glow 5s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  }
+
+  .tb-momentum-progress {
+    animation: tb-momentum-progress 850ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .tb-momentum-copy {
+    animation: tb-momentum-enter 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .tb-momentum-badge {
+    animation: tb-momentum-badge-enter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
   .tb-hover-lift {
@@ -468,7 +535,12 @@
 
   @media (prefers-reduced-motion: reduce) {
     .tb-page-enter,
-    .tb-workspace-main::before {
+    .tb-workspace-main::before,
+    .tb-momentum-orbit,
+    .tb-momentum-glow,
+    .tb-momentum-progress,
+    .tb-momentum-copy,
+    .tb-momentum-badge {
       animation: none;
     }
 
