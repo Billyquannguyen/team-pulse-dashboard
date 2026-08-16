@@ -422,6 +422,7 @@ function TeamMembersPage() {
                 <MemberProfileCard
                   key={`${member.id}-${member.rowNumber ?? "profile"}`}
                   member={member}
+                  canEdit={isAdmin || auth.user?.teamMemberId?.toLowerCase() === member.id.toLowerCase()}
                   onEdit={() => setProfileModal({ member })}
                 />
               ))}
@@ -1033,7 +1034,15 @@ function ProfileModal({
   );
 }
 
-function MemberProfileCard({ member, onEdit }: { member: TeamMemberConfig; onEdit: () => void }) {
+function MemberProfileCard({
+  member,
+  canEdit,
+  onEdit,
+}: {
+  member: TeamMemberConfig;
+  canEdit: boolean;
+  onEdit: () => void;
+}) {
   const socialLinks = [
     { label: "Instagram", value: normalizeExternalUrl(member.instagramUrl), Icon: Instagram },
     { label: "TikTok", value: normalizeExternalUrl(member.tiktokUrl), Icon: Music2 },
@@ -1055,14 +1064,16 @@ function MemberProfileCard({ member, onEdit }: { member: TeamMemberConfig; onEdi
           />
           <div className="mb-2 flex items-center gap-2">
             <StatusBadge status={member.status} />
-            <button
-              type="button"
-              onClick={onEdit}
-              className="tb-action inline-flex h-8 items-center gap-1.5 rounded-xl bg-muted px-3 text-xs font-bold hover:bg-accent"
-            >
-              <Edit3 className="h-3.5 w-3.5" />
-              Edit
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={onEdit}
+                className="tb-action inline-flex h-8 items-center gap-1.5 rounded-xl bg-muted px-3 text-xs font-bold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+                Edit
+              </button>
+            )}
           </div>
         </div>
 

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
@@ -45,6 +45,7 @@ const linkFilters = [
 
 type LinkFilter = (typeof linkFilters)[number];
 const PAGE_SIZE = 20;
+const rootRoute = getRouteApi("__root__");
 
 function formatLinkLabel(url: string) {
   return url.replace(/^https?:\/\//, "").replace(/^www\./, "");
@@ -55,6 +56,7 @@ function uniqueSorted(values: string[]) {
 }
 
 function DealsPage() {
+  const auth = rootRoute.useLoaderData();
   const [q, setQ] = useState("");
   const [member, setMember] = useState("All members");
   const [status, setStatus] = useState("All statuses");
@@ -216,12 +218,14 @@ function DealsPage() {
               <Filter className="h-3.5 w-3.5" />
               Smart filters
             </div>
-            <DashboardSelectField
-              label="Member"
-              value={member}
-              options={members}
-              onChange={setMember}
-            />
+            {auth.isAdmin && (
+              <DashboardSelectField
+                label="Member"
+                value={member}
+                options={members}
+                onChange={setMember}
+              />
+            )}
             <DashboardSelectField
               label="Status"
               value={status}

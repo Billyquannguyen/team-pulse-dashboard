@@ -7,9 +7,14 @@ import { GoalProgressCard } from "@/components/dashboard/GoalProgressCard";
 import { LeaderboardCard } from "@/components/dashboard/LeaderboardCard";
 import { HomeGoalSnapshotCard } from "@/components/dashboard/HomeGoalSnapshotCard";
 import { OutreachSummaryCard } from "@/components/dashboard/OutreachSummaryCard";
-import { dashboardSheetQuery } from "@/lib/sheets-public";
+import { dashboardSheetQuery, leaderboardQuery } from "@/lib/sheets-public";
 import { useGoalSettings } from "@/lib/goal-settings";
-import { getMemberProgressionGoal, getTeamMonthlyGoal } from "@/lib/goal-targets";
+import {
+  getMemberMonthlyGoal,
+  getMemberProgressionGoal,
+  getTeamMonthlyGoal,
+} from "@/lib/goal-targets";
+import { getRouteApi } from "@tanstack/react-router";
 import {
   team as fallbackTeam,
   totalCommission,
@@ -26,15 +31,41 @@ export const Route = createFileRoute("/")({
   }),
   component: Dashboard,
 });
+const rootRoute = getRouteApi("__root__");
 
 function Dashboard() {
+  const auth = rootRoute.useLoaderData();
   const { data, isLoading } = useQuery(dashboardSheetQuery);
+  const { data: leaderboardData } = useQuery(leaderboardQuery);
   const [settings] = useGoalSettings();
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
   const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
   const getProgressionGoal = (member: (typeof team)[number]) =>
     getMemberProgressionGoal(settings, member);
-  const teamMonthlyGoal = getTeamMonthlyGoal(settings);
+  const teamMonthlyGoal = auth.isAdmin
+    ? getTeamMonthlyGoal(settings)
+    : team[0]
+      ? getMemberMonthlyGoal(settings, team[0])
+      : 0;
+  const leaderboardTeam = auth.isAdmin
+    ? team
+    : (leaderboardData?.members ?? []).map((member) => ({
+        id: member.id,
+        name: member.name,
+        initials: member.initials,
+        role: "Member",
+        avatarUrl: member.avatarUrl,
+        commission: member.paidCommission,
+        paidCommission: member.paidCommission,
+        monthCommission: member.monthCommission,
+        pendingOwed: 0,
+        dealsClosed: member.dealsClosed,
+        revenue: member.dealValue,
+        revenueGoal: 0,
+        dealsGoal: 0,
+        exclusiveCreators: member.exclusiveCreators,
+        nonExclusiveCreators: 0,
+      }));
   const totals = data?.totals ?? {
     totalPaid: canUseLocalFallback ? totalCommission : 0,
     totalPaidCommission: 0,
@@ -51,7 +82,7 @@ function Dashboard() {
   return (
     <div className="space-y-6">
       <AppHeader
-        title="Hi, Team Billion 👋"
+        title={auth.isAdmin ? "Hi, Team Billion 👋" : `Hi, ${team[0]?.name ?? auth.user?.displayName ?? "there"} 👋`}
         subtitle={
           isLoading
             ? "Loading live Google Sheets data..."
@@ -103,14 +134,14 @@ function Dashboard() {
           <GoalProgressCard
             current={totals.paidThisMonth}
             target={teamMonthlyGoal}
-            title="Team monthly goal"
+            title={auth.isAdmin ? "Team monthly goal" : "My monthly goal"}
             badge="Monthly"
             progressLabel="to monthly goal"
             paidThisMonth={totals.paidThisMonth}
-            team={team}
+            team={auth.isAdmin ? team : team.slice(0, 1)}
           />
         </div>
-        <LeaderboardCard team={team} getProgressionGoal={getProgressionGoal} />
+        <LeaderboardCard team={leaderboardTeam} getProgressionGoal={getProgressionGoal} />
       </section>
 
       <section>

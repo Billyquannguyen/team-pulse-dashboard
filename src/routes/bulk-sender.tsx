@@ -218,7 +218,7 @@ function BulkSenderPage() {
         subtitle="Create personalized drafts or prepare safe follow-ups for unanswered outreach."
       />
       <div
-        className="mx-auto grid w-full max-w-md grid-cols-2 rounded-[22px] border border-white/10 bg-foreground p-1.5 text-background shadow-sm"
+        className="mx-auto grid w-full max-w-lg grid-cols-2 rounded-[22px] border bg-card p-1.5 shadow-sm ring-1 ring-border/60"
         role="tablist"
         aria-label="Bulk Sender tools"
       >
@@ -230,10 +230,10 @@ function BulkSenderPage() {
           aria-selected={activeTool === "bulk-drafts"}
           onClick={() => setActiveTool("bulk-drafts")}
           className={cn(
-            "rounded-[17px] px-5 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-foreground",
+            "rounded-[17px] px-5 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
             activeTool === "bulk-drafts"
-              ? "border border-white/20 bg-background/10 text-background shadow-sm"
-              : "border border-transparent text-background/55 hover:bg-white/5 hover:text-background",
+              ? "bg-foreground text-background shadow-sm"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
           )}
         >
           Bulk Outreach
@@ -246,10 +246,10 @@ function BulkSenderPage() {
           aria-selected={activeTool === "bulk-follow-up"}
           onClick={() => setActiveTool("bulk-follow-up")}
           className={cn(
-            "rounded-[17px] px-5 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-foreground",
+            "rounded-[17px] px-5 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
             activeTool === "bulk-follow-up"
-              ? "border border-white/20 bg-background/10 text-background shadow-sm"
-              : "border border-transparent text-background/55 hover:bg-white/5 hover:text-background",
+              ? "bg-foreground text-background shadow-sm"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
           )}
         >
           Bulk Follow-up

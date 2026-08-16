@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { getRouteApi, Link, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   FileSpreadsheet,
@@ -17,7 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import { totalMonthCommission } from "@/data/team";
 import { useGoalSettings } from "@/lib/goal-settings";
-import { getTeamMonthlyGoal } from "@/lib/goal-targets";
+import { getMemberMonthlyGoal, getTeamMonthlyGoal } from "@/lib/goal-targets";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { TeamMonthlyGoalCard } from "@/components/ui/team-monthly-goal-card";
 
@@ -34,14 +34,20 @@ const items = [
   { to: "/assets", label: "Team Assets", icon: LinkIcon },
   { to: "/team-members", label: "Team Members", icon: Settings2 },
 ] as const;
+const rootRoute = getRouteApi("__root__");
 
 export function AppSidebar() {
+  const auth = rootRoute.useLoaderData();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const { data } = useQuery(dashboardSheetQuery);
   const [settings] = useGoalSettings();
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
   const currentMonthCommission =
     data?.totals.paidThisMonth ?? (canUseLocalFallback ? totalMonthCommission : 0);
+  const goalTarget =
+    !auth.isAdmin && data?.team[0]
+      ? getMemberMonthlyGoal(settings, data.team[0])
+      : getTeamMonthlyGoal(settings);
   const showGoalCard = !path.startsWith("/goals");
 
   return (
@@ -92,7 +98,7 @@ export function AppSidebar() {
         >
           <TeamMonthlyGoalCard
             current={currentMonthCommission}
-            target={getTeamMonthlyGoal(settings)}
+            target={goalTarget}
           />
         </Link>
       )}

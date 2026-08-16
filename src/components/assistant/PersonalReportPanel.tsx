@@ -244,13 +244,25 @@ export function PersonalReportPanel({
   members,
   data,
   settings,
+  isAdmin,
+  teamMemberId,
 }: {
   members: Teammate[];
   data: DashboardSheetData | undefined;
   settings: GoalSettings;
   isAdmin: boolean;
+  teamMemberId: string | null;
 }) {
-  const [memberName, setMemberName] = useState("");
+  const ownMember = useMemo(
+    () =>
+      members.find(
+        (item) =>
+          item.id.toLowerCase() === teamMemberId?.toLowerCase() ||
+          item.worksheetName?.toLowerCase() === teamMemberId?.toLowerCase(),
+      ) ?? (!isAdmin ? members[0] : undefined),
+    [isAdmin, members, teamMemberId],
+  );
+  const [memberName, setMemberName] = useState(isAdmin ? "" : ownMember?.name ?? "");
   const [draftMemberName, setDraftMemberName] = useState(members[0]?.name ?? "");
   const [isPickerOpen, setIsPickerOpen] = useState(true);
   const member = memberName ? (members.find((item) => item.name === memberName) ?? null) : null;
@@ -259,7 +271,7 @@ export function PersonalReportPanel({
     [data, member, members, settings],
   );
   const hasMembers = members.length > 0;
-  const pickerOpen = hasMembers && (!memberName || isPickerOpen);
+  const pickerOpen = isAdmin && hasMembers && (!memberName || isPickerOpen);
   const [aiReport, setAiReport] = useState<AIPersonalReport | null>(null);
   const [aiError, setAiError] = useState("");
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
@@ -276,6 +288,13 @@ export function PersonalReportPanel({
           report.metrics.creatorsSourced,
         ].join(":")
       : "";
+
+  useEffect(() => {
+    if (!isAdmin && ownMember?.name && memberName !== ownMember.name) {
+      setMemberName(ownMember.name);
+      setIsPickerOpen(false);
+    }
+  }, [isAdmin, memberName, ownMember]);
 
   useEffect(() => {
     if (!members.some((item) => item.name === draftMemberName) && members[0]?.name) {
@@ -444,16 +463,18 @@ export function PersonalReportPanel({
                 Regenerate AI report
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={() => {
-                setDraftMemberName(memberName);
-                setIsPickerOpen(true);
-              }}
-              className="tb-action inline-flex h-10 items-center justify-center rounded-2xl bg-muted px-4 text-sm font-bold hover:bg-accent"
-            >
-              Change member
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftMemberName(memberName);
+                  setIsPickerOpen(true);
+                }}
+                className="tb-action inline-flex h-10 items-center justify-center rounded-2xl bg-muted px-4 text-sm font-bold hover:bg-accent"
+              >
+                Change member
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -530,7 +551,11 @@ export function PersonalReportPanel({
         </section>
       ) : null}
 
-      {memberName && !report ? (
+      {!isAdmin && !teamMemberId ? (
+        <div className="rounded-3xl border border-warning/40 bg-warning/10 p-6 text-sm font-bold text-amber-900">
+          Your account is approved, but an admin still needs to connect it to your member profile.
+        </div>
+      ) : memberName && !report ? (
         <div className="rounded-3xl border border-border bg-background/75 p-6 text-sm font-bold text-muted-foreground">
           No member data available yet.
         </div>

@@ -1314,6 +1314,10 @@ function GoalsPage() {
   const getProgressionTarget = (member: Teammate) => getMemberProgressionGoal(settings, member);
   const getExclusiveCreatorTarget = (member: Teammate) =>
     getMemberExclusiveCreatorGoal(settings, member);
+  const personalMember = !auth.isAdmin ? team[0] : undefined;
+  const primaryMonthlyTarget = personalMember
+    ? getMonthlyTarget(personalMember)
+    : getTeamMonthlyGoal(settings);
 
   useEffect(() => {
     console.info(
@@ -1335,21 +1339,25 @@ function GoalsPage() {
   return (
     <div className="space-y-6">
       <AppHeader
-        title="Goals & Analytics"
-        subtitle="Current-month closed commission for productivity, paid commission for progression."
+        title={auth.isAdmin ? "Goals & Analytics" : "My Goals & Analytics"}
+        subtitle={
+          auth.isAdmin
+            ? "Current-month closed commission for productivity, paid commission for progression."
+            : "Your commission, progression, creator portfolio, and outreach performance."
+        }
       />
 
       <GoalProgressPanel
-        title="Team monthly goal"
+        title={auth.isAdmin ? "Team monthly goal" : "My monthly goal"}
         label="Current-month closed"
         current={totals.paidThisMonth}
-        target={getTeamMonthlyGoal(settings)}
+        target={primaryMonthlyTarget}
         tone="lime"
         icon={Target}
         size="hero"
       />
 
-      <section className="space-y-3">
+      {auth.isAdmin && <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h3 className="text-base font-semibold">Individual monthly goals</h3>
@@ -1384,7 +1392,7 @@ function GoalsPage() {
             />
           ))}
         </div>
-      </section>
+      </section>}
 
       <section className="space-y-3">
         <div>
@@ -1420,17 +1428,19 @@ function GoalsPage() {
           </p>
         </div>
 
-        <GoalProgressPanel
-          title="Team exclusive creator goal"
-          label="Exclusive signed"
-          current={teamExclusiveCreators}
-          target={getTeamExclusiveCreatorGoal(settings)}
-          tone="orange"
-          icon={UserCheck}
-          size="hero"
-          formatValue={formatCount}
-          formatGap={getCountGoalGap}
-        />
+        {auth.isAdmin && (
+          <GoalProgressPanel
+            title="Team exclusive creator goal"
+            label="Exclusive signed"
+            current={teamExclusiveCreators}
+            target={getTeamExclusiveCreatorGoal(settings)}
+            tone="orange"
+            icon={UserCheck}
+            size="hero"
+            formatValue={formatCount}
+            formatGap={getCountGoalGap}
+          />
+        )}
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {sortedByExclusiveCreators.map((member, index) => (
@@ -1461,12 +1471,14 @@ function GoalsPage() {
 
       <TopExclusiveCreators creators={creators} deals={deals} />
 
-      <AdminGoalControls
-        members={team}
-        settings={settings}
-        onChange={setSettings}
-        authRole={auth.role}
-      />
+      {auth.isAdmin && (
+        <AdminGoalControls
+          members={team}
+          settings={settings}
+          onChange={setSettings}
+          authRole={auth.role}
+        />
+      )}
       <MotivationCardDialog card={motivationCard} onClose={() => setMotivationCard(null)} />
       <MonthlyClosedCommissionDialog
         member={progressionChartMember}

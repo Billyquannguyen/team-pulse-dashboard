@@ -131,7 +131,7 @@ function RootComponent() {
             </main>
           </div>
           <MobileNav />
-          <AssistantPanel authRole={auth.role} />
+          <AssistantPanel authRole={auth.role} teamMemberId={auth.user?.teamMemberId ?? null} />
         </div>
       ) : auth.isSignedIn ? (
         <MemberAccessScreen auth={auth} />

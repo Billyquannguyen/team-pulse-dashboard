@@ -19,7 +19,6 @@ import {
   ListOrdered,
   Loader2,
   MailPlus,
-  RefreshCw,
   Save,
   Search,
   Trash2,
@@ -180,6 +179,35 @@ function ComposerButton({
     >
       <Icon className="h-4 w-4" />
     </button>
+  );
+}
+
+function WorkflowHeading({
+  step,
+  title,
+  description,
+  children,
+}: {
+  step: number;
+  title: string;
+  description: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex min-w-0 items-start gap-3.5">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground text-sm font-black text-background shadow-sm">
+          {step}
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-base font-black tracking-tight">{title}</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            {description}
+          </p>
+        </div>
+      </div>
+      {children}
+    </div>
   );
 }
 
@@ -402,28 +430,23 @@ export function BulkFollowUpPanel() {
   };
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl bg-card p-5 shadow-sm ring-1 ring-border md:p-6">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/12 text-primary">
-            <Search className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="font-black">Find unanswered outreach</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Labels match any selection. Only outbound-first threads with no received message
-              qualify.
-            </p>
-          </div>
+    <div className="space-y-5 pb-2">
+      <section className="overflow-hidden rounded-[28px] bg-card shadow-sm ring-1 ring-border">
+        <div className="border-b bg-gradient-to-r from-primary/[0.08] via-card to-card px-5 py-5 md:px-6">
+          <WorkflowHeading
+            step={1}
+            title="Choose who should be followed up"
+            description="Match any selected Gmail label, then narrow the results by interaction level and the age of the last email you sent."
+          />
         </div>
-        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(220px,0.7fr)_minmax(190px,0.55fr)_auto] lg:items-end">
-          <div>
-            <div className="mb-2 text-xs font-black uppercase tracking-wide text-muted-foreground">
+        <div className="p-5 md:p-6">
+          <fieldset>
+            <legend className="text-xs font-black uppercase tracking-[0.12em] text-muted-foreground">
               Gmail labels · match any
-            </div>
-            <div className="max-h-36 overflow-auto rounded-2xl border bg-background p-2">
+            </legend>
+            <div className="mt-3 flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-2xl border bg-background/70 p-3">
               {labelsQuery.isLoading ? (
-                <div className="p-3 text-sm font-bold text-muted-foreground">
+                <div className="px-2 py-2 text-sm font-bold text-muted-foreground">
                   <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
                   Loading labels...
                 </div>
@@ -431,25 +454,97 @@ export function BulkFollowUpPanel() {
                 labelsQuery.data?.labels.map((label) => (
                   <label
                     key={label.id}
-                    className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm font-bold hover:bg-accent"
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-bold transition focus-within:ring-2 focus-within:ring-ring",
+                      selectedLabels.has(label.id)
+                        ? "border-foreground bg-foreground text-background shadow-sm"
+                        : "bg-card text-foreground hover:border-primary/40 hover:bg-primary/[0.06]",
+                    )}
                   >
                     <input
                       type="checkbox"
                       checked={selectedLabels.has(label.id)}
                       onChange={() => toggleLabel(label.id)}
-                      className="h-4 w-4 accent-primary"
+                      className="sr-only"
                     />
+                    <span
+                      className={cn(
+                        "flex h-4 w-4 items-center justify-center rounded-full border text-[10px]",
+                        selectedLabels.has(label.id)
+                          ? "border-background/40 bg-background/15"
+                          : "border-border",
+                      )}
+                    >
+                      {selectedLabels.has(label.id) ? "✓" : ""}
+                    </span>
                     <span>{label.name}</span>
                   </label>
                 ))
               )}
             </div>
-            {labelsQuery.data?.canManage && (
-              <div className="mt-3 rounded-2xl border border-dashed p-3">
-                <div className="text-xs font-black uppercase tracking-wide text-muted-foreground">
-                  Admin allowed labels
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
+          </fieldset>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2 lg:grid-cols-[minmax(230px,1fr)_minmax(210px,0.8fr)_auto] lg:items-end">
+            <label>
+              <span className="mb-2 block text-xs font-black uppercase tracking-[0.12em] text-muted-foreground">
+                Level of interaction
+              </span>
+              <select
+                value={interactionLevel}
+                onChange={(event) => setInteractionLevel(Number(event.target.value))}
+                className="h-12 w-full rounded-2xl border bg-background px-4 text-sm font-bold outline-none transition focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
+              >
+                {[1, 2, 3, 4, 5].map((level) => (
+                  <option key={level} value={level}>
+                    {interactionLabel(level)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="mb-2 block text-xs font-black uppercase tracking-[0.12em] text-muted-foreground">
+                Last sent email
+              </span>
+              <select
+                value={minimumDays}
+                onChange={(event) => setMinimumDays(Number(event.target.value) as 3 | 7 | 14 | 30)}
+                className="h-12 w-full rounded-2xl border bg-background px-4 text-sm font-bold outline-none transition focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
+              >
+                {[3, 7, 14, 30].map((days) => (
+                  <option key={days} value={days}>
+                    At least {days} days ago
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              type="button"
+              disabled={scanning || selectedLabelIds.length === 0}
+              onClick={() => void scan()}
+              className="h-12 rounded-2xl px-6 shadow-sm md:col-span-2 lg:col-span-1"
+            >
+              {scanning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Search className="h-4 w-4" />
+              )}
+              Find matching threads
+            </Button>
+          </div>
+
+          {labelsQuery.data?.canManage && (
+            <details className="group mt-5 rounded-2xl border border-dashed bg-muted/25">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-black hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <span>Admin label access</span>
+                <span className="rounded-full bg-background px-2.5 py-1 text-xs text-muted-foreground ring-1 ring-border">
+                  {allowedLabelIds.length} allowed
+                </span>
+              </summary>
+              <div className="border-t px-4 py-4">
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Choose which Gmail labels members are allowed to use in this tool.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-3">
                   {labelsQuery.data.labels.map((label) => (
                     <label
                       key={`allowed-${label.id}`}
@@ -471,100 +566,60 @@ export function BulkFollowUpPanel() {
                     </label>
                   ))}
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={labelSettingsBusy}
-                  onClick={() => void saveAllowedLabels()}
-                  className="mt-3"
-                >
-                  Save allowed labels
-                </Button>
-                {labelSettingsMessage && (
-                  <p className="mt-2 text-xs font-bold">{labelSettingsMessage}</p>
-                )}
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={labelSettingsBusy}
+                    onClick={() => void saveAllowedLabels()}
+                  >
+                    {labelSettingsBusy ? "Saving..." : "Save label access"}
+                  </Button>
+                  {labelSettingsMessage && (
+                    <p className="text-xs font-bold text-muted-foreground">
+                      {labelSettingsMessage}
+                    </p>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
-          <label>
-            <span className="mb-2 block text-xs font-black uppercase tracking-wide text-muted-foreground">
-              Level of interaction
-            </span>
-            <select
-              value={interactionLevel}
-              onChange={(event) => setInteractionLevel(Number(event.target.value))}
-              className="h-12 w-full rounded-2xl border bg-background px-4 text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            </details>
+          )}
+          {(scanError || labelsQuery.error) && (
+            <div
+              role="alert"
+              className="mt-4 rounded-2xl bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive"
             >
-              {[1, 2, 3, 4, 5].map((level) => (
-                <option key={level} value={level}>
-                  {interactionLabel(level)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span className="mb-2 block text-xs font-black uppercase tracking-wide text-muted-foreground">
-              Last sent email
-            </span>
-            <select
-              value={minimumDays}
-              onChange={(event) => setMinimumDays(Number(event.target.value) as 3 | 7 | 14 | 30)}
-              className="h-12 w-full rounded-2xl border bg-background px-4 text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {[3, 7, 14, 30].map((days) => (
-                <option key={days} value={days}>
-                  At least {days} days ago
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button
-            type="button"
-            disabled={scanning || selectedLabelIds.length === 0}
-            onClick={() => void scan()}
-            className="h-12 rounded-2xl px-5"
-          >
-            {scanning ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Filter threads
-          </Button>
-        </div>
-        {(scanError || labelsQuery.error) && (
-          <div
-            role="alert"
-            className="mt-4 rounded-2xl bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive"
-          >
-            {scanError ||
-              (labelsQuery.error instanceof Error
-                ? labelsQuery.error.message
-                : "Labels could not be loaded.")}
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-3xl bg-card p-5 shadow-sm ring-1 ring-border md:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="font-black">Review matching threads</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {candidates.length
-                ? `Showing the oldest ${oldestBatch.length} matching threads${hasMoreCandidates ? ". More matches exist." : "."}`
-                : "Run the filters to review eligible recipients."}
-            </p>
-          </div>
-          {oldestBatch.length > 0 && (
-            <span className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-black text-primary">
-              {selectedCandidates.length} selected
-            </span>
+              {scanError ||
+                (labelsQuery.error instanceof Error
+                  ? labelsQuery.error.message
+                  : "Labels could not be loaded.")}
+            </div>
           )}
         </div>
+      </section>
+
+      <section className="overflow-hidden rounded-[28px] bg-card shadow-sm ring-1 ring-border">
+        <div className="border-b px-5 py-5 md:px-6">
+          <WorkflowHeading
+            step={2}
+            title="Review matching threads"
+            description={
+              candidates.length
+                ? `Oldest outreach appears first. Showing up to ${oldestBatch.length} eligible threads${hasMoreCandidates ? ", with more matches available." : "."}`
+                : "Run the filters above, then confirm exactly who should receive a follow-up draft."
+            }
+          >
+            {oldestBatch.length > 0 && (
+              <span className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-black text-primary">
+                {selectedCandidates.length} selected
+              </span>
+            )}
+          </WorkflowHeading>
+        </div>
         {oldestBatch.length > 0 && (
-          <>
-            <div className="mt-5 max-h-[610px] overflow-auto rounded-2xl border">
+          <div className="p-5 md:p-6">
+            <div className="max-h-[540px] overflow-auto rounded-2xl border">
               <table className="w-full min-w-[860px] text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-muted/95 text-xs uppercase tracking-wide text-muted-foreground backdrop-blur">
                   <tr>
@@ -632,25 +687,36 @@ export function BulkFollowUpPanel() {
             <div className="mt-5">
               <Pagination page={page} totalPages={totalPages} onChange={setPage} />
             </div>
-          </>
+          </div>
+        )}
+        {oldestBatch.length === 0 && (
+          <div className="px-5 py-10 text-center md:px-6 md:py-12">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <Search className="h-5 w-5" />
+            </div>
+            <h3 className="mt-4 text-sm font-black">No threads loaded yet</h3>
+            <p className="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">
+              Select at least one Gmail label and run the search. Eligible threads will appear here
+              with their recipient, interaction level, and last-sent date.
+            </p>
+          </div>
         )}
       </section>
 
-      <section className="rounded-3xl bg-card p-5 shadow-sm ring-1 ring-border md:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="font-black">Follow-up template</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Templates are shared with the team. Add any sign-off you want directly in the
-              template. No signature or image is added automatically.
-            </p>
-          </div>
-          <Button type="button" variant="outline" onClick={() => loadTemplate(null)}>
-            New template
-          </Button>
+      <section className="overflow-hidden rounded-[28px] bg-card shadow-sm ring-1 ring-border">
+        <div className="border-b bg-gradient-to-r from-card via-card to-primary/[0.06] px-5 py-5 md:px-6">
+          <WorkflowHeading
+            step={3}
+            title="Write the follow-up"
+            description="Choose a shared template or write a new one. Gmail will attach it to the existing thread, so no subject line is needed."
+          >
+            <Button type="button" variant="outline" onClick={() => loadTemplate(null)}>
+              New template
+            </Button>
+          </WorkflowHeading>
         </div>
-        <div className="mt-5 grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-          <div className="max-h-[360px] space-y-2 overflow-auto rounded-2xl border bg-background p-2">
+        <div className="grid gap-5 p-5 md:p-6 xl:grid-cols-[240px_minmax(0,1fr)]">
+          <div className="max-h-[410px] space-y-2 overflow-auto rounded-2xl border bg-muted/25 p-2">
             {templatesQuery.isLoading ? (
               <div className="p-3 text-sm font-bold text-muted-foreground">
                 <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
@@ -685,8 +751,9 @@ export function BulkFollowUpPanel() {
                 </div>
               ))
             ) : (
-              <div className="p-4 text-sm font-semibold text-muted-foreground">
-                No saved templates yet.
+              <div className="px-3 py-8 text-center text-sm font-semibold text-muted-foreground">
+                <MailPlus className="mx-auto mb-3 h-5 w-5 opacity-60" />
+                No shared templates yet.
               </div>
             )}
           </div>
@@ -740,7 +807,7 @@ export function BulkFollowUpPanel() {
                   suppressContentEditableWarning
                   onInput={(event) => setBodyHtml(event.currentTarget.innerHTML)}
                   onPaste={pastePlainText}
-                  className="min-h-48 px-5 py-4 text-sm leading-relaxed outline-none [&_a]:text-primary [&_a]:underline"
+                  className="min-h-60 px-5 py-4 text-sm leading-relaxed outline-none empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-['Write_your_follow-up_message...'] [&_a]:text-primary [&_a]:underline"
                 />
               </div>
             </div>
@@ -814,15 +881,20 @@ export function BulkFollowUpPanel() {
         </section>
       ) : null}
 
-      <div className="sticky bottom-4 z-30 rounded-3xl bg-foreground p-4 text-background shadow-xl ring-1 ring-border/30 lg:mr-40">
+      <div className="sticky bottom-4 z-30 rounded-[24px] border bg-card/95 p-3.5 text-foreground shadow-xl backdrop-blur-xl">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="font-black">
-              {selectedCandidates.length} follow-up draft
-              {selectedCandidates.length === 1 ? "" : "s"} selected
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background">
+              <MailPlus className="h-4 w-4" />
             </div>
-            <div className="mt-0.5 text-xs text-background/65">
-              Nothing is sent automatically. Review every Gmail draft before sending.
+            <div>
+              <div className="font-black">
+                {selectedCandidates.length} follow-up draft
+                {selectedCandidates.length === 1 ? "" : "s"} selected
+              </div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                Nothing is sent automatically. Review every Gmail draft before sending.
+              </div>
             </div>
           </div>
           <Button

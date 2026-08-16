@@ -210,9 +210,20 @@ function groupTopicsByMember(topics: MeetingTopic[]) {
   }, {});
 }
 
-function buildMeetingMemberOptions(members: Teammate[]): MeetingMemberOption[] {
+function buildMeetingMemberOptions(
+  members: Teammate[],
+  isAdmin: boolean,
+  teamMemberId: string | null,
+): MeetingMemberOption[] {
   const seen = new Set<string>();
-  return [billyMeetingMember, ...members]
+  const visibleMembers = isAdmin
+    ? [billyMeetingMember, ...members]
+    : members.filter(
+        (member) =>
+          member.id.toLowerCase() === teamMemberId?.toLowerCase() ||
+          member.worksheetName?.toLowerCase() === teamMemberId?.toLowerCase(),
+      );
+  return visibleMembers
     .filter((member) => {
       const key = member.name.trim().toLowerCase();
       if (!key || seen.has(key)) return false;
@@ -222,7 +233,13 @@ function buildMeetingMemberOptions(members: Teammate[]): MeetingMemberOption[] {
     .map((member) => ({ id: member.id, name: member.name }));
 }
 
-function MeetingMemoryPanel({ members }: { members: MeetingMemberOption[] }) {
+function MeetingMemoryPanel({
+  members,
+  isAdmin,
+}: {
+  members: MeetingMemberOption[];
+  isAdmin: boolean;
+}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data: topicsData, isLoading } = useQuery(meetingTopicsQuery);
@@ -294,13 +311,19 @@ function MeetingMemoryPanel({ members }: { members: MeetingMemberOption[] }) {
 
         <div className="grid gap-4 md:grid-cols-2">
           <div>
-            <span className="text-xs font-bold text-muted-foreground">Member name</span>
-            <DashboardSelect
-              value={memberName}
-              onChange={setMemberName}
-              options={members.map((member) => ({ value: member.name, label: member.name }))}
-              triggerClassName="h-12 px-4 text-sm font-bold"
-            />
+            <span className="text-xs font-bold text-muted-foreground">Member</span>
+            {isAdmin ? (
+              <DashboardSelect
+                value={memberName}
+                onChange={setMemberName}
+                options={members.map((member) => ({ value: member.name, label: member.name }))}
+                triggerClassName="h-12 px-4 text-sm font-bold"
+              />
+            ) : (
+              <div className="mt-1 flex h-12 items-center rounded-2xl border border-border bg-muted/50 px-4 text-sm font-bold">
+                {members[0]?.name ?? "Profile not connected"}
+              </div>
+            )}
           </div>
 
           <label>
@@ -340,7 +363,7 @@ function MeetingMemoryPanel({ members }: { members: MeetingMemberOption[] }) {
 
         <button
           type="submit"
-          disabled={saving || !memberName || !title.trim()}
+          disabled={saving || !memberName || !title.trim() || (!isAdmin && members.length === 0)}
           className="tb-action inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -514,7 +537,13 @@ function ExternalGptPanel({
   );
 }
 
-export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
+export function AssistantPanel({
+  authRole,
+  teamMemberId,
+}: {
+  authRole: AuthRole | null;
+  teamMemberId: string | null;
+}) {
   const [open, setOpen] = useState(false);
   const [activeFeature, setActiveFeature] = useState<AssistantFeature>("home");
   const [settings] = useGoalSettings();
@@ -532,14 +561,16 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
     () => data?.team ?? (canUseLocalFallback ? fallbackTeam : []),
     [canUseLocalFallback, data?.team],
   );
-  const meetingMembers = useMemo(() => buildMeetingMemberOptions(members), [members]);
+  const isAdmin = authRole === "admin";
+  const meetingMembers = useMemo(
+    () => buildMeetingMemberOptions(members, isAdmin, teamMemberId),
+    [isAdmin, members, teamMemberId],
+  );
   const externalGptLinks = resolveExternalGptLinksFromTeamAssets(
     teamAssetsData?.allAssets ?? teamAssetsData?.assets ?? [],
   );
   const generalFaqsUrl = externalGptLinks.generalFaqs.url ?? GENERAL_FAQS_GPT_URL;
   const selectedFeature = featureCards.find((feature) => feature.id === activeFeature);
-  const isAdmin = authRole === "admin";
-
   const title = activeFeature === "home" ? "Billy GPT" : (selectedFeature?.title ?? "Billy GPT");
   const subtitle =
     activeFeature === "home"
@@ -618,7 +649,9 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
             </div>
           )}
 
-          {activeFeature === "meeting" && <MeetingMemoryPanel members={meetingMembers} />}
+          {activeFeature === "meeting" && (
+            <MeetingMemoryPanel members={meetingMembers} isAdmin={isAdmin} />
+          )}
 
           {activeFeature === "report" && (
             <PersonalReportPanel
@@ -626,6 +659,7 @@ export function AssistantPanel({ authRole }: { authRole: AuthRole | null }) {
               data={data}
               settings={settings}
               isAdmin={isAdmin}
+              teamMemberId={teamMemberId}
             />
           )}
 

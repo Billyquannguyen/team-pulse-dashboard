@@ -177,6 +177,27 @@ export type OutreachDashboardData = {
   source: "google-sheet" | "fallback";
 };
 
+export type LeaderboardMemberData = {
+  id: string;
+  name: string;
+  initials: string;
+  avatarUrl?: string;
+  monthCommission: number;
+  paidCommission: number;
+  dealsClosed: number;
+  dealValue: number;
+  profit: number;
+  averageDealValue: number;
+  exclusiveCreators: number;
+  contacted: number;
+  replies: number;
+  bookedCalls: number;
+  signed: number;
+  replyRate: number;
+  bookingRate: number;
+  closingRate: number;
+};
+
 export type DashboardDataFlowDiagnostics = {
   checkedAt: string;
   runtime: {
@@ -1141,6 +1162,120 @@ function calculateTotals(team: Teammate[], deals: Deal[]) {
   };
 }
 
+function memberIdentityMatches(value: string, member: Pick<Teammate, "name" | "worksheetName" | "id">) {
+  const expected = new Set(
+    [member.id, member.name, member.worksheetName]
+      .filter((item): item is string => Boolean(item))
+      .map((item) => canonicalMemberName(item).toLowerCase()),
+  );
+  return expected.has(canonicalMemberName(value).toLowerCase());
+}
+
+function emptyOutreachForMember(source: OutreachDashboardData["source"]): OutreachDashboardData {
+  return { members: [], totals: emptyOutreachTotals(), source };
+}
+
+export function scopeDashboardDataForMember(data: DashboardSheetData, teamMemberId: string | null) {
+  if (!teamMemberId) {
+    return {
+      ...data,
+      deals: [],
+      team: [],
+      creators: [],
+      outreach: emptyOutreachForMember(data.outreach.source),
+      totals: calculateTotals([], []),
+      warning: "Your account is approved but is not connected to a member profile yet.",
+    } satisfies DashboardSheetData;
+  }
+
+  const member = data.team.find((item) => memberIdentityMatches(teamMemberId, item));
+  if (!member) {
+    return {
+      ...data,
+      deals: [],
+      team: [],
+      creators: [],
+      outreach: emptyOutreachForMember(data.outreach.source),
+      totals: calculateTotals([], []),
+      warning: "Your connected member profile is not active or could not be found.",
+    } satisfies DashboardSheetData;
+  }
+
+  const deals = data.deals.filter((deal) => memberIdentityMatches(deal.manager, member));
+  const creators = data.creators.filter((creator) => memberIdentityMatches(creator.owner, member));
+  const outreachMember = data.outreach.members.find((item) =>
+    memberIdentityMatches(item.memberName, member),
+  );
+  const outreach = outreachMember
+    ? {
+        members: [outreachMember],
+        totals: {
+          totalCreators: outreachMember.totalCreators,
+          contacted: outreachMember.contacted,
+          emailed: outreachMember.emailed,
+          igOutreach: outreachMember.igOutreach,
+          replies: outreachMember.replies,
+          bookedCalls: outreachMember.bookedCalls,
+          signed: outreachMember.signed,
+          ended: outreachMember.ended,
+          replyRate: outreachMember.replyRate,
+          bookingRate: outreachMember.bookingRate,
+          callClosingRate: outreachMember.callClosingRate,
+          overallClosingRate: outreachMember.overallClosingRate,
+          conversionRate: outreachMember.conversionRate,
+          topNiche: outreachMember.topNiche,
+        },
+        source: data.outreach.source,
+      }
+    : emptyOutreachForMember(data.outreach.source);
+
+  return {
+    ...data,
+    deals,
+    team: [member],
+    creators,
+    outreach,
+    totals: calculateTotals([member], deals),
+  } satisfies DashboardSheetData;
+}
+
+export function buildLeaderboardData(data: DashboardSheetData): LeaderboardMemberData[] {
+  return data.team.map((member) => {
+    const deals = data.deals.filter(
+      (deal) => memberIdentityMatches(deal.manager, member) && isActiveDashboardDeal(deal),
+    );
+    const outreach = data.outreach.members.find((item) =>
+      memberIdentityMatches(item.memberName, member),
+    );
+    const dealValue = deals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
+    const profit = deals.reduce(
+      (sum, deal) => sum + Math.max(0, deal.totalPricingGbp - deal.creatorTotalGbp),
+      0,
+    );
+
+    return {
+      id: member.id,
+      name: member.name,
+      initials: member.initials,
+      avatarUrl: member.avatarUrl,
+      monthCommission: member.monthCommission,
+      paidCommission: member.paidCommission,
+      dealsClosed: member.dealsClosed,
+      dealValue,
+      profit,
+      averageDealValue: deals.length > 0 ? Math.round(dealValue / deals.length) : 0,
+      exclusiveCreators: member.exclusiveCreators,
+      contacted: outreach?.contacted ?? 0,
+      replies: outreach?.replies ?? 0,
+      bookedCalls: outreach?.bookedCalls ?? 0,
+      signed: outreach?.signed ?? 0,
+      replyRate: outreach?.replyRate ?? 0,
+      bookingRate: outreach?.bookingRate ?? 0,
+      closingRate: outreach?.overallClosingRate ?? 0,
+    };
+  });
+}
+
 function emptyDashboardData(error: string, links: SpreadsheetLinks): DashboardSheetData {
   return {
     deals: [],
@@ -1480,7 +1615,7 @@ export async function getDashboardDataFlowDiagnostics(): Promise<DashboardDataFl
 export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler(async () => {
   const { requireDashboardAuth } = await import("@/lib/auth.server");
   logDashboardDataFlow("dashboard server function called");
-  await requireDashboardAuth();
+  const auth = await requireDashboardAuth();
   const googleSheets = await getGoogleSheetsServer();
   const links = googleSheets.getOptionalSheetLinks();
   const productionRuntime = googleSheets.isProductionRuntime();
@@ -1491,7 +1626,9 @@ export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler
 
   try {
     const result = await getDashboardDataWithServerCache(googleSheets.getGoogleSheetsConfig());
-    return result.data;
+    return auth.isAdmin
+      ? result.data
+      : scopeDashboardDataForMember(result.data, auth.user?.teamMemberId ?? null);
   } catch (error) {
     const message = getGoogleSheetsErrorMessage(error);
     console.error("Google Sheets dashboard access failed:", error);
@@ -1505,14 +1642,32 @@ export const fetchDashboardSheetData = createServerFn({ method: "GET" }).handler
       logDashboardDataFlow("using local fallback data", {
         reason: message,
       });
-      return fallbackDashboardData(message, links);
+      const fallback = fallbackDashboardData(message, links);
+      return auth.isAdmin
+        ? fallback
+        : scopeDashboardDataForMember(fallback, auth.user?.teamMemberId ?? null);
     }
 
     logDashboardDataFlow("production fallback disabled; returning visible error", {
       reason: message,
     });
-    return emptyDashboardData(message, links);
+    const empty = emptyDashboardData(message, links);
+    return auth.isAdmin
+      ? empty
+      : scopeDashboardDataForMember(empty, auth.user?.teamMemberId ?? null);
   }
+});
+
+export const fetchLeaderboardData = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireDashboardAuth } = await import("@/lib/auth.server");
+  await requireDashboardAuth();
+  const googleSheets = await getGoogleSheetsServer();
+  const result = await getDashboardDataWithServerCache(googleSheets.getGoogleSheetsConfig());
+  return {
+    members: buildLeaderboardData(result.data),
+    updatedAt: result.data.updatedAt,
+    source: result.data.source,
+  };
 });
 
 export const dashboardSheetQuery = {
@@ -1522,4 +1677,11 @@ export const dashboardSheetQuery = {
   staleTime: QUERY_STALE_TIME_MS,
   refetchOnMount: "always" as const,
   refetchOnReconnect: "always" as const,
+};
+
+export const leaderboardQuery = {
+  queryKey: ["team-billion-leaderboard", "multi-category-v1"],
+  queryFn: () => fetchLeaderboardData(),
+  staleTime: QUERY_STALE_TIME_MS,
+  refetchOnMount: "always" as const,
 };

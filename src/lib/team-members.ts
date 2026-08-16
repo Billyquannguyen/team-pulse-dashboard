@@ -683,6 +683,29 @@ export async function getTeamMembersDataForServer() {
   return getTeamMembersWithServerCache(config);
 }
 
+export async function createTeamMemberRecordForServer(input: z.infer<typeof teamMemberInput>) {
+  const data = teamMemberInput.parse(input);
+  const googleSheets = await getGoogleSheetsServer();
+  const config = googleSheets.getGoogleSheetsConfig();
+  const worksheet = await loadTeamMembersWorksheet(config, {
+    createIfMissing: true,
+    ensureHeaders: true,
+  });
+  const duplicate = normalizeTeamMemberRows(worksheet.headers, worksheet.rows).find(
+    (member) => normalizeSheetKey(member.id) === normalizeSheetKey(data.id),
+  );
+  if (duplicate) throw new Error(`A member card with ID ${data.id} already exists.`);
+
+  await googleSheets.appendSheetRow(
+    config,
+    getTeamMembersSpreadsheetId(),
+    worksheet.sheet,
+    buildTeamMemberWriteRow(data),
+  );
+  await invalidateRelatedCaches();
+  return data;
+}
+
 export async function getActiveTeamMemberConfigsForServer() {
   const data = await getTeamMembersDataForServer();
   return data.activeMembers;
@@ -777,8 +800,25 @@ function chooseSeedMembers(availableTabs: string[]) {
 
 export const fetchTeamMembersData = createServerFn({ method: "GET" }).handler(async () => {
   const { requireDashboardAuth } = await import("@/lib/auth.server");
-  await requireDashboardAuth();
-  return getTeamMembersDataForServer();
+  const auth = await requireDashboardAuth();
+  const data = await getTeamMembersDataForServer();
+  if (auth.isAdmin) return data;
+
+  const sanitize = (member: TeamMemberConfig): TeamMemberConfig => ({
+    ...member,
+    gmailLabel: "",
+    discordUserId: "",
+    weeklyReportEnabled: false,
+  });
+  const members = data.members.map(sanitize);
+  return {
+    ...data,
+    members,
+    activeMembers: members.filter((member) => member.status === "active"),
+    offboardedMembers: [],
+    suggestions: [],
+    links: {},
+  };
 });
 
 export const createTeamMembersSheet = createServerFn({ method: "POST" }).handler(async () => {
@@ -818,21 +858,7 @@ export const addTeamMember = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { requireAdminAuth } = await import("@/lib/auth.server");
     await requireAdminAuth();
-    const googleSheets = await getGoogleSheetsServer();
-    const config = googleSheets.getGoogleSheetsConfig();
-    const worksheet = await loadTeamMembersWorksheet(config, {
-      createIfMissing: true,
-      ensureHeaders: true,
-    });
-    const spreadsheetId = getTeamMembersSpreadsheetId();
-
-    await googleSheets.appendSheetRow(
-      config,
-      spreadsheetId,
-      worksheet.sheet,
-      buildTeamMemberWriteRow(data),
-    );
-    await invalidateRelatedCaches();
+    await createTeamMemberRecordForServer(data);
 
     return { ok: true as const };
   });
@@ -912,8 +938,8 @@ export const offboardTeamMember = createServerFn({ method: "POST" })
 export const updateTeamMemberProfile = createServerFn({ method: "POST" })
   .inputValidator(teamMemberProfileInput)
   .handler(async ({ data }) => {
-    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
-    await requireWritableDashboardAuth();
+    const { requireTeamMemberAccess } = await import("@/lib/auth.server");
+    await requireTeamMemberAccess(data.originalId);
     const googleSheets = await getGoogleSheetsServer();
     const config = googleSheets.getGoogleSheetsConfig();
     const worksheet = await loadTeamMembersWorksheet(config, {
@@ -938,6 +964,7 @@ export const updateTeamMemberProfile = createServerFn({ method: "POST" })
     if (!existingMember) {
       throw new Error("Could not read this TeamMembers row. Refresh and try again.");
     }
+    await requireTeamMemberAccess(existingMember.id);
 
     await googleSheets.updateSheetRow(
       config,

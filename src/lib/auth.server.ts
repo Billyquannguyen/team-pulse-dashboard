@@ -10,6 +10,8 @@ type MemberRow = {
   display_name: string;
   status: MemberAccessStatus;
   role: AuthRole;
+  team_member_id: string | null;
+  linked_at: string | null;
   created_at: string;
   approved_at: string | null;
 };
@@ -46,6 +48,8 @@ function mapMember(row: MemberRow): DashboardMemberAccess {
     displayName: row.display_name,
     status: row.status,
     role: row.role,
+    teamMemberId: row.team_member_id,
+    linkedAt: row.linked_at,
     createdAt: row.created_at,
     approvedAt: row.approved_at,
   };
@@ -73,7 +77,7 @@ export async function readAuthStateServer(): Promise<AuthState> {
 
   const { data: memberData, error: memberError } = await supabase
     .from("dashboard_members")
-    .select("user_id,email,display_name,status,role,created_at,approved_at")
+    .select("user_id,email,display_name,status,role,team_member_id,linked_at,created_at,approved_at")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -81,7 +85,7 @@ export async function readAuthStateServer(): Promise<AuthState> {
     return {
       ...base,
       isSignedIn: true,
-      user: { id: user.id, email: user.email ?? "", displayName: "" },
+      user: { id: user.id, email: user.email ?? "", displayName: "", teamMemberId: null },
       setupIssue: "Your account exists, but its dashboard access record could not be loaded.",
     };
   }
@@ -102,6 +106,7 @@ export async function readAuthStateServer(): Promise<AuthState> {
       id: user.id,
       email: user.email ?? member?.email ?? "",
       displayName: member?.display_name ?? "",
+      teamMemberId: member?.team_member_id ?? null,
     },
   };
 }
@@ -196,12 +201,30 @@ export async function requireWritableDashboardAuth() {
   return requireDashboardAuth();
 }
 
+export async function requireLinkedMemberAuth() {
+  const auth = await requireDashboardAuth();
+  if (auth.isAdmin) return auth;
+  if (!auth.user?.teamMemberId) {
+    throw new Error("Your dashboard account is not connected to a member profile yet.");
+  }
+  return auth;
+}
+
+export async function requireTeamMemberAccess(teamMemberId: string) {
+  const auth = await requireLinkedMemberAuth();
+  if (auth.isAdmin) return auth;
+  if (auth.user?.teamMemberId?.toLowerCase() !== teamMemberId.trim().toLowerCase()) {
+    throw new Error("You can only access your own member data.");
+  }
+  return auth;
+}
+
 export async function listDashboardMemberAccessServer(): Promise<DashboardMemberAccess[]> {
   await requireAdminAuth();
   const supabase = createDashboardSupabaseServerClient();
   const { data, error } = await supabase
     .from("dashboard_members")
-    .select("user_id,email,display_name,status,role,created_at,approved_at")
+    .select("user_id,email,display_name,status,role,team_member_id,linked_at,created_at,approved_at")
     .order("created_at", { ascending: false });
 
   if (error) throw new Error(error.message);
@@ -212,25 +235,108 @@ export async function updateDashboardMemberAccessServer(input: {
   userId: string;
   status: MemberAccessStatus;
   role: AuthRole;
+  teamMemberId?: string | null;
 }) {
   const auth = await requireAdminAuth();
   if (input.userId === auth.user?.id && input.status !== "approved") {
     return { ok: false as const, message: "You cannot remove your own dashboard access." };
   }
+  if (input.userId === auth.user?.id && input.role !== "admin") {
+    return { ok: false as const, message: "You cannot remove your own admin role." };
+  }
 
   const supabase = createDashboardSupabaseServerClient();
+  const { data: existingMember, error: existingMemberError } = await supabase
+    .from("dashboard_members")
+    .select("team_member_id")
+    .eq("user_id", input.userId)
+    .maybeSingle();
+  if (existingMemberError) return { ok: false as const, message: existingMemberError.message };
+  const requestedTeamMemberId =
+    input.teamMemberId === undefined
+      ? existingMember?.team_member_id ?? null
+      : input.teamMemberId?.trim() || null;
+  const linkChanged =
+    requestedTeamMemberId?.toLowerCase() !== existingMember?.team_member_id?.toLowerCase();
+
+  if (input.status === "approved" && requestedTeamMemberId && linkChanged) {
+    const { getTeamMembersDataForServer } = await import("@/lib/team-members");
+    const teamMembers = await getTeamMembersDataForServer();
+    const matchedMember = teamMembers.members.find(
+      (member) => member.id.toLowerCase() === requestedTeamMemberId.toLowerCase(),
+    );
+    if (!matchedMember) {
+      return { ok: false as const, message: "That member card no longer exists." };
+    }
+  }
   const approved = input.status === "approved";
+  const accessUpdate = {
+    status: input.status,
+    role: input.role,
+    approved_at: approved ? new Date().toISOString() : null,
+    approved_by: approved ? (auth.user?.id ?? null) : null,
+    updated_at: new Date().toISOString(),
+    ...(approved && input.teamMemberId !== undefined
+      ? {
+          team_member_id: requestedTeamMemberId,
+          linked_at: linkChanged
+            ? requestedTeamMemberId
+              ? new Date().toISOString()
+              : null
+            : undefined,
+          linked_by: linkChanged ? (requestedTeamMemberId ? (auth.user?.id ?? null) : null) : undefined,
+        }
+      : {}),
+  };
   const { error } = await supabase
     .from("dashboard_members")
-    .update({
-      status: input.status,
-      role: input.role,
-      approved_at: approved ? new Date().toISOString() : null,
-      approved_by: approved ? (auth.user?.id ?? null) : null,
-      updated_at: new Date().toISOString(),
-    })
+    .update(accessUpdate)
     .eq("user_id", input.userId);
 
-  if (error) return { ok: false as const, message: error.message };
+  if (error) {
+    if (error.code === "23505") {
+      return {
+        ok: false as const,
+        message: "That member card is already connected to another account.",
+      };
+    }
+    return { ok: false as const, message: error.message };
+  }
   return { ok: true as const };
+}
+
+export async function approveDashboardMemberWithNewCardServer(input: {
+  userId: string;
+  role: AuthRole;
+  displayName: string;
+  teamMemberId: string;
+  joinedMonth?: string;
+  teamDepartment?: string;
+  gmailLabel?: string;
+}) {
+  await requireAdminAuth();
+  const { createTeamMemberRecordForServer } = await import("@/lib/team-members");
+  await createTeamMemberRecordForServer({
+    displayName: input.displayName,
+    id: input.teamMemberId,
+    joinedMonth: input.joinedMonth ?? "",
+    status: "active",
+    teamDepartment: input.teamDepartment ?? "Outreach",
+    gmailLabel: input.gmailLabel ?? "",
+    weeklyReportEnabled: true,
+  });
+
+  const result = await updateDashboardMemberAccessServer({
+    userId: input.userId,
+    status: "approved",
+    role: input.role,
+    teamMemberId: input.teamMemberId,
+  });
+  if (!result.ok) {
+    return {
+      ...result,
+      message: `${result.message} The new member card was created but could not be connected.`,
+    };
+  }
+  return result;
 }

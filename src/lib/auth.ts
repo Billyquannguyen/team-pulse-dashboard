@@ -14,6 +14,7 @@ export type AuthState = {
     id: string;
     email: string;
     displayName: string;
+    teamMemberId: string | null;
   } | null;
   setupReady: boolean;
   setupIssue: string | null;
@@ -25,6 +26,8 @@ export type DashboardMemberAccess = {
   displayName: string;
   status: MemberAccessStatus;
   role: AuthRole;
+  teamMemberId: string | null;
+  linkedAt: string | null;
   createdAt: string;
   approvedAt: string | null;
 };
@@ -49,6 +52,17 @@ const memberAccessInput = z.object({
   userId: z.string().uuid(),
   status: z.enum(["pending", "approved", "rejected", "disabled"]),
   role: z.enum(["member", "admin"]),
+  teamMemberId: z.string().trim().min(1).max(80).nullable().optional(),
+});
+
+const approveWithNewMemberInput = z.object({
+  userId: z.string().uuid(),
+  role: z.enum(["member", "admin"]),
+  displayName: z.string().trim().min(1).max(80),
+  teamMemberId: z.string().trim().min(1).max(80),
+  joinedMonth: z.string().trim().max(20).optional().default(""),
+  teamDepartment: z.string().trim().max(80).optional().default("Outreach"),
+  gmailLabel: z.string().trim().max(200).optional().default(""),
 });
 
 export const getAuthState = createServerFn({ method: "GET" }).handler(async () => {
@@ -99,4 +113,11 @@ export const updateDashboardMemberAccess = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { updateDashboardMemberAccessServer } = await import("@/lib/auth.server");
     return updateDashboardMemberAccessServer(data);
+  });
+
+export const approveDashboardMemberWithNewCard = createServerFn({ method: "POST" })
+  .inputValidator(approveWithNewMemberInput)
+  .handler(async ({ data }) => {
+    const { approveDashboardMemberWithNewCardServer } = await import("@/lib/auth.server");
+    return approveDashboardMemberWithNewCardServer(data);
   });

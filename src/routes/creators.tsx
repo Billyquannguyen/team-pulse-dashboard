@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Filter, RotateCcw, Search, Users } from "lucide-react";
@@ -23,12 +23,14 @@ const relationshipStyles: Record<CreatorRelationship, string> = {
   Exclusive: "bg-fun-lime text-emerald-900",
   "Non-exclusive": "bg-fun-blue text-sky-900",
 };
+const rootRoute = getRouteApi("__root__");
 
 function uniqueSorted(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
 
 function CreatorsPage() {
+  const auth = rootRoute.useLoaderData();
   const [q, setQ] = useState("");
   const [relationship, setRelationship] = useState<CreatorRelationship | "All">("All");
   const [owner, setOwner] = useState("All owners");
@@ -160,12 +162,14 @@ function CreatorsPage() {
               options={["All", "Exclusive", "Non-exclusive"]}
               onChange={(value) => setRelationship(value as CreatorRelationship | "All")}
             />
-            <DashboardSelectField
-              label="Owner"
-              value={owner}
-              options={owners}
-              onChange={setOwner}
-            />
+            {auth.isAdmin && (
+              <DashboardSelectField
+                label="Owner"
+                value={owner}
+                options={owners}
+                onChange={setOwner}
+              />
+            )}
             <DashboardSelectField
               label="Platform"
               value={platform}

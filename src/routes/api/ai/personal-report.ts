@@ -25,9 +25,6 @@ export const Route = createFileRoute("/api/ai/personal-report")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const { requireDashboardAuth } = await import("@/lib/auth.server");
-        await requireDashboardAuth();
-
         const body = await request.json().catch(() => null);
         const parsed = requestSchema.safeParse(body);
 
@@ -41,6 +38,9 @@ export const Route = createFileRoute("/api/ai/personal-report")({
             400,
           );
         }
+
+        const { requireTeamMemberAccess } = await import("@/lib/auth.server");
+        await requireTeamMemberAccess(parsed.data.memberId);
 
         try {
           const report = await generateAIPersonalReport(parsed.data);

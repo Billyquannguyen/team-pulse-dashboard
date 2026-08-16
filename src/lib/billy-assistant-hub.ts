@@ -475,14 +475,20 @@ export const getBillyAssistantHubDiagnostics = createServerFn({ method: "GET" })
 
 export const getThisWeeksMeetingTopics = createServerFn({ method: "GET" }).handler(async () => {
   const { requireDashboardAuth } = await import("@/lib/auth.server");
-  await requireDashboardAuth();
+  const auth = await requireDashboardAuth();
   const week = getCurrentMeetingWeek();
   const topics = await readCurrentWeekTopics();
+  const visibleTopics = auth.isAdmin
+    ? topics
+    : topics.filter(
+        (topic) =>
+          topic.memberName.trim().toLowerCase() === auth.user?.teamMemberId?.trim().toLowerCase(),
+      );
 
   return {
     weekKey: week.weekKey,
     weekLabel: week.label,
-    topics: topics.sort(
+    topics: visibleTopics.sort(
       (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
     ),
   };
@@ -491,13 +497,13 @@ export const getThisWeeksMeetingTopics = createServerFn({ method: "GET" }).handl
 export const saveMeetingTopic = createServerFn({ method: "POST" })
   .inputValidator(saveMeetingTopicInput)
   .handler(async ({ data }) => {
-    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
-    await requireWritableDashboardAuth();
+    const { requireLinkedMemberAuth } = await import("@/lib/auth.server");
+    const auth = await requireLinkedMemberAuth();
     const week = getCurrentMeetingWeek();
     const topic: MeetingTopic = {
       id: `meeting-topic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       weekKey: week.weekKey,
-      memberName: data.memberName,
+      memberName: auth.isAdmin ? data.memberName : auth.user!.teamMemberId!,
       title: data.title,
       details: data.details,
       createdAt: new Date().toISOString(),

@@ -13,6 +13,9 @@ export type DashboardDatabase = {
           display_name: string;
           status: "pending" | "approved" | "rejected" | "disabled";
           role: "member" | "admin";
+          team_member_id: string | null;
+          linked_at: string | null;
+          linked_by: string | null;
           approved_at: string | null;
           approved_by: string | null;
           created_at: string;
@@ -22,6 +25,9 @@ export type DashboardDatabase = {
         Update: {
           status?: "pending" | "approved" | "rejected" | "disabled";
           role?: "member" | "admin";
+          team_member_id?: string | null;
+          linked_at?: string | null;
+          linked_by?: string | null;
           approved_at?: string | null;
           approved_by?: string | null;
           updated_at?: string;
