@@ -31,6 +31,7 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
         background: "linear-gradient(120deg, #10131b 0%, #171d2c 48%, #241629 100%)",
         color: "white",
         fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+        isolation: "isolate",
         overflow: "hidden",
       }}
     >
@@ -44,6 +45,7 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
           border: "2px solid rgba(133, 220, 255, 0.18)",
           left: 920,
           top: -120,
+          zIndex: 0,
           rotate: interpolate(frame, [0, durationInFrames], ["0deg", "360deg"], {
             extrapolateLeft: "clamp",
             extrapolateRight: "clamp",
@@ -77,6 +79,7 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
             "radial-gradient(circle, rgba(255, 134, 177, .26), rgba(255, 134, 177, 0) 68%)",
           right: -80,
           bottom: -260,
+          zIndex: 0,
           scale: interpolate(frame, [0, 2 * fps, 4 * fps], [0.96, 1.08, 0.96], {
             extrapolateLeft: "clamp",
             extrapolateRight: "clamp",
@@ -91,8 +94,9 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
         style={{
           position: "absolute",
           left: 76,
-          top: 68,
-          width: 700,
+          top: 54,
+          width: 800,
+          zIndex: 2,
           opacity: interpolate(frame, [0, 0.8 * fps], [0, 1], {
             extrapolateLeft: "clamp",
             extrapolateRight: "clamp",
@@ -109,7 +113,7 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
           name="Momentum eyebrow"
           style={{
             color: "rgba(255,255,255,.58)",
-            fontSize: 24,
+            fontSize: 22,
             fontWeight: 800,
             letterSpacing: 4,
             textTransform: "uppercase",
@@ -120,11 +124,11 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
         <Interactive.Div
           name="Momentum headline"
           style={{
-            fontSize: 72,
+            fontSize: 64,
             fontWeight: 900,
-            letterSpacing: -4,
-            lineHeight: 1,
-            marginTop: 20,
+            letterSpacing: -3.5,
+            lineHeight: 0.98,
+            marginTop: 14,
           }}
         >
           Keep the streak moving.
@@ -133,10 +137,11 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
           name="Momentum supporting text"
           style={{
             color: "rgba(255,255,255,.62)",
-            fontSize: 28,
+            fontSize: 24,
             fontWeight: 600,
-            lineHeight: 1.45,
-            marginTop: 24,
+            lineHeight: 1.35,
+            marginTop: 16,
+            maxWidth: 760,
           }}
         >
           Live progress from the workspace, turned into one clear daily pulse.
@@ -150,13 +155,14 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
           alignItems: "center",
           background: "rgba(255,255,255,.08)",
           border: "1px solid rgba(255,255,255,.12)",
-          borderRadius: 38,
-          bottom: 48,
+          borderRadius: 32,
+          bottom: 32,
           display: "flex",
-          gap: 32,
+          gap: 24,
           left: 76,
-          padding: "20px 26px",
+          padding: "16px 24px",
           width: 780,
+          zIndex: 2,
           opacity: interpolate(frame, [0.5 * fps, 1.3 * fps], [0, 1], {
             extrapolateLeft: "clamp",
             extrapolateRight: "clamp",
@@ -164,7 +170,10 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
           }),
         }}
       >
-        <Interactive.Div name="Progress percent" style={{ fontSize: 42, fontWeight: 900 }}>
+        <Interactive.Div
+          name="Progress percent"
+          style={{ flexShrink: 0, fontSize: 38, fontWeight: 900, lineHeight: 1 }}
+        >
           {progress}%
         </Interactive.Div>
         <Interactive.Div
@@ -172,9 +181,10 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
           style={{
             background: "rgba(255,255,255,.1)",
             borderRadius: 99,
-            height: 18,
+            flex: 1,
+            height: 16,
+            minWidth: 260,
             overflow: "hidden",
-            width: 400,
           }}
         >
           <Interactive.Div
@@ -182,7 +192,7 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
             style={{
               background: "linear-gradient(90deg, #a6f04d, #ffe036, #ff8c66)",
               borderRadius: 99,
-              height: 18,
+              height: 16,
               width: `${progress}%`,
               scale: interpolate(frame, [0.8 * fps, 2 * fps], [0, 1], {
                 extrapolateLeft: "clamp",
@@ -194,7 +204,10 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
             }}
           />
         </Interactive.Div>
-        <Interactive.Div name="Progress value" style={{ fontSize: 25, fontWeight: 800 }}>
+        <Interactive.Div
+          name="Progress value"
+          style={{ flexShrink: 0, fontSize: 23, fontWeight: 800, whiteSpace: "nowrap" }}
+        >
           {formatMoney(current)} / {formatMoney(target)}
         </Interactive.Div>
       </Interactive.Div>
@@ -214,6 +227,7 @@ export function MomentumScene({ current, target, memberCount, personal }: Moment
           position: "absolute",
           right: 72,
           top: 68,
+          zIndex: 2,
           translate: interpolate(frame, [0.2 * fps, 1.1 * fps], ["30px 0px", "0px 0px"], {
             extrapolateLeft: "clamp",
             extrapolateRight: "clamp",
@@ -249,7 +263,7 @@ export function WorkspaceMomentum({ current, target, memberCount, personal }: Mo
   }, []);
 
   return (
-    <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-[#10131b] shadow-[0_28px_80px_rgba(22,18,35,.16)]">
+    <section className="relative isolate overflow-hidden rounded-[2rem] border border-white/10 bg-[#10131b] shadow-[0_28px_80px_rgba(22,18,35,.16)]">
       <Player
         component={MomentumScene}
         inputProps={{ current, target, memberCount, personal }}
@@ -261,7 +275,7 @@ export function WorkspaceMomentum({ current, target, memberCount, personal }: Mo
         loop={!reduceMotion}
         controls={false}
         clickToPlay={false}
-        style={{ width: "100%", aspectRatio: "1600 / 420" }}
+        style={{ display: "block", width: "100%", aspectRatio: "1600 / 420" }}
       />
     </section>
   );
