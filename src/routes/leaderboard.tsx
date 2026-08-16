@@ -1,32 +1,34 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { ArrowLeft, ShieldCheck, Trophy, UserRound } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { TopExclusiveCreators } from "@/components/goals/TopExclusiveCreators";
+import { TeamAvatar } from "@/components/ui/team-avatar";
+import { deals as fallbackDeals, isActiveDashboardDeal, type Deal } from "@/data/deals";
 import { team as fallbackTeam } from "@/data/team";
-import { deals as fallbackDeals, isActiveDashboardDeal } from "@/data/deals";
 import {
   dashboardSheetQuery,
   leaderboardQuery,
+  type LeaderboardFinancialMetrics,
   type LeaderboardMemberData,
 } from "@/lib/sheets-public";
-import { canonicalMemberName } from "@/lib/sheet-normalizer";
-import { BarChart3, Trophy } from "lucide-react";
-import { TeamAvatar } from "@/components/ui/team-avatar";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+  canonicalMemberName,
+  getCurrentDealMonthKey,
+  normalizeDealMonthKey,
+} from "@/lib/sheet-normalizer";
+
+const rootRoute = getRouteApi("__root__");
 
 export const Route = createFileRoute("/leaderboard")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    member: typeof search.member === "string" ? search.member : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Leaderboard — Team Billion" },
-      { name: "description", content: "Team commission leaderboard." },
+      { name: "description", content: "Team financial performance and deal rankings." },
     ],
   }),
   component: LeaderboardPage,
@@ -41,401 +43,478 @@ const palette = [
   "var(--fun-orange)",
 ];
 
-function formatCurrency(value: number) {
-  return `£${value.toLocaleString()}`;
-}
-
-function formatCompactCurrency(value: number) {
-  if (value >= 1000) return `£${Math.round(value / 1000)}k`;
-  return `£${value.toLocaleString()}`;
-}
-
+type Period = "monthly" | "longTerm";
+type MetricKey = keyof LeaderboardFinancialMetrics;
 type LeaderboardCategory = {
-  key: keyof Pick<
-    LeaderboardMemberData,
-    | "monthCommission"
-    | "dealsClosed"
-    | "dealValue"
-    | "profit"
-    | "averageDealValue"
-    | "exclusiveCreators"
-    | "contacted"
-    | "replies"
-    | "bookedCalls"
-    | "signed"
-    | "replyRate"
-    | "bookingRate"
-    | "closingRate"
-  >;
+  key: MetricKey;
   label: string;
   shortLabel: string;
-  description: string;
-  format: "money" | "count" | "percent";
-  minimum?: (member: LeaderboardMemberData) => boolean;
+  description: (period: Period) => string;
+  format: "money" | "count";
+  longTermOnly?: boolean;
 };
 
 const categories: LeaderboardCategory[] = [
-  { key: "monthCommission", label: "Monthly commission", shortLabel: "Commission", description: "Current-month closed commission.", format: "money" },
-  { key: "dealsClosed", label: "Deals closed", shortLabel: "Deals", description: "Valid closed deals recorded for each member.", format: "count" },
-  { key: "dealValue", label: "Total deal value", shortLabel: "Deal value", description: "Total pricing across active deal rows.", format: "money" },
-  { key: "profit", label: "Profit generated", shortLabel: "Profit", description: "Total pricing minus creator cost.", format: "money" },
-  { key: "averageDealValue", label: "Average deal value", shortLabel: "Avg deal", description: "Average value across active deal rows.", format: "money" },
-  { key: "exclusiveCreators", label: "Exclusive creators", shortLabel: "Exclusive", description: "Exclusive creators assigned to each member.", format: "count" },
-  { key: "contacted", label: "Creators contacted", shortLabel: "Contacted", description: "Outreach contacts recorded in member sourcing tabs.", format: "count" },
-  { key: "replies", label: "Replies", shortLabel: "Replies", description: "Replies recorded from outreach activity.", format: "count" },
-  { key: "bookedCalls", label: "Booked calls", shortLabel: "Calls", description: "Calls booked from outreach activity.", format: "count" },
-  { key: "signed", label: "Creators signed", shortLabel: "Signed", description: "Signed or partnered creators from outreach.", format: "count" },
-  { key: "replyRate", label: "Reply rate", shortLabel: "Reply rate", description: "Requires at least 20 contacted creators for a fair comparison.", format: "percent", minimum: (member) => member.contacted >= 20 },
-  { key: "bookingRate", label: "Booking rate", shortLabel: "Booking rate", description: "Requires at least 20 contacted creators for a fair comparison.", format: "percent", minimum: (member) => member.contacted >= 20 },
-  { key: "closingRate", label: "Overall closing rate", shortLabel: "Closing rate", description: "Requires at least 20 contacted creators for a fair comparison.", format: "percent", minimum: (member) => member.contacted >= 20 },
+  {
+    key: "commission",
+    label: "Commission",
+    shortLabel: "Commission",
+    description: (period) =>
+      period === "monthly"
+        ? "Closed commission for the current month."
+        : "Closed commission across all recorded deals.",
+    format: "money",
+  },
+  {
+    key: "dealsClosed",
+    label: "Deals closed",
+    shortLabel: "Deals",
+    description: (period) =>
+      period === "monthly"
+        ? "Valid deals closed this month."
+        : "Valid deals closed across all time.",
+    format: "count",
+  },
+  {
+    key: "dealValue",
+    label: "Total deal value",
+    shortLabel: "Deal value",
+    description: (period) =>
+      period === "monthly"
+        ? "Total pricing from this month's valid deal rows."
+        : "Total pricing across all valid deal rows.",
+    format: "money",
+  },
+  {
+    key: "profit",
+    label: "Profit generated",
+    shortLabel: "Profit",
+    description: (period) =>
+      period === "monthly"
+        ? "Profit generated by this month's deals."
+        : "Profit generated across all valid deals.",
+    format: "money",
+  },
+  {
+    key: "averageDealValue",
+    label: "Average deal value",
+    shortLabel: "Avg deal",
+    description: (period) =>
+      period === "monthly"
+        ? "Average value of this month's valid deals."
+        : "Average value across all valid deals.",
+    format: "money",
+  },
+  {
+    key: "exclusiveCreators",
+    label: "Exclusive creators",
+    shortLabel: "Exclusive",
+    description: () => "Exclusive creators assigned to each member.",
+    format: "count",
+    longTermOnly: true,
+  },
 ];
 
-function formatMetric(value: number, format: LeaderboardCategory["format"]) {
-  if (format === "money") return formatCurrency(value);
-  if (format === "percent") return `${value}%`;
-  return value.toLocaleString();
+function formatCurrency(value: number) {
+  return `£${Math.round(value).toLocaleString()}`;
 }
 
-function getDealProfit(deal: { totalPricingGbp: number; creatorTotalGbp: number }) {
+function formatMetric(value: number, format: LeaderboardCategory["format"]) {
+  return format === "money" ? formatCurrency(value) : value.toLocaleString();
+}
+
+function getDealProfit(deal: Pick<Deal, "totalPricingGbp" | "creatorTotalGbp">) {
   return Math.max(0, deal.totalPricingGbp - deal.creatorTotalGbp);
 }
 
-function MetricTooltip({
-  active,
-  payload,
-  label,
-  format,
-}: {
-  active?: boolean;
-  payload?: Array<{ name?: string; value?: number; color?: string }>;
-  label?: string;
-  format: LeaderboardCategory["format"];
-}) {
-  if (!active || !payload?.length) return null;
+function identityMatches(value: string, member: LeaderboardMemberData) {
+  const normalized = canonicalMemberName(value);
+  return [member.id, member.name].some(
+    (candidate) => canonicalMemberName(candidate) === normalized,
+  );
+}
 
+function PeriodSlider({
+  period,
+  onChange,
+}: {
+  period: Period;
+  onChange: (period: Period) => void;
+}) {
   return (
-    <div className="rounded-2xl border border-border bg-card px-3 py-2 text-xs shadow-xl">
-      <div className="font-semibold">{label}</div>
-      <div className="mt-1 space-y-1">
-        {payload.map((item) => (
-          <div key={item.name} className="flex items-center justify-between gap-5">
-            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{ background: item.color ?? "var(--primary)" }}
-              />
-              {item.name}
-            </span>
-            <span className="font-semibold">{formatMetric(Number(item.value ?? 0), format)}</span>
-          </div>
-        ))}
-      </div>
+    <div
+      className="mx-auto grid w-full max-w-lg grid-cols-2 rounded-[22px] border border-border bg-card p-1.5 shadow-sm ring-1 ring-border/60"
+      role="tablist"
+      aria-label="Leaderboard period"
+    >
+      {(["monthly", "longTerm"] as const).map((value) => (
+        <button
+          key={value}
+          type="button"
+          role="tab"
+          aria-selected={period === value}
+          onClick={() => onChange(value)}
+          className={`rounded-[17px] px-5 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
+            period === value
+              ? "bg-foreground text-background shadow-sm"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          }`}
+        >
+          {value === "monthly" ? "Monthly" : "Long-term"}
+        </button>
+      ))}
     </div>
   );
 }
 
+function DealTable({
+  title,
+  description,
+  deals,
+  sortBy,
+  showMember,
+}: {
+  title: string;
+  description: string;
+  deals: Deal[];
+  sortBy: "pricing" | "profit";
+  showMember: boolean;
+}) {
+  const rows = [...deals]
+    .sort((a, b) =>
+      sortBy === "pricing"
+        ? b.totalPricingGbp - a.totalPricingGbp
+        : getDealProfit(b) - getDealProfit(a),
+    )
+    .slice(0, 3);
+
+  return (
+    <section className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+      <h3 className="text-base font-black">{title}</h3>
+      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold">#</th>
+              <th className="px-4 py-3 text-left font-semibold">Brand</th>
+              <th className="px-4 py-3 text-left font-semibold">Creator</th>
+              {showMember ? <th className="px-4 py-3 text-left font-semibold">Member</th> : null}
+              <th className="px-4 py-3 text-right font-semibold">
+                {sortBy === "pricing" ? "Total pricing" : "Profit"}
+              </th>
+              <th className="px-4 py-3 text-right font-semibold">Margin</th>
+              <th className="px-4 py-3 text-right font-semibold">
+                {sortBy === "pricing" ? "Profit" : "Total pricing"}
+              </th>
+              <th className="px-4 py-3 text-left font-semibold">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? (
+              rows.map((deal, index) => (
+                <tr
+                  key={deal.id}
+                  className="tb-row-hover border-t border-border/60 hover:bg-muted/40"
+                >
+                  <td className="px-4 py-3 font-black">{index + 1}</td>
+                  <td className="px-4 py-3 font-semibold">{deal.brand}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{deal.creator}</td>
+                  {showMember ? <td className="px-4 py-3">{deal.manager}</td> : null}
+                  <td className="px-4 py-3 text-right font-black">
+                    {formatCurrency(
+                      sortBy === "pricing" ? deal.totalPricingGbp : getDealProfit(deal),
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">{deal.profitMargin || "-"}</td>
+                  <td className="px-4 py-3 text-right">
+                    {formatCurrency(
+                      sortBy === "pricing" ? getDealProfit(deal) : deal.totalPricingGbp,
+                    )}
+                  </td>
+                  <td className="px-4 py-3">{deal.status}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td
+                  colSpan={showMember ? 8 : 7}
+                  className="px-4 py-10 text-center text-muted-foreground"
+                >
+                  No matching deals for this view.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function LeaderboardPage() {
+  const auth = rootRoute.useLoaderData();
+  const search = Route.useSearch();
   const { data } = useQuery(dashboardSheetQuery);
   const { data: leaderboardData } = useQuery(leaderboardQuery);
-  const [categoryKey, setCategoryKey] = useState<LeaderboardCategory["key"]>("monthCommission");
-  const category = categories.find((item) => item.key === categoryKey) ?? categories[0];
+  const [period, setPeriod] = useState<Period>("monthly");
+  const [categoryKey, setCategoryKey] = useState<MetricKey>("commission");
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
+
   const fallbackLeaderboard: LeaderboardMemberData[] = fallbackTeam.map((member) => ({
     id: member.id,
     name: member.name,
     initials: member.initials,
     avatarUrl: member.avatarUrl,
-    monthCommission: member.monthCommission,
-    paidCommission: member.paidCommission,
-    dealsClosed: member.dealsClosed,
-    dealValue: member.revenue,
-    profit: 0,
-    averageDealValue: member.dealsClosed ? Math.round(member.revenue / member.dealsClosed) : 0,
-    exclusiveCreators: member.exclusiveCreators,
-    contacted: 0,
-    replies: 0,
-    bookedCalls: 0,
-    signed: member.exclusiveCreators + member.nonExclusiveCreators,
-    replyRate: 0,
-    bookingRate: 0,
-    closingRate: 0,
+    monthly: {
+      commission: member.monthCommission,
+      dealsClosed: member.dealsClosed,
+      dealValue: member.revenue,
+      profit: 0,
+      averageDealValue: member.dealsClosed ? Math.round(member.revenue / member.dealsClosed) : 0,
+      exclusiveCreators: 0,
+    },
+    longTerm: {
+      commission: member.commission,
+      dealsClosed: member.dealsClosed,
+      dealValue: member.revenue,
+      profit: 0,
+      averageDealValue: member.dealsClosed ? Math.round(member.revenue / member.dealsClosed) : 0,
+      exclusiveCreators: member.exclusiveCreators,
+    },
   }));
   const members = leaderboardData?.members ?? (canUseLocalFallback ? fallbackLeaderboard : []);
-  const sorted = useMemo(
-    () =>
-      [...members].sort((a, b) => {
-        const aEligible = category.minimum ? category.minimum(a) : true;
-        const bEligible = category.minimum ? category.minimum(b) : true;
-        if (aEligible !== bEligible) return Number(bEligible) - Number(aEligible);
-        return Number(b[category.key]) - Number(a[category.key]) || a.name.localeCompare(b.name);
-      }),
-    [category, members],
+  const ownMember = members.find((member) =>
+    auth.user?.teamMemberId ? identityMatches(auth.user.teamMemberId, member) : false,
   );
-  const chartData = sorted.map((member) => ({
-    name: member.name,
-    value: category.minimum && !category.minimum(member) ? 0 : Number(member[category.key]),
-  }));
-  const podiumMembers = sorted
-    .filter((member) => (category.minimum ? category.minimum(member) : true))
-    .slice(0, 3);
-  const deals = data?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
-  const activeMemberNames = new Set(members.map((member) => canonicalMemberName(member.name)));
-  const activeDeals = deals.filter(
+  const scopeId = auth.isAdmin ? (search.member ?? "team") : (ownMember?.id ?? "");
+  const selectedMember =
+    scopeId === "team" ? undefined : members.find((member) => member.id === scopeId);
+  const metricsKey = period === "monthly" ? "monthly" : "longTerm";
+  const visibleCategories = categories.filter(
+    (category) => period === "longTerm" || !category.longTermOnly,
+  );
+  const category =
+    visibleCategories.find((item) => item.key === categoryKey) ?? visibleCategories[0];
+  const sorted = [...members].sort(
+    (a, b) =>
+      Number(b[metricsKey][category.key]) - Number(a[metricsKey][category.key]) ||
+      a.name.localeCompare(b.name),
+  );
+  const rawDeals = data?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
+  const periodDeals = rawDeals.filter(
     (deal) =>
-      isActiveDashboardDeal(deal) && activeMemberNames.has(canonicalMemberName(deal.manager)),
+      isActiveDashboardDeal(deal) &&
+      (period === "longTerm" || normalizeDealMonthKey(deal.month) === getCurrentDealMonthKey()),
   );
-  const topDeals = [...activeDeals]
-    .sort((a, b) => b.totalPricingGbp - a.totalPricingGbp)
-    .slice(0, 5);
-  const topProfitDeals = [...activeDeals]
-    .sort((a, b) => getDealProfit(b) - getDealProfit(a))
-    .slice(0, 5);
+  const scopedDeals = selectedMember
+    ? periodDeals.filter((deal) => identityMatches(deal.manager, selectedMember))
+    : periodDeals;
+  const rawCreators = data?.creators ?? [];
+  const scopedCreators = selectedMember
+    ? rawCreators.filter((creator) => identityMatches(creator.owner, selectedMember))
+    : rawCreators;
+  const longTermDeals = rawDeals.filter(
+    (deal) =>
+      isActiveDashboardDeal(deal) &&
+      (!selectedMember || identityMatches(deal.manager, selectedMember)),
+  );
+  const periodLabel = period === "monthly" ? "this month" : "across all time";
+
+  const changePeriod = (nextPeriod: Period) => {
+    setPeriod(nextPeriod);
+    if (nextPeriod === "monthly" && categoryKey === "exclusiveCreators") {
+      setCategoryKey("commission");
+    }
+  };
 
   return (
     <div className="space-y-6">
       <AppHeader
         title="Leaderboard"
-        subtitle="Compare team performance across commission, deals, outreach, and creator growth."
+        subtitle="Compare financial performance, deal value, and creator results without outreach activity."
       />
 
-      <div className="rounded-3xl bg-card p-3 ring-1 ring-border">
-        <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Leaderboard category">
-          {categories.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="tab"
-              aria-selected={item.key === category.key}
-              onClick={() => setCategoryKey(item.key)}
-              className={`tb-action shrink-0 rounded-2xl px-4 py-2.5 text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                item.key === category.key
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted/60 text-muted-foreground hover:bg-accent hover:text-foreground"
-              }`}
-            >
-              {item.shortLabel}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        {podiumMembers.map((t, i) => (
-          <div
-            key={t.id}
-            className="tb-hover-lift tb-stat-tile overflow-hidden rounded-3xl p-6 ring-1 ring-border"
-            style={{ background: palette[i] }}
-          >
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide opacity-70">
-              <Trophy className="h-3.5 w-3.5" /> #{i + 1}
+      {auth.isAdmin && selectedMember ? (
+        <div
+          className="flex flex-col gap-3 rounded-3xl border border-primary/20 bg-primary/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+          role="status"
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-card text-primary ring-1 ring-primary/20">
+              <ShieldCheck className="h-5 w-5" />
             </div>
-            <div className="mt-3 flex items-center gap-3">
-              <TeamAvatar
-                name={t.name}
-                initials={t.initials}
-                avatarUrl={t.avatarUrl}
-                className="h-14 w-14"
-                fallbackClassName="bg-white/70 text-lg font-bold"
-              />
-              <div>
-                <div className="text-lg font-bold">{t.name}</div>
-                <div className="text-xs opacity-70">Team member</div>
+            <div className="min-w-0">
+              <div className="text-xs font-bold uppercase tracking-wide text-primary">
+                Admin preview
+              </div>
+              <div className="truncate text-sm font-black">
+                Viewing {selectedMember.name}'s dashboard
               </div>
             </div>
-            <div className="mt-4 text-3xl font-bold">
-              {formatMetric(Number(t[category.key]), category.format)}
+          </div>
+          <Link
+            to="/leaderboard"
+            search={{ member: undefined }}
+            className="tb-action inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-2xl bg-foreground px-4 text-sm font-bold text-background hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Exit preview
+          </Link>
+        </div>
+      ) : null}
+
+      <PeriodSlider period={period} onChange={changePeriod} />
+
+      <div className="flex flex-col gap-3 rounded-3xl bg-card p-4 ring-1 ring-border sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="text-sm font-black">
+            {period === "monthly" ? "Current month" : "Long-term performance"}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {period === "monthly"
+              ? "Only deals recorded in the current month are included."
+              : "All valid historical deal rows are included."}
+          </p>
+        </div>
+        {selectedMember && !auth.isAdmin ? (
+          <div className="inline-flex items-center gap-2 self-start rounded-full bg-muted px-3 py-2 text-xs font-bold text-muted-foreground sm:self-auto">
+            <UserRound className="h-4 w-4" /> My results
+          </div>
+        ) : null}
+      </div>
+
+      {!selectedMember ? (
+        <>
+          <div className="rounded-3xl bg-card p-3 ring-1 ring-border">
+            <div className="px-1 pb-3">
+              <h2 className="text-base font-black">Top 3 members</h2>
+              <p className="mt-1 text-xs text-muted-foreground">{category.description(period)}</p>
             </div>
-            <div className="text-xs opacity-70">
-              {category.label} · {t.dealsClosed} deals
+            <div
+              className="flex gap-2 overflow-x-auto pb-1"
+              role="tablist"
+              aria-label="Financial metric"
+            >
+              {visibleCategories.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={item.key === category.key}
+                  onClick={() => setCategoryKey(item.key)}
+                  className={`tb-action shrink-0 rounded-2xl px-4 py-2.5 text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    item.key === category.key
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted/60 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  }`}
+                >
+                  {item.shortLabel}
+                </button>
+              ))}
             </div>
           </div>
-        ))}
-      </div>
 
-      <div className="overflow-hidden rounded-3xl bg-card ring-1 ring-border">
-        <div className="border-b border-border px-5 py-4">
-          <h3 className="text-base font-semibold">Full ranking</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{category.description}</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
-            <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-5 py-3 text-left font-medium">Rank</th>
-                <th className="px-5 py-3 text-left font-medium">Member</th>
-                <th className="px-5 py-3 text-right font-medium">{category.label}</th>
-                <th className="px-5 py-3 text-right font-medium">Sample</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((member, index) => {
-                const eligible = category.minimum ? category.minimum(member) : true;
-                return (
-                  <tr key={member.id} className="border-t border-border/60 hover:bg-muted/40">
-                    <td className="px-5 py-3 font-black">{eligible ? `#${index + 1}` : "-"}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <TeamAvatar
-                          name={member.name}
-                          initials={member.initials}
-                          avatarUrl={member.avatarUrl}
-                          className="h-8 w-8"
-                          fallbackClassName="bg-fun-blue text-xs"
-                        />
-                        <span className="font-semibold">{member.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3 text-right font-black">
-                      {eligible
-                        ? formatMetric(Number(member[category.key]), category.format)
-                        : "Not enough data"}
-                    </td>
-                    <td className="px-5 py-3 text-right text-muted-foreground">
-                      {member.contacted.toLocaleString()} contacted
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">{category.label} by member</h3>
-            <p className="text-xs text-muted-foreground">
-              {category.description}
-            </p>
+          <div className="grid gap-4 md:grid-cols-3">
+            {sorted.slice(0, 3).map((member, index) => (
+              <div
+                key={member.id}
+                className="tb-hover-lift tb-stat-tile overflow-hidden rounded-3xl p-6 ring-1 ring-border"
+                style={{ background: palette[index] }}
+              >
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide opacity-70">
+                  <Trophy className="h-3.5 w-3.5" /> #{index + 1}
+                </div>
+                <div className="mt-3 flex items-center gap-3">
+                  <TeamAvatar
+                    name={member.name}
+                    initials={member.initials}
+                    avatarUrl={member.avatarUrl}
+                    className="h-14 w-14"
+                    fallbackClassName="bg-white/70 text-lg font-bold"
+                  />
+                  <div>
+                    <div className="text-lg font-bold">{member.name}</div>
+                    <div className="text-xs opacity-70">Team member</div>
+                  </div>
+                </div>
+                <div className="mt-4 text-3xl font-black">
+                  {formatMetric(Number(member[metricsKey][category.key]), category.format)}
+                </div>
+                <div className="text-xs opacity-70">
+                  {category.label} · {formatCurrency(member[metricsKey].averageDealValue)} avg deal
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
-            <BarChart3 className="h-3.5 w-3.5" />
-            {category.format === "money" ? "GBP" : category.format === "percent" ? "%" : "Count"}
+        </>
+      ) : (
+        <section className="rounded-3xl bg-card p-6 ring-1 ring-border">
+          <div className="flex items-center gap-3">
+            <TeamAvatar
+              name={selectedMember.name}
+              initials={selectedMember.initials}
+              avatarUrl={selectedMember.avatarUrl}
+              className="h-14 w-14"
+              fallbackClassName="bg-fun-blue text-base font-black"
+            />
+            <div>
+              <h2 className="text-xl font-black">{selectedMember.name}</h2>
+              <p className="text-sm text-muted-foreground">
+                Individual performance · {periodLabel}
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="mt-5 h-[340px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ top: 10, right: 12, left: 6, bottom: 0 }}>
-              <CartesianGrid vertical={false} strokeDasharray="4 4" />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} />
-              <YAxis
-                width={56}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(value) =>
-                  category.format === "money"
-                    ? formatCompactCurrency(Number(value))
-                    : category.format === "percent"
-                      ? `${value}%`
-                      : Number(value).toLocaleString()
-                }
-              />
-              <Tooltip content={<MetricTooltip format={category.format} />} cursor={{ fill: "hsl(var(--muted))" }} />
-              <Bar
-                dataKey="value"
-                name={category.label}
-                fill="var(--fun-blue)"
-                radius={[8, 8, 0, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">Top 5 deals by total pricing</h3>
-            <p className="text-xs text-muted-foreground">
-              Highest revenue rows from the live deal sheet.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2.5 text-left font-medium">#</th>
-                <th className="px-3 py-2.5 text-left font-medium">Brand</th>
-                <th className="px-3 py-2.5 text-left font-medium">Creator</th>
-                <th className="px-3 py-2.5 text-left font-medium">Member</th>
-                <th className="px-3 py-2.5 text-right font-medium">Total pricing</th>
-                <th className="px-3 py-2.5 text-right font-medium">Margin</th>
-                <th className="px-3 py-2.5 text-right font-medium">Profit</th>
-                <th className="px-3 py-2.5 text-left font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topDeals.map((deal, index) => (
-                <tr
-                  key={deal.id}
-                  className="tb-row-hover border-t border-border/60 hover:bg-muted/40"
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {categories
+              .filter((item) => !item.longTermOnly)
+              .map((item, index) => (
+                <div
+                  key={item.key}
+                  className="rounded-2xl p-4 ring-1 ring-border"
+                  style={{ background: `${palette[index]}99` }}
                 >
-                  <td className="px-3 py-3 font-semibold">{index + 1}</td>
-                  <td className="px-3 py-3 font-medium">{deal.brand}</td>
-                  <td className="px-3 py-3 text-muted-foreground">{deal.creator}</td>
-                  <td className="px-3 py-3">{deal.manager}</td>
-                  <td className="px-3 py-3 text-right font-semibold">
-                    {formatCurrency(deal.totalPricingGbp)}
-                  </td>
-                  <td className="px-3 py-3 text-right">{deal.profitMargin || "-"}</td>
-                  <td className="px-3 py-3 text-right">{formatCurrency(getDealProfit(deal))}</td>
-                  <td className="px-3 py-3">{deal.status}</td>
-                </tr>
+                  <div className="text-xs font-bold text-foreground/65">{item.label}</div>
+                  <div className="mt-2 text-2xl font-black">
+                    {formatMetric(Number(selectedMember[metricsKey][item.key]), item.format)}
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">Top 5 deals by profit</h3>
-            <p className="text-xs text-muted-foreground">
-              Profit is calculated as total pricing minus creator total.
-            </p>
           </div>
-        </div>
+        </section>
+      )}
 
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2.5 text-left font-medium">#</th>
-                <th className="px-3 py-2.5 text-left font-medium">Brand</th>
-                <th className="px-3 py-2.5 text-left font-medium">Creator</th>
-                <th className="px-3 py-2.5 text-left font-medium">Member</th>
-                <th className="px-3 py-2.5 text-right font-medium">Profit</th>
-                <th className="px-3 py-2.5 text-right font-medium">Margin</th>
-                <th className="px-3 py-2.5 text-right font-medium">Total pricing</th>
-                <th className="px-3 py-2.5 text-left font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topProfitDeals.map((deal, index) => (
-                <tr
-                  key={deal.id}
-                  className="tb-row-hover border-t border-border/60 hover:bg-muted/40"
-                >
-                  <td className="px-3 py-3 font-semibold">{index + 1}</td>
-                  <td className="px-3 py-3 font-medium">{deal.brand}</td>
-                  <td className="px-3 py-3 text-muted-foreground">{deal.creator}</td>
-                  <td className="px-3 py-3">{deal.manager}</td>
-                  <td className="px-3 py-3 text-right font-semibold">
-                    {formatCurrency(getDealProfit(deal))}
-                  </td>
-                  <td className="px-3 py-3 text-right">{deal.profitMargin || "-"}</td>
-                  <td className="px-3 py-3 text-right">{formatCurrency(deal.totalPricingGbp)}</td>
-                  <td className="px-3 py-3">{deal.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {period === "longTerm" ? (
+        <TopExclusiveCreators
+          creators={scopedCreators}
+          deals={longTermDeals}
+          title={
+            selectedMember
+              ? `${selectedMember.name}'s Exclusive Creators`
+              : "Top Exclusive Creators"
+          }
+          description={
+            selectedMember
+              ? "The member's exclusive creators ranked by total deal value."
+              : "Ranked by total deal value, with posted live deal value highlighted inside each bar."
+          }
+        />
+      ) : null}
+
+      <DealTable
+        title="Top 3 deals by total pricing"
+        description={`Highest-value valid deal rows ${periodLabel}.`}
+        deals={scopedDeals}
+        sortBy="pricing"
+        showMember={!selectedMember}
+      />
+      <DealTable
+        title="Top 3 deals by profit"
+        description={`Highest-profit valid deal rows ${periodLabel}. Profit is total pricing minus creator total.`}
+        deals={scopedDeals}
+        sortBy="profit"
+        showMember={!selectedMember}
+      />
     </div>
   );
 }

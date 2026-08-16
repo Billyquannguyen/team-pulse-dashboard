@@ -25,7 +25,6 @@ import {
   YAxis,
 } from "recharts";
 import { AppHeader } from "@/components/layout/AppHeader";
-import { TopExclusiveCreators } from "@/components/goals/TopExclusiveCreators";
 import { deals as fallbackDeals, isClosedCommissionDeal, type Deal } from "@/data/deals";
 import {
   team as fallbackTeam,
@@ -1308,7 +1307,6 @@ function GoalsPage() {
     [team],
   );
   const teamExclusiveCreators = team.reduce((sum, member) => sum + member.exclusiveCreators, 0);
-  const creators = data?.creators ?? [];
 
   const getMonthlyTarget = (member: Teammate) => getMemberMonthlyGoal(settings, member);
   const getProgressionTarget = (member: Teammate) => getMemberProgressionGoal(settings, member);
@@ -1468,8 +1466,6 @@ function GoalsPage() {
           ))}
         </div>
       </section>
-
-      <TopExclusiveCreators creators={creators} deals={deals} />
 
       {auth.isAdmin && (
         <AdminGoalControls

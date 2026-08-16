@@ -43,6 +43,7 @@ OPENROUTER_API_KEY=your_openrouter_api_key
 OPENROUTER_DEFAULT_MODEL=your_preferred_openrouter_model
 OPENROUTER_FALLBACK_MODEL=optional_backup_model
 SLACK_USER_TOKEN=xoxp-your-personal-user-token
+SLACK_LINK_ALERT_USER_TOKEN=xoxp-your-separate-link-alert-user-token
 SLACK_OWNER_USER_ID=your_slack_user_id
 SLACK_BOT_TOKEN=xoxb-your-bot-token-if-used
 SLACK_SIGNING_SECRET=your_slack_signing_secret
@@ -104,8 +105,8 @@ The Slack user token needs permission to list IM conversations and read IM histo
 
 Slack link alerts resolve the comma-separated names in `SLACK_LINK_ALERT_MEMBER_NAMES` to Slack users at runtime. They scan at 10:00, 12:00, 13:00, 17:00, and 20:00 UK time. They monitor every public channel visible to the connected Slack account, every private channel that account has joined, and one-to-one direct messages with the configured members. When one of those members posts an `http://` or `https://` link, the server posts the member name, Slack location, a quoted copy of the Slack message, and a link to the original Slack message through `SLACK_LINK_ALERT_DISCORD_WEBHOOK_URL`. Quotes are shortened to 1,000 characters so they fit safely inside Discord's message limit.
 
-The link-alert route is checked at the UTC hours that cover both GMT and BST. It only scans Slack when the current `Europe/London` hour is 10:00, 12:00, 13:00, 17:00, or 20:00. This keeps the intended UK schedule when daylight saving changes. On the first successful check, each channel scans up to the previous 48 hours before storing its checkpoint. Later checks process only newer channel messages and update their Upstash Redis checkpoints as they go.
+The link-alert route is checked at the UTC hours that cover both GMT and BST. It only scans Slack when the current `Europe/London` hour is 10:00, 12:00, 13:00, 17:00, or 20:00. This keeps the intended UK schedule when daylight saving changes. On the first successful check, each channel stores the current time without sending historical links. Later checks process only newer channel messages and update their Upstash Redis checkpoints as they go.
 
-The Slack token used for link alerts must be able to read the configured channels, look up users and channel names, and create message permalinks. Public channels normally need `channels:history` and `channels:read`; private channels normally need `groups:history` and `groups:read`; names need `users:read`. The Slack user connected by `SLACK_USER_TOKEN` must already belong to every private channel being monitored.
+Link alerts use the separate `SLACK_LINK_ALERT_USER_TOKEN`; the DM unreply workflow continues using `SLACK_USER_TOKEN`. The link-alert token must have `channels:read`, `channels:history`, `groups:read`, `groups:history`, `im:read`, `im:history`, and `users:read`. The Slack user connected by `SLACK_LINK_ALERT_USER_TOKEN` must already belong to every private channel being monitored.
 
 For local testing only, you can set `SLACK_FOLLOWUP_THRESHOLD_MINUTES=1` before starting the dev server. Production ignores this and keeps the real 24-hour threshold.

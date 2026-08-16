@@ -55,15 +55,15 @@ function Dashboard() {
         initials: member.initials,
         role: "Member",
         avatarUrl: member.avatarUrl,
-        commission: member.paidCommission,
-        paidCommission: member.paidCommission,
-        monthCommission: member.monthCommission,
+        commission: member.longTerm.commission,
+        paidCommission: member.longTerm.commission,
+        monthCommission: member.monthly.commission,
         pendingOwed: 0,
-        dealsClosed: member.dealsClosed,
-        revenue: member.dealValue,
+        dealsClosed: member.longTerm.dealsClosed,
+        revenue: member.longTerm.dealValue,
         revenueGoal: 0,
         dealsGoal: 0,
-        exclusiveCreators: member.exclusiveCreators,
+        exclusiveCreators: member.longTerm.exclusiveCreators,
         nonExclusiveCreators: 0,
       }));
   const totals = data?.totals ?? {
@@ -82,7 +82,11 @@ function Dashboard() {
   return (
     <div className="space-y-6">
       <AppHeader
-        title={auth.isAdmin ? "Hi, Team Billion 👋" : `Hi, ${team[0]?.name ?? auth.user?.displayName ?? "there"} 👋`}
+        title={
+          auth.isAdmin
+            ? "Hi, Team Billion 👋"
+            : `Hi, ${team[0]?.name ?? auth.user?.displayName ?? "there"} 👋`
+        }
         subtitle={
           isLoading
             ? "Loading live Google Sheets data..."

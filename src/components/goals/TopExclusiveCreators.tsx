@@ -333,7 +333,17 @@ function AllCreatorsModal({
   );
 }
 
-export function TopExclusiveCreators({ creators, deals }: { creators: Creator[]; deals: Deal[] }) {
+export function TopExclusiveCreators({
+  creators,
+  deals,
+  title = "Top Exclusive Creators",
+  description = "Ranked by total deal value, with posted live deal value highlighted inside each bar.",
+}: {
+  creators: Creator[];
+  deals: Deal[];
+  title?: string;
+  description?: string;
+}) {
   const [allOpen, setAllOpen] = useState(false);
   const [selectedCreator, setSelectedCreator] = useState<CreatorPerformance | null>(null);
   const performance = useMemo(
@@ -352,10 +362,8 @@ export function TopExclusiveCreators({ creators, deals }: { creators: Creator[];
             <BarChart3 className="h-5 w-5" />
           </div>
           <div>
-            <h3 className="text-base font-black">Top Exclusive Creators</h3>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Ranked by total deal value, with posted live deal value highlighted inside each bar.
-            </p>
+            <h3 className="text-base font-black">{title}</h3>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
           </div>
         </div>
         <button

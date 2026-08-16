@@ -182,20 +182,17 @@ export type LeaderboardMemberData = {
   name: string;
   initials: string;
   avatarUrl?: string;
-  monthCommission: number;
-  paidCommission: number;
+  monthly: LeaderboardFinancialMetrics;
+  longTerm: LeaderboardFinancialMetrics;
+};
+
+export type LeaderboardFinancialMetrics = {
+  commission: number;
   dealsClosed: number;
   dealValue: number;
   profit: number;
   averageDealValue: number;
   exclusiveCreators: number;
-  contacted: number;
-  replies: number;
-  bookedCalls: number;
-  signed: number;
-  replyRate: number;
-  bookingRate: number;
-  closingRate: number;
 };
 
 export type DashboardDataFlowDiagnostics = {
@@ -322,9 +319,7 @@ function isSignedCreatorsSheet(value: string) {
 function isDealArchiveSheet(value: string) {
   const normalized = normalizeSheetLabel(value);
 
-  return DEAL_ARCHIVE_TAB_NAMES.some(
-    (tabName) => normalized === normalizeSheetLabel(tabName),
-  );
+  return DEAL_ARCHIVE_TAB_NAMES.some((tabName) => normalized === normalizeSheetLabel(tabName));
 }
 
 function getSystemTabSkipReason(sheetName: string) {
@@ -1162,7 +1157,10 @@ function calculateTotals(team: Teammate[], deals: Deal[]) {
   };
 }
 
-function memberIdentityMatches(value: string, member: Pick<Teammate, "name" | "worksheetName" | "id">) {
+function memberIdentityMatches(
+  value: string,
+  member: Pick<Teammate, "name" | "worksheetName" | "id">,
+) {
   const expected = new Set(
     [member.id, member.name, member.worksheetName]
       .filter((item): item is string => Boolean(item))
@@ -1241,37 +1239,48 @@ export function scopeDashboardDataForMember(data: DashboardSheetData, teamMember
 
 export function buildLeaderboardData(data: DashboardSheetData): LeaderboardMemberData[] {
   return data.team.map((member) => {
-    const deals = data.deals.filter(
+    const activeDeals = data.deals.filter(
       (deal) => memberIdentityMatches(deal.manager, member) && isActiveDashboardDeal(deal),
     );
-    const outreach = data.outreach.members.find((item) =>
-      memberIdentityMatches(item.memberName, member),
+    const closedDeals = data.deals.filter(
+      (deal) => memberIdentityMatches(deal.manager, member) && isClosedCommissionDeal(deal),
     );
-    const dealValue = deals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
-    const profit = deals.reduce(
-      (sum, deal) => sum + Math.max(0, deal.totalPricingGbp - deal.creatorTotalGbp),
-      0,
+    const currentMonthKey = getCurrentDealMonthKey();
+    const monthlyActiveDeals = activeDeals.filter(
+      (deal) => normalizeDealMonthKey(deal.month) === currentMonthKey,
     );
+    const monthlyClosedDeals = closedDeals.filter(
+      (deal) => normalizeDealMonthKey(deal.month) === currentMonthKey,
+    );
+
+    const metrics = (
+      deals: Deal[],
+      commissionDeals: Deal[],
+      exclusiveCreators: number,
+    ): LeaderboardFinancialMetrics => {
+      const dealValue = deals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
+      const profit = deals.reduce(
+        (sum, deal) => sum + Math.max(0, deal.totalPricingGbp - deal.creatorTotalGbp),
+        0,
+      );
+
+      return {
+        commission: commissionDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0),
+        dealsClosed: commissionDeals.length,
+        dealValue,
+        profit,
+        averageDealValue: deals.length > 0 ? Math.round(dealValue / deals.length) : 0,
+        exclusiveCreators,
+      };
+    };
 
     return {
       id: member.id,
       name: member.name,
       initials: member.initials,
       avatarUrl: member.avatarUrl,
-      monthCommission: member.monthCommission,
-      paidCommission: member.paidCommission,
-      dealsClosed: member.dealsClosed,
-      dealValue,
-      profit,
-      averageDealValue: deals.length > 0 ? Math.round(dealValue / deals.length) : 0,
-      exclusiveCreators: member.exclusiveCreators,
-      contacted: outreach?.contacted ?? 0,
-      replies: outreach?.replies ?? 0,
-      bookedCalls: outreach?.bookedCalls ?? 0,
-      signed: outreach?.signed ?? 0,
-      replyRate: outreach?.replyRate ?? 0,
-      bookingRate: outreach?.bookingRate ?? 0,
-      closingRate: outreach?.overallClosingRate ?? 0,
+      monthly: metrics(monthlyActiveDeals, monthlyClosedDeals, 0),
+      longTerm: metrics(activeDeals, closedDeals, member.exclusiveCreators),
     };
   });
 }
@@ -1680,7 +1689,7 @@ export const dashboardSheetQuery = {
 };
 
 export const leaderboardQuery = {
-  queryKey: ["team-billion-leaderboard", "multi-category-v1"],
+  queryKey: ["team-billion-leaderboard", "financial-periods-v2"],
   queryFn: () => fetchLeaderboardData(),
   staleTime: QUERY_STALE_TIME_MS,
   refetchOnMount: "always" as const,

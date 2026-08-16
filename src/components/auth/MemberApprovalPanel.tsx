@@ -1,6 +1,14 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Loader2, ShieldCheck, UserRoundCheck, UserRoundX } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Loader2,
+  LockKeyhole,
+  ShieldCheck,
+  UserRoundCheck,
+  UserRoundX,
+} from "lucide-react";
 import {
   approveDashboardMemberWithNewCard,
   listDashboardMemberAccess,
@@ -49,6 +57,16 @@ function statusLabel(status: MemberAccessStatus) {
         : "Declined";
 }
 
+function initials(name: string, email: string) {
+  const value = name.trim() || email;
+  return value
+    .split(/[\s@._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
 export function MemberApprovalPanel({ currentUserId }: { currentUserId: string }) {
   const queryClient = useQueryClient();
   const { data = [], isLoading, error } = useQuery(accessQuery);
@@ -58,10 +76,12 @@ export function MemberApprovalPanel({ currentUserId }: { currentUserId: string }
   const [linkDrafts, setLinkDrafts] = useState<Record<string, string>>({});
   const [newCardDrafts, setNewCardDrafts] = useState<Record<string, NewCardDraft>>({});
   const [successMessage, setSuccessMessage] = useState("");
+
   const mutation = useMutation({
     mutationFn: async (input: { member: DashboardMemberAccess; status: MemberAccessStatus }) => {
       const role = roleDrafts[input.member.userId] ?? input.member.role;
-      const mode = linkModes[input.member.userId] ?? (input.member.teamMemberId ? "existing" : "none");
+      const mode =
+        linkModes[input.member.userId] ?? (input.member.teamMemberId ? "existing" : "none");
       const newCard = newCardDrafts[input.member.userId];
       const result =
         input.status === "approved" && mode === "new"
@@ -70,8 +90,7 @@ export function MemberApprovalPanel({ currentUserId }: { currentUserId: string }
                 userId: input.member.userId,
                 role,
                 displayName: newCard?.displayName || input.member.displayName,
-                teamMemberId:
-                  newCard?.teamMemberId || suggestedMemberId(input.member.displayName),
+                teamMemberId: newCard?.teamMemberId || suggestedMemberId(input.member.displayName),
                 joinedMonth: newCard?.joinedMonth || "",
                 teamDepartment: newCard?.teamDepartment || "Outreach",
                 gmailLabel: newCard?.gmailLabel || "",
@@ -114,18 +133,29 @@ export function MemberApprovalPanel({ currentUserId }: { currentUserId: string }
       }),
     [data],
   );
-  const pendingCount = orderedMembers.filter((member) => member.status === "pending").length;
+  const pendingMembers = orderedMembers.filter((member) => member.status === "pending");
+  const managedMembers = orderedMembers.filter((member) => member.status !== "pending");
   const assignedIds = new Map(
     orderedMembers
       .filter((member) => member.teamMemberId)
       .map((member) => [member.teamMemberId!.toLowerCase(), member.userId]),
   );
   const teamMembers = teamMembersData?.members ?? [];
+
   const submitAccessChange = (member: DashboardMemberAccess, status: MemberAccessStatus) => {
     setSuccessMessage("");
+    if (status === "rejected") {
+      if (!window.confirm(`Decline access for ${member.displayName || member.email}?`)) return;
+    }
+    if (status === "disabled") {
+      if (!window.confirm(`Disable dashboard access for ${member.displayName || member.email}?`)) {
+        return;
+      }
+    }
     if (status === "approved" && member.teamMemberId) {
       const mode = linkModes[member.userId] ?? "existing";
-      const nextId = mode === "existing" ? linkDrafts[member.userId] ?? member.teamMemberId : null;
+      const nextId =
+        mode === "existing" ? (linkDrafts[member.userId] ?? member.teamMemberId) : null;
       if (nextId?.toLowerCase() !== member.teamMemberId.toLowerCase()) {
         const message = nextId
           ? `Change this account from ${member.teamMemberId} to ${nextId}? Historical data will remain unchanged.`
@@ -136,6 +166,237 @@ export function MemberApprovalPanel({ currentUserId }: { currentUserId: string }
     mutation.mutate({ member, status });
   };
 
+  const renderAccountCard = (member: DashboardMemberAccess) => {
+    const busy = mutation.isPending && mutation.variables?.member.userId === member.userId;
+    const isSelf = member.userId === currentUserId;
+    const mode = linkModes[member.userId] ?? (member.teamMemberId ? "existing" : "none");
+    const newCard = newCardDrafts[member.userId] ?? {
+      displayName: member.displayName,
+      teamMemberId: suggestedMemberId(member.displayName),
+      joinedMonth: "",
+      teamDepartment: "Outreach",
+      gmailLabel: "",
+    };
+    const availableCards = teamMembers.filter(
+      (card) =>
+        !assignedIds.has(card.id.toLowerCase()) ||
+        assignedIds.get(card.id.toLowerCase()) === member.userId,
+    );
+
+    return (
+      <article
+        key={member.userId}
+        className={cn(
+          "rounded-2xl border bg-background p-4 transition-colors sm:p-5",
+          member.status === "pending" ? "border-primary/25 shadow-sm" : "border-border",
+        )}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-fun-blue text-sm font-black text-slate-900">
+              {initials(member.displayName, member.email)}
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-sm font-black sm:text-base">
+                  {member.displayName || "Unnamed member"}
+                </h3>
+                {isSelf && (
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-muted-foreground">
+                    You
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 truncate text-xs font-semibold text-muted-foreground">
+                {member.email}
+              </p>
+            </div>
+          </div>
+          <span
+            className={cn(
+              "inline-flex rounded-full px-2.5 py-1 text-xs font-black",
+              member.status === "approved"
+                ? "bg-success/15 text-success"
+                : member.status === "pending"
+                  ? "bg-warning/20 text-amber-800"
+                  : "bg-muted text-muted-foreground",
+            )}
+          >
+            {statusLabel(member.status)}
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 lg:grid-cols-[minmax(160px,0.7fr)_minmax(280px,1.5fr)]">
+          <label className="grid gap-1.5">
+            <span className="text-[11px] font-black uppercase tracking-wide text-muted-foreground">
+              Account role
+            </span>
+            <select
+              aria-label={`Role for ${member.email}`}
+              value={roleDrafts[member.userId] ?? member.role}
+              disabled={busy || isSelf}
+              onChange={(event) =>
+                setRoleDrafts((current) => ({
+                  ...current,
+                  [member.userId]: event.target.value as AuthRole,
+                }))
+              }
+              className="h-11 w-full rounded-xl border bg-card px-3 text-sm font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            >
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+
+          <div className="grid gap-2">
+            <label className="grid gap-1.5">
+              <span className="text-[11px] font-black uppercase tracking-wide text-muted-foreground">
+                Connected member profile
+              </span>
+              <select
+                aria-label={`Member profile action for ${member.email}`}
+                value={mode}
+                disabled={busy}
+                onChange={(event) =>
+                  setLinkModes((current) => ({
+                    ...current,
+                    [member.userId]: event.target.value as LinkMode,
+                  }))
+                }
+                className="h-11 w-full rounded-xl border bg-card px-3 text-sm font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+              >
+                <option value="none">No member profile</option>
+                <option value="existing">Connect existing profile</option>
+                {member.status === "pending" && <option value="new">Create new profile</option>}
+              </select>
+            </label>
+
+            {mode === "existing" && (
+              <select
+                aria-label={`Existing member profile for ${member.email}`}
+                value={linkDrafts[member.userId] ?? member.teamMemberId ?? ""}
+                disabled={busy}
+                onChange={(event) =>
+                  setLinkDrafts((current) => ({
+                    ...current,
+                    [member.userId]: event.target.value,
+                  }))
+                }
+                className="h-11 w-full rounded-xl border bg-card px-3 text-sm font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+              >
+                <option value="">Select a profile</option>
+                {availableCards.map((card) => (
+                  <option key={card.id} value={card.id}>
+                    {card.displayName} ({card.id})
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {mode === "new" && (
+              <div className="grid gap-2 rounded-xl bg-muted/55 p-3 sm:grid-cols-2">
+                <input
+                  aria-label="New member display name"
+                  value={newCard.displayName}
+                  placeholder="Display name"
+                  onChange={(event) =>
+                    setNewCardDrafts((current) => ({
+                      ...current,
+                      [member.userId]: { ...newCard, displayName: event.target.value },
+                    }))
+                  }
+                  className="h-10 rounded-lg border bg-background px-3 text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <input
+                  aria-label="New member ID"
+                  value={newCard.teamMemberId}
+                  placeholder="Member ID"
+                  onChange={(event) =>
+                    setNewCardDrafts((current) => ({
+                      ...current,
+                      [member.userId]: { ...newCard, teamMemberId: event.target.value },
+                    }))
+                  }
+                  className="h-10 rounded-lg border bg-background px-3 text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <input
+                  aria-label="Joined month"
+                  type="month"
+                  value={newCard.joinedMonth}
+                  onChange={(event) =>
+                    setNewCardDrafts((current) => ({
+                      ...current,
+                      [member.userId]: { ...newCard, joinedMonth: event.target.value },
+                    }))
+                  }
+                  className="h-10 rounded-lg border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <input
+                  aria-label="Team or department"
+                  value={newCard.teamDepartment}
+                  placeholder="Team"
+                  onChange={(event) =>
+                    setNewCardDrafts((current) => ({
+                      ...current,
+                      [member.userId]: { ...newCard, teamDepartment: event.target.value },
+                    }))
+                  }
+                  className="h-10 rounded-lg border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+            )}
+
+            {isSelf && !member.teamMemberId && (
+              <span className="text-xs font-semibold text-muted-foreground">
+                Your admin account does not need a member profile.
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-border/70 pt-4">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => submitAccessChange(member, "approved")}
+            className="inline-flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-xs font-black text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          >
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : member.status === "approved" ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <UserRoundCheck className="h-4 w-4" />
+            )}
+            {member.status === "approved" ? "Save changes" : "Approve access"}
+          </button>
+          {!isSelf && member.status === "pending" && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => submitAccessChange(member, "rejected")}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-muted px-4 text-xs font-black transition hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            >
+              <UserRoundX className="h-4 w-4" />
+              Decline
+            </button>
+          )}
+          {!isSelf && member.status === "approved" && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => submitAccessChange(member, "disabled")}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-muted px-4 text-xs font-black transition hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            >
+              <UserRoundX className="h-4 w-4" />
+              Disable access
+            </button>
+          )}
+        </div>
+      </article>
+    );
+  };
+
   return (
     <section className="rounded-3xl bg-card p-5 shadow-sm ring-1 ring-border md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -144,14 +405,21 @@ export function MemberApprovalPanel({ currentUserId }: { currentUserId: string }
             <ShieldCheck className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-base font-black">Dashboard access requests</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Approve verified accounts and choose whether they are members or admins.
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-black">Dashboard access</h2>
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-muted-foreground">
+                <LockKeyhole className="h-3 w-3" />
+                Admin only
+              </span>
+            </div>
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+              Only approved admins can see this panel or manage account access. Members never see
+              this list.
             </p>
           </div>
         </div>
         <span className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-black text-primary">
-          {pendingCount} pending
+          {pendingMembers.length} pending
         </span>
       </div>
 
@@ -164,252 +432,64 @@ export function MemberApprovalPanel({ currentUserId }: { currentUserId: string }
         </div>
       )}
       {successMessage && (
-        <div role="status" className="mt-4 rounded-2xl bg-success/12 px-4 py-3 text-sm font-bold text-success">
+        <div
+          role="status"
+          className="mt-4 rounded-2xl bg-success/12 px-4 py-3 text-sm font-bold text-success"
+        >
           {successMessage}
         </div>
       )}
-
-      <div className="mt-5 max-h-[560px] overflow-auto rounded-2xl border border-border">
-        <table className="w-full min-w-[1040px] text-left text-sm">
-          <thead className="sticky top-0 z-10 bg-muted/95 text-xs uppercase tracking-wide text-muted-foreground backdrop-blur">
-            <tr>
-              <th className="px-4 py-3 font-black">Account</th>
-              <th className="px-4 py-3 font-black">Status</th>
-              <th className="px-4 py-3 font-black">Role</th>
-              <th className="px-4 py-3 font-black">Member profile</th>
-              <th className="px-4 py-3 text-right font-black">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {isLoading ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center font-bold text-muted-foreground">
-                  <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-                  Loading accounts...
-                </td>
-              </tr>
-            ) : orderedMembers.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center font-bold text-muted-foreground">
-                  No registered accounts yet.
-                </td>
-              </tr>
-            ) : (
-              orderedMembers.map((member) => {
-                const busy =
-                  mutation.isPending && mutation.variables?.member.userId === member.userId;
-                const isSelf = member.userId === currentUserId;
-                const mode =
-                  linkModes[member.userId] ?? (member.teamMemberId ? "existing" : "none");
-                const newCard = newCardDrafts[member.userId] ?? {
-                  displayName: member.displayName,
-                  teamMemberId: suggestedMemberId(member.displayName),
-                  joinedMonth: "",
-                  teamDepartment: "Outreach",
-                  gmailLabel: "",
-                };
-                const availableCards = teamMembers.filter(
-                  (card) =>
-                    !assignedIds.has(card.id.toLowerCase()) ||
-                    assignedIds.get(card.id.toLowerCase()) === member.userId,
-                );
-                return (
-                  <tr
-                    key={member.userId}
-                    className={cn(member.status === "pending" && "bg-primary/[0.035]")}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="font-black">{member.displayName || "Unnamed member"}</div>
-                      <div className="mt-0.5 text-xs font-semibold text-muted-foreground">
-                        {member.email}
-                        {isSelf ? " · You" : ""}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={cn(
-                          "inline-flex rounded-full px-2.5 py-1 text-xs font-black",
-                          member.status === "approved"
-                            ? "bg-success/15 text-success"
-                            : member.status === "pending"
-                              ? "bg-warning/20 text-amber-800"
-                              : "bg-muted text-muted-foreground",
-                        )}
-                      >
-                        {statusLabel(member.status)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <select
-                        aria-label={`Role for ${member.email}`}
-                        value={roleDrafts[member.userId] ?? member.role}
-                        disabled={busy || isSelf}
-                        onChange={(event) =>
-                          setRoleDrafts((current) => ({
-                            ...current,
-                            [member.userId]: event.target.value as AuthRole,
-                          }))
-                        }
-                        className="h-9 rounded-xl border bg-background px-3 text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <option value="member">Member</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <div className="grid min-w-[310px] gap-2">
-                        <select
-                          aria-label={`Member profile action for ${member.email}`}
-                          value={mode}
-                          disabled={busy}
-                          onChange={(event) =>
-                            setLinkModes((current) => ({
-                              ...current,
-                              [member.userId]: event.target.value as LinkMode,
-                            }))
-                          }
-                          className="h-9 rounded-xl border bg-background px-3 text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-                        >
-                          <option value="none">No member profile</option>
-                          <option value="existing">Connect existing profile</option>
-                          {member.status === "pending" && <option value="new">Create new profile</option>}
-                        </select>
-
-                        {mode === "existing" && (
-                          <select
-                            aria-label={`Existing member profile for ${member.email}`}
-                            value={linkDrafts[member.userId] ?? member.teamMemberId ?? ""}
-                            disabled={busy}
-                            onChange={(event) =>
-                              setLinkDrafts((current) => ({
-                                ...current,
-                                [member.userId]: event.target.value,
-                              }))
-                            }
-                            className="h-9 rounded-xl border bg-background px-3 text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-                          >
-                            <option value="">Select a profile</option>
-                            {availableCards.map((card) => (
-                              <option key={card.id} value={card.id}>
-                                {card.displayName} ({card.id})
-                              </option>
-                            ))}
-                          </select>
-                        )}
-
-                        {mode === "new" && (
-                          <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted/55 p-2">
-                            <input
-                              aria-label="New member display name"
-                              value={newCard.displayName}
-                              placeholder="Display name"
-                              onChange={(event) =>
-                                setNewCardDrafts((current) => ({
-                                  ...current,
-                                  [member.userId]: { ...newCard, displayName: event.target.value },
-                                }))
-                              }
-                              className="h-9 rounded-lg border bg-background px-2 text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            />
-                            <input
-                              aria-label="New member ID"
-                              value={newCard.teamMemberId}
-                              placeholder="Member ID"
-                              onChange={(event) =>
-                                setNewCardDrafts((current) => ({
-                                  ...current,
-                                  [member.userId]: { ...newCard, teamMemberId: event.target.value },
-                                }))
-                              }
-                              className="h-9 rounded-lg border bg-background px-2 text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            />
-                            <input
-                              aria-label="Joined month"
-                              type="month"
-                              value={newCard.joinedMonth}
-                              onChange={(event) =>
-                                setNewCardDrafts((current) => ({
-                                  ...current,
-                                  [member.userId]: { ...newCard, joinedMonth: event.target.value },
-                                }))
-                              }
-                              className="h-9 rounded-lg border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            />
-                            <input
-                              aria-label="Team or department"
-                              value={newCard.teamDepartment}
-                              placeholder="Team"
-                              onChange={(event) =>
-                                setNewCardDrafts((current) => ({
-                                  ...current,
-                                  [member.userId]: { ...newCard, teamDepartment: event.target.value },
-                                }))
-                              }
-                              className="h-9 rounded-lg border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            />
-                          </div>
-                        )}
-                        {isSelf && !member.teamMemberId && (
-                          <span className="text-xs font-semibold text-muted-foreground">
-                            Admin account. No member profile required.
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => submitAccessChange(member, "approved")}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-black text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                        >
-                          {busy ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : member.status === "approved" ? (
-                            <Check className="h-3.5 w-3.5" />
-                          ) : (
-                            <UserRoundCheck className="h-3.5 w-3.5" />
-                          )}
-                          {member.status === "approved" ? "Save role" : "Approve"}
-                        </button>
-                        {!isSelf && member.status === "pending" && (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => submitAccessChange(member, "rejected")}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-muted px-3 text-xs font-black hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                          >
-                            <UserRoundX className="h-3.5 w-3.5" />
-                            Decline
-                          </button>
-                        )}
-                        {!isSelf && member.status === "approved" && (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => submitAccessChange(member, "disabled")}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-muted px-3 text-xs font-black hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                          >
-                            <UserRoundX className="h-3.5 w-3.5" />
-                            Disable
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
       {mutation.error && (
         <p role="alert" className="mt-3 text-sm font-bold text-destructive">
           {mutation.error instanceof Error
             ? mutation.error.message
             : "Could not update this account."}
         </p>
+      )}
+
+      <div className="mt-5">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-black">Waiting for your approval</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Review the account, role, and member-profile connection before approving.
+            </p>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm font-bold text-muted-foreground">
+            <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+            Loading accounts...
+          </div>
+        ) : pendingMembers.length ? (
+          <div className="grid gap-3">{pendingMembers.map(renderAccountCard)}</div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-border bg-muted/25 px-4 py-6 text-center">
+            <Check className="mx-auto h-5 w-5 text-success" />
+            <p className="mt-2 text-sm font-black">You are all caught up</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              New verified requests will appear here.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {!isLoading && managedMembers.length > 0 && (
+        <details className="group mt-4 overflow-hidden rounded-2xl border border-border bg-background">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-4 outline-none transition hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            <div>
+              <span className="text-sm font-black">Manage existing accounts</span>
+              <span className="ml-2 text-xs font-semibold text-muted-foreground">
+                {managedMembers.length} account{managedMembers.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="grid max-h-[620px] gap-3 overflow-y-auto border-t border-border bg-muted/20 p-3 sm:p-4">
+            {managedMembers.map(renderAccountCard)}
+          </div>
+        </details>
       )}
     </section>
   );

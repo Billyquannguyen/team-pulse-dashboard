@@ -64,6 +64,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     authMode: z.string().optional(),
     authMessage: z.string().optional(),
     authError: z.string().optional(),
+    error: z.string().optional(),
+    error_code: z.string().optional(),
+    error_description: z.string().optional(),
   }),
   head: () => ({
     meta: [
@@ -111,7 +114,7 @@ function RootComponent() {
   const search = Route.useSearch();
   const isPasswordRecovery = search.authMode === "update-password";
   const initialError =
-    search.authError === "expired_link"
+    search.authError === "expired_link" || search.error_code === "otp_expired"
       ? "This email link has expired or was already used. Request another link."
       : search.authError === "missing_code"
         ? "This email link is incomplete. Request another link."

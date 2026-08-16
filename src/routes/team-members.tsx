@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
@@ -422,7 +422,10 @@ function TeamMembersPage() {
                 <MemberProfileCard
                   key={`${member.id}-${member.rowNumber ?? "profile"}`}
                   member={member}
-                  canEdit={isAdmin || auth.user?.teamMemberId?.toLowerCase() === member.id.toLowerCase()}
+                  canEdit={
+                    isAdmin || auth.user?.teamMemberId?.toLowerCase() === member.id.toLowerCase()
+                  }
+                  canAccessView={isAdmin}
                   onEdit={() => setProfileModal({ member })}
                 />
               ))}
@@ -1037,10 +1040,12 @@ function ProfileModal({
 function MemberProfileCard({
   member,
   canEdit,
+  canAccessView,
   onEdit,
 }: {
   member: TeamMemberConfig;
   canEdit: boolean;
+  canAccessView: boolean;
   onEdit: () => void;
 }) {
   const socialLinks = [
@@ -1105,6 +1110,16 @@ function MemberProfileCard({
             </span>
           )}
         </div>
+        {canAccessView ? (
+          <Link
+            to="/leaderboard"
+            search={{ member: member.id }}
+            className="tb-action mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-foreground px-4 text-sm font-bold text-background hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <UserRound className="h-4 w-4" />
+            Access {member.displayName}'s view
+          </Link>
+        ) : null}
       </div>
     </article>
   );

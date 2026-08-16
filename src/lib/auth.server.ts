@@ -16,27 +16,37 @@ type MemberRow = {
   approved_at: string | null;
 };
 
-function safeOrigin() {
+export function dashboardPublicOrigin() {
   const configuredOrigin = process.env.DASHBOARD_PUBLIC_URL?.trim();
   if (configuredOrigin) {
     try {
-      return new URL(configuredOrigin).origin;
+      const origin = new URL(configuredOrigin).origin;
+      if (process.env.VERCEL_ENV === "production" && new URL(origin).hostname === "localhost") {
+        throw new Error("DASHBOARD_PUBLIC_URL cannot use localhost in production.");
+      }
+      return origin;
     } catch {
       throw new Error("DASHBOARD_PUBLIC_URL must be a valid absolute URL.");
     }
   }
 
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  }
+
+  if (process.env.VERCEL_ENV === "production") {
+    throw new Error("DASHBOARD_PUBLIC_URL is required in production.");
+  }
+
   try {
     return new URL(getRequestUrl()).origin;
   } catch {
-    return process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : "http://localhost:3000";
+    return "http://localhost:3000";
   }
 }
 
 function callbackUrl(next: "confirmed" | "recovery") {
-  const url = new URL("/api/auth/callback", safeOrigin());
+  const url = new URL("/api/auth/callback", dashboardPublicOrigin());
   url.searchParams.set("next", next);
   return url.toString();
 }
@@ -77,7 +87,9 @@ export async function readAuthStateServer(): Promise<AuthState> {
 
   const { data: memberData, error: memberError } = await supabase
     .from("dashboard_members")
-    .select("user_id,email,display_name,status,role,team_member_id,linked_at,created_at,approved_at")
+    .select(
+      "user_id,email,display_name,status,role,team_member_id,linked_at,created_at,approved_at",
+    )
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -172,6 +184,27 @@ export async function requestDashboardPasswordResetServer(email: string) {
   };
 }
 
+export async function resendDashboardVerificationServer(email: string) {
+  const { claimAuthAttempt } = await import("@/lib/rate-limit.server");
+  if (!(await claimAuthAttempt("resend-verification", email, 5, 60 * 60))) {
+    return {
+      ok: true as const,
+      message: "If this account still needs verification, a new email has been sent.",
+    };
+  }
+  const supabase = createDashboardSupabaseServerClient();
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email,
+    options: { emailRedirectTo: callbackUrl("confirmed") },
+  });
+  if (error) return { ok: false as const, message: error.message };
+  return {
+    ok: true as const,
+    message: "If this account still needs verification, a new email has been sent.",
+  };
+}
+
 export async function updateDashboardPasswordServer(password: string) {
   const supabase = createDashboardSupabaseServerClient();
   const { error } = await supabase.auth.updateUser({ password });
@@ -224,7 +257,9 @@ export async function listDashboardMemberAccessServer(): Promise<DashboardMember
   const supabase = createDashboardSupabaseServerClient();
   const { data, error } = await supabase
     .from("dashboard_members")
-    .select("user_id,email,display_name,status,role,team_member_id,linked_at,created_at,approved_at")
+    .select(
+      "user_id,email,display_name,status,role,team_member_id,linked_at,created_at,approved_at",
+    )
     .order("created_at", { ascending: false });
 
   if (error) throw new Error(error.message);
@@ -254,7 +289,7 @@ export async function updateDashboardMemberAccessServer(input: {
   if (existingMemberError) return { ok: false as const, message: existingMemberError.message };
   const requestedTeamMemberId =
     input.teamMemberId === undefined
-      ? existingMember?.team_member_id ?? null
+      ? (existingMember?.team_member_id ?? null)
       : input.teamMemberId?.trim() || null;
   const linkChanged =
     requestedTeamMemberId?.toLowerCase() !== existingMember?.team_member_id?.toLowerCase();
@@ -284,7 +319,11 @@ export async function updateDashboardMemberAccessServer(input: {
               ? new Date().toISOString()
               : null
             : undefined,
-          linked_by: linkChanged ? (requestedTeamMemberId ? (auth.user?.id ?? null) : null) : undefined,
+          linked_by: linkChanged
+            ? requestedTeamMemberId
+              ? (auth.user?.id ?? null)
+              : null
+            : undefined,
         }
       : {}),
   };

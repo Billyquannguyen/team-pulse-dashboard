@@ -67,7 +67,6 @@ const SLACK_API_URL = "https://slack.com/api";
 const REDIS_KEY_PREFIX = "team-billion:slack-link-alerts:checkpoint";
 const LINK_PATTERN = /(?:https?:\/\/|<https?:\/\/)[^\s<>]+/i;
 const UK_ALERT_HOURS = new Set([10, 12, 13, 17, 20]);
-const INITIAL_LOOKBACK_SECONDS = 48 * 60 * 60;
 
 export function isUkSlackLinkAlertHour(date = new Date()) {
   const hour = Number(
@@ -172,7 +171,7 @@ async function slackApi<T>(
   }
 
   const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${requiredEnv("SLACK_USER_TOKEN")}` },
+    headers: { Authorization: `Bearer ${requiredEnv("SLACK_LINK_ALERT_USER_TOKEN")}` },
     cache: "no-store",
   });
   const payload = (await response.json().catch(() => null)) as SlackApiResponse<T> | null;
@@ -272,7 +271,7 @@ async function resolveConfiguredMembers() {
     }
 
     const user = matchingUsers[0];
-    matches.set(user.id!, slackUserDisplayName(user));
+    matches.set(user.id!, requestedName);
   }
 
   if (matches.size === 0) {
@@ -371,9 +370,6 @@ async function postDiscordAlert({
 
 export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
   const initialCheckpoint = (Date.now() / 1000).toFixed(6);
-  const initialLookbackCheckpoint = (
-    Number(initialCheckpoint) - INITIAL_LOOKBACK_SECONDS
-  ).toFixed(6);
   let alertsSent = 0;
   let initializedChannels = 0;
   let checkedChannels = 0;
@@ -385,7 +381,7 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
   });
 
   try {
-    requiredEnv("SLACK_USER_TOKEN");
+    requiredEnv("SLACK_LINK_ALERT_USER_TOKEN");
     requiredEnv("SLACK_LINK_ALERT_DISCORD_WEBHOOK_URL");
     redisConfig();
     const memberResolution = await resolveConfiguredMembers();
@@ -398,10 +394,11 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
 
     for (const conversation of conversations) {
       const channelId = conversation.id;
-      const storedCheckpoint = await readCheckpoint(channelId);
-      const checkpoint = storedCheckpoint ?? initialLookbackCheckpoint;
-      if (!storedCheckpoint) {
+      const checkpoint = await readCheckpoint(channelId);
+      if (!checkpoint) {
+        await writeCheckpoint(channelId, initialCheckpoint);
         initializedChannels += 1;
+        continue;
       }
 
       const messages = await messagesAfter(channelId, checkpoint);
@@ -425,9 +422,6 @@ export async function syncSlackLinkAlerts(): Promise<SlackLinkAlertResult> {
         await writeCheckpoint(channelId, message.ts);
       }
 
-      if (messages.length === 0) {
-        await writeCheckpoint(channelId, initialCheckpoint);
-      }
     }
 
     const result: SlackLinkAlertResult = {

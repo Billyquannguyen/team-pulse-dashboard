@@ -4,13 +4,19 @@ import { KeyRound, LockKeyhole, MailCheck, Sparkles, UserPlus } from "lucide-rea
 import { BalloonsPopBackground } from "@/components/ui/balloons-pop-background";
 import {
   requestDashboardPasswordReset,
+  resendDashboardVerification,
   signInToDashboard,
   signUpToDashboard,
   updateDashboardPassword,
   type AuthState,
 } from "@/lib/auth";
 
-type AuthMode = "sign-in" | "sign-up" | "reset-password" | "update-password";
+type AuthMode =
+  | "sign-in"
+  | "sign-up"
+  | "resend-verification"
+  | "reset-password"
+  | "update-password";
 
 export function TeamLoginScreen({
   auth,
@@ -41,6 +47,13 @@ export function TeamLoginScreen({
     try {
       if (mode === "reset-password") {
         const result = await requestDashboardPasswordReset({ data: { email } });
+        if (!result.ok) setError(result.message);
+        else setMessage(result.message);
+        return;
+      }
+
+      if (mode === "resend-verification") {
+        const result = await resendDashboardVerification({ data: { email } });
         if (!result.ok) setError(result.message);
         else setMessage(result.message);
         return;
@@ -92,20 +105,24 @@ export function TeamLoginScreen({
   const title =
     mode === "sign-up"
       ? "Create your account"
-      : mode === "reset-password"
-        ? "Reset your password"
-        : mode === "update-password"
-          ? "Choose a new password"
-          : "Sign in";
+      : mode === "resend-verification"
+        ? "Resend verification email"
+        : mode === "reset-password"
+          ? "Reset your password"
+          : mode === "update-password"
+            ? "Choose a new password"
+            : "Sign in";
 
   const submitLabel =
     mode === "sign-up"
       ? "Create account"
-      : mode === "reset-password"
-        ? "Send reset link"
-        : mode === "update-password"
-          ? "Save new password"
-          : "Sign in";
+      : mode === "resend-verification"
+        ? "Send new verification link"
+        : mode === "reset-password"
+          ? "Send reset link"
+          : mode === "update-password"
+            ? "Save new password"
+            : "Sign in";
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-white px-4 py-10 text-foreground">
@@ -130,11 +147,13 @@ export function TeamLoginScreen({
             <p className="mt-1 text-sm text-muted-foreground">
               {mode === "sign-up"
                 ? "Verify your email, then wait for admin approval."
-                : mode === "reset-password"
-                  ? "We will send a secure recovery link if the account exists."
-                  : mode === "update-password"
-                    ? "Use at least eight characters."
-                    : "Use your approved member account."}
+                : mode === "resend-verification"
+                  ? "We will send a fresh link if this account still needs verification."
+                  : mode === "reset-password"
+                    ? "We will send a secure recovery link if the account exists."
+                    : mode === "update-password"
+                      ? "Use at least eight characters."
+                      : "Use your approved member account."}
             </p>
           </div>
 
@@ -172,7 +191,7 @@ export function TeamLoginScreen({
               </div>
             )}
 
-            {mode !== "reset-password" && (
+            {mode !== "reset-password" && mode !== "resend-verification" && (
               <div>
                 <label htmlFor="member-password" className="text-sm font-bold">
                   {mode === "update-password" ? "New password" : "Password"}
@@ -214,7 +233,7 @@ export function TeamLoginScreen({
             >
               {mode === "sign-up" ? (
                 <UserPlus className="h-4 w-4" />
-              ) : mode === "reset-password" ? (
+              ) : mode === "reset-password" || mode === "resend-verification" ? (
                 <MailCheck className="h-4 w-4" />
               ) : mode === "update-password" ? (
                 <KeyRound className="h-4 w-4" />
@@ -243,6 +262,15 @@ export function TeamLoginScreen({
                   className="text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   Create account
+                </button>
+              )}
+              {mode !== "resend-verification" && (
+                <button
+                  type="button"
+                  onClick={() => changeMode("resend-verification")}
+                  className="text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Resend verification
                 </button>
               )}
               {mode !== "reset-password" && (

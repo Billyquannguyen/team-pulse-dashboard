@@ -91,6 +91,13 @@ export const requestDashboardPasswordReset = createServerFn({ method: "POST" })
     return requestDashboardPasswordResetServer(data.email);
   });
 
+export const resendDashboardVerification = createServerFn({ method: "POST" })
+  .inputValidator(emailInput)
+  .handler(async ({ data }) => {
+    const { resendDashboardVerificationServer } = await import("@/lib/auth.server");
+    return resendDashboardVerificationServer(data.email);
+  });
+
 export const updateDashboardPassword = createServerFn({ method: "POST" })
   .inputValidator(passwordUpdateInput)
   .handler(async ({ data }) => {
