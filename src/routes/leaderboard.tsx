@@ -258,7 +258,6 @@ function LeaderboardPage() {
   const { data } = useQuery(dashboardSheetQuery);
   const { data: leaderboardData } = useQuery(leaderboardQuery);
   const [period, setPeriod] = useState<Period>("monthly");
-  const [categoryKey, setCategoryKey] = useState<MetricKey>("commission");
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
 
   const fallbackLeaderboard: LeaderboardMemberData[] = fallbackTeam.map((member) => ({
@@ -291,15 +290,13 @@ function LeaderboardPage() {
   const selectedMember =
     scopeId === "team" ? undefined : members.find((member) => member.id === scopeId);
   const metricsKey = period === "monthly" ? "monthly" : "longTerm";
-  const visibleCategories = categories.filter(
-    (category) => period === "longTerm" || !category.longTermOnly,
-  );
-  const category =
-    visibleCategories.find((item) => item.key === categoryKey) ?? visibleCategories[0];
-  const sorted = [...members].sort(
-    (a, b) =>
-      Number(b[metricsKey][category.key]) - Number(a[metricsKey][category.key]) ||
-      a.name.localeCompare(b.name),
+  const commissionLeaders = [...members]
+    .sort(
+      (a, b) => b[metricsKey].commission - a[metricsKey].commission || a.name.localeCompare(b.name),
+    )
+    .slice(0, 3);
+  const supportingCategories = categories.filter(
+    (item) => item.key !== "commission" && !item.longTermOnly,
   );
   const rawDeals = data?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
   const periodDeals = rawDeals.filter(
@@ -320,13 +317,6 @@ function LeaderboardPage() {
       (!selectedMember || identityMatches(deal.manager, selectedMember)),
   );
   const periodLabel = period === "monthly" ? "this month" : "across all time";
-
-  const changePeriod = (nextPeriod: Period) => {
-    setPeriod(nextPeriod);
-    if (nextPeriod === "monthly" && categoryKey === "exclusiveCreators") {
-      setCategoryKey("commission");
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -364,7 +354,7 @@ function LeaderboardPage() {
         </div>
       ) : null}
 
-      <PeriodSlider period={period} onChange={changePeriod} />
+      <PeriodSlider period={period} onChange={setPeriod} />
 
       <div className="flex flex-col gap-3 rounded-3xl bg-card p-4 ring-1 ring-border sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -386,38 +376,18 @@ function LeaderboardPage() {
 
       {!selectedMember ? (
         <>
-          <div className="rounded-3xl bg-card p-3 ring-1 ring-border">
-            <div className="px-1 pb-3">
-              <h2 className="text-base font-black">Top 3 members</h2>
-              <p className="mt-1 text-xs text-muted-foreground">{category.description(period)}</p>
-            </div>
-            <div
-              className="flex gap-2 overflow-x-auto pb-1"
-              role="tablist"
-              aria-label="Financial metric"
-            >
-              {visibleCategories.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={item.key === category.key}
-                  onClick={() => setCategoryKey(item.key)}
-                  className={`tb-action shrink-0 rounded-2xl px-4 py-2.5 text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                    item.key === category.key
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted/60 text-muted-foreground hover:bg-accent hover:text-foreground"
-                  }`}
-                >
-                  {item.shortLabel}
-                </button>
-              ))}
-            </div>
+          <div>
+            <h2 className="text-base font-black">Top 3 members by commission</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {period === "monthly"
+                ? "Closed commission for the current month."
+                : "Closed commission across all recorded deals."}
+            </p>
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
-            {sorted.slice(0, 3).map((member, index) => (
-              <div
+            {commissionLeaders.map((member, index) => (
+              <article
                 key={member.id}
                 className="tb-hover-lift tb-stat-tile overflow-hidden rounded-3xl p-6 ring-1 ring-border"
                 style={{ background: palette[index] }}
@@ -433,20 +403,71 @@ function LeaderboardPage() {
                     className="h-14 w-14"
                     fallbackClassName="bg-white/70 text-lg font-bold"
                   />
-                  <div>
-                    <div className="text-lg font-bold">{member.name}</div>
+                  <div className="min-w-0">
+                    <div className="truncate text-lg font-bold">{member.name}</div>
                     <div className="text-xs opacity-70">Team member</div>
                   </div>
                 </div>
                 <div className="mt-4 text-3xl font-black">
-                  {formatMetric(Number(member[metricsKey][category.key]), category.format)}
+                  {formatCurrency(member[metricsKey].commission)}
                 </div>
                 <div className="text-xs opacity-70">
-                  {category.label} · {formatCurrency(member[metricsKey].averageDealValue)} avg deal
+                  Commission · {formatCurrency(member[metricsKey].averageDealValue)} avg deal
                 </div>
-              </div>
+              </article>
             ))}
           </div>
+
+          <section className="rounded-3xl bg-card p-6 ring-1 ring-border">
+            <div>
+              <h2 className="text-base font-black">Other performance leaders</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Top three members for each supporting financial metric.
+              </p>
+            </div>
+            <div className="mt-5 grid gap-x-8 gap-y-7 md:grid-cols-2 xl:grid-cols-4">
+              {supportingCategories.map((item, metricIndex) => {
+                const rankedMembers = [...members]
+                  .sort(
+                    (a, b) =>
+                      Number(b[metricsKey][item.key]) - Number(a[metricsKey][item.key]) ||
+                      a.name.localeCompare(b.name),
+                  )
+                  .slice(0, 3);
+
+                return (
+                  <div key={item.key}>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{ background: palette[metricIndex + 1] }}
+                      />
+                      <h3 className="text-sm font-black">{item.label}</h3>
+                    </div>
+
+                    <div className="mt-3">
+                      {rankedMembers.map((member, rank) => (
+                        <div
+                          key={member.id}
+                          className="flex items-center gap-2 border-b border-border/60 py-3 last:border-b-0"
+                        >
+                          <span className="w-5 shrink-0 text-xs font-black text-muted-foreground/70">
+                            #{rank + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold">{member.name}</div>
+                          </div>
+                          <div className="shrink-0 text-right text-sm font-black">
+                            {formatMetric(Number(member[metricsKey][item.key]), item.format)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         </>
       ) : (
         <section className="rounded-3xl bg-card p-6 ring-1 ring-border">

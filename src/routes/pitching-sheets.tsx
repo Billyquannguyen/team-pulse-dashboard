@@ -889,23 +889,76 @@ function PitchingSheetsPage() {
           className="rounded-3xl bg-amber-50 px-5 py-4 text-sm text-amber-900 ring-1 ring-amber-200"
         >
           <div className="font-semibold">Creator profile matching needs attention</div>
+          <p className="mt-1 text-xs leading-relaxed text-amber-800">
+            Pitching Sheets matches current roster exclusives to the private Creator Profiles
+            master by TikTok, Instagram, or YouTube link. If your team edits the company roster,
+            they must also make sure the same social link exists in Creator Profiles.
+          </p>
           <div className="mt-3 space-y-2">
             {unmatchedRosterExclusives.map((creator) => (
-              <div key={creator.creatorId} className="rounded-xl bg-white/60 px-3 py-2">
-                <span className="font-semibold">{creator.creatorName}</span>
-                <span className="text-amber-800">
-                  {creator.reason === "missing-social-link"
-                    ? " · No TikTok, Instagram or YouTube link is filled in on the Creators sheet."
-                    : " · Their roster social link does not match any Creator Profiles record."}
-                </span>
+              <div key={creator.creatorId} className="rounded-xl bg-white/70 px-3 py-3">
+                <div className="font-semibold">{creator.creatorName}</div>
+                {creator.reason === "missing-social-link" ? (
+                  <ol className="mt-1 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-amber-800">
+                    <li>
+                      Check the current roster row for <strong>{creator.creatorName}</strong> in
+                      the Creators/Signed creators sheet.
+                    </li>
+                    <li>
+                      Fill at least one social field: TikTok Link, Instagram Link, or YouTube Link.
+                    </li>
+                    <li>
+                      Open Master, then add or update the Creator Profiles record with that exact
+                      same social link.
+                    </li>
+                  </ol>
+                ) : (
+                  <ol className="mt-1 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-amber-800">
+                    <li>
+                      Check the current roster row for <strong>{creator.creatorName}</strong> and
+                      copy one of these social links:
+                      <span className="mt-1 block space-y-1">
+                        {creator.rosterLinks.map((link) => (
+                          <span key={`${creator.creatorId}-${link.platform}`} className="block">
+                            <span className="font-semibold">{link.platform}:</span>{" "}
+                            <span className="break-all">{link.url}</span>
+                          </span>
+                        ))}
+                      </span>
+                    </li>
+                    <li>
+                      Open Master, search <strong>{creator.creatorName}</strong>, then paste the
+                      exact same link into the matching TikTok, Instagram, or YouTube Link field.
+                    </li>
+                    <li>
+                      If no profile exists yet, add this creator to Creator Profiles instead of only
+                      editing the company roster.
+                    </li>
+                  </ol>
+                )}
               </div>
             ))}
             {rosterExclusiveProfileConflicts.map((conflict) => (
-              <div key={conflict.profileId} className="rounded-xl bg-white/60 px-3 py-2">
-                <span className="font-semibold">{conflict.rosterCreatorNames.join(" and ")}</span>
-                <span className="text-amber-800">
-                  {` · Both match the Creator Profiles record “${conflict.profileName}”. Correct or split that profile's social links so each creator has their own record.`}
-                </span>
+              <div key={conflict.profileId} className="rounded-xl bg-white/70 px-3 py-3">
+                <div className="font-semibold">{conflict.rosterCreatorNames.join(" and ")}</div>
+                <ol className="mt-1 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-amber-800">
+                  <li>
+                    Open Master and search the Creator Profiles record{" "}
+                    <strong>{conflict.profileName}</strong>.
+                  </li>
+                  <li>
+                    That one profile is currently matching multiple roster creators:{" "}
+                    <strong>{conflict.rosterCreatorNames.join(", ")}</strong>.
+                  </li>
+                  <li>
+                    Split them into one Creator Profiles record per creator, or remove the wrong
+                    social link from the shared profile.
+                  </li>
+                  <li>
+                    Fixed means each roster creator has their own profile with their own TikTok,
+                    Instagram, or YouTube link.
+                  </li>
+                </ol>
               </div>
             ))}
           </div>

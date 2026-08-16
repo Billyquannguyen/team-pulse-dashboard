@@ -25,6 +25,14 @@ function creatorSocialKeys(creator: Creator) {
   ].filter(Boolean);
 }
 
+function creatorSocialLinks(creator: Creator) {
+  return [
+    { platform: "TikTok", url: creator.tiktokLink },
+    { platform: "Instagram", url: creator.instagramLink },
+    { platform: "YouTube", url: creator.youtubeLink },
+  ].filter((link): link is { platform: string; url: string } => Boolean(link.url?.trim()));
+}
+
 function profileSocialKeys(profile: CreatorProfile) {
   return [
     normalizedSocialKey("tiktok", profile.ttLink),
@@ -37,6 +45,7 @@ export type UnmatchedRosterExclusive = {
   creatorId: string;
   creatorName: string;
   reason: "missing-social-link" | "no-matching-profile";
+  rosterLinks: Array<{ platform: string; url: string }>;
 };
 
 export type RosterExclusiveProfileConflict = {
@@ -62,6 +71,7 @@ export function diagnoseUnmatchedRosterExclusives(
           creatorId: creator.id,
           creatorName: creator.handle || creator.id,
           reason: socialKeys.length === 0 ? "missing-social-link" : "no-matching-profile",
+          rosterLinks: creatorSocialLinks(creator),
         } satisfies UnmatchedRosterExclusive,
       ];
     });
