@@ -8,8 +8,15 @@ export type AuthState = {
   isAuthenticated: boolean;
   isSignedIn: boolean;
   isAdmin: boolean;
+  isActualAdmin: boolean;
+  isPreviewing: boolean;
   role: AuthRole | null;
+  actualRole: AuthRole | null;
   accessStatus: MemberAccessStatus | null;
+  previewMember: {
+    id: string;
+    displayName: string;
+  } | null;
   user: {
     id: string;
     email: string;
@@ -65,6 +72,10 @@ const approveWithNewMemberInput = z.object({
   gmailLabel: z.string().trim().max(200).optional().default(""),
 });
 
+const previewMemberInput = z.object({
+  teamMemberId: z.string().trim().min(1).max(80),
+});
+
 export const getAuthState = createServerFn({ method: "GET" }).handler(async () => {
   const { readAuthStateServer } = await import("@/lib/auth.server");
   return readAuthStateServer();
@@ -108,6 +119,18 @@ export const updateDashboardPassword = createServerFn({ method: "POST" })
 export const logoutFromDashboard = createServerFn({ method: "POST" }).handler(async () => {
   const { logoutFromDashboardServer } = await import("@/lib/auth.server");
   return logoutFromDashboardServer();
+});
+
+export const startAdminMemberPreview = createServerFn({ method: "POST" })
+  .inputValidator(previewMemberInput)
+  .handler(async ({ data }) => {
+    const { startAdminMemberPreviewServer } = await import("@/lib/auth.server");
+    return startAdminMemberPreviewServer(data.teamMemberId);
+  });
+
+export const stopAdminMemberPreview = createServerFn({ method: "POST" }).handler(async () => {
+  const { stopAdminMemberPreviewServer } = await import("@/lib/auth.server");
+  return stopAdminMemberPreviewServer();
 });
 
 export const listDashboardMemberAccess = createServerFn({ method: "GET" }).handler(async () => {

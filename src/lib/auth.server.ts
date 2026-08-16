@@ -1,6 +1,6 @@
 import "@tanstack/react-start/server-only";
 
-import { getRequestUrl } from "@tanstack/react-start/server";
+import { getCookies, getRequestUrl, setCookie } from "@tanstack/react-start/server";
 import type { AuthRole, AuthState, DashboardMemberAccess, MemberAccessStatus } from "@/lib/auth";
 import { createDashboardSupabaseServerClient, readSupabaseEnv } from "@/lib/supabase.server";
 
@@ -15,6 +15,18 @@ type MemberRow = {
   created_at: string;
   approved_at: string | null;
 };
+
+const ADMIN_PREVIEW_COOKIE = "tb_admin_preview_member";
+
+function clearAdminPreviewCookie() {
+  setCookie(ADMIN_PREVIEW_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+}
 
 export function dashboardPublicOrigin() {
   const configuredOrigin = process.env.DASHBOARD_PUBLIC_URL?.trim();
@@ -71,8 +83,12 @@ export async function readAuthStateServer(): Promise<AuthState> {
     isAuthenticated: false,
     isSignedIn: false,
     isAdmin: false,
+    isActualAdmin: false,
+    isPreviewing: false,
     role: null,
+    actualRole: null,
     accessStatus: null,
+    previewMember: null,
     user: null,
     setupReady: env.setupReady,
     setupIssue: env.setupIssue,
@@ -107,18 +123,47 @@ export async function readAuthStateServer(): Promise<AuthState> {
   const role = member?.role ?? "member";
   const approved = accessStatus === "approved";
 
+  const isActualAdmin = approved && role === "admin";
+  const requestedPreviewId = isActualAdmin ? getCookies()[ADMIN_PREVIEW_COOKIE]?.trim() : "";
+  let previewMember: AuthState["previewMember"] = null;
+
+  if (requestedPreviewId) {
+    try {
+      const { getTeamMembersDataForServer } = await import("@/lib/team-members");
+      const teamMembers = await getTeamMembersDataForServer();
+      const matchedMember = teamMembers.activeMembers.find(
+        (item) => item.id.toLowerCase() === requestedPreviewId.toLowerCase(),
+      );
+      if (matchedMember) {
+        previewMember = { id: matchedMember.id, displayName: matchedMember.displayName };
+      } else {
+        clearAdminPreviewCookie();
+      }
+    } catch (error) {
+      console.error("Could not validate the admin member preview:", error);
+      clearAdminPreviewCookie();
+    }
+  }
+
+  const isPreviewing = Boolean(previewMember);
+  const effectiveRole = isPreviewing ? "member" : approved ? role : null;
+
   return {
     ...base,
     isAuthenticated: approved,
     isSignedIn: true,
-    isAdmin: approved && role === "admin",
-    role: approved ? role : null,
+    isAdmin: effectiveRole === "admin",
+    isActualAdmin,
+    isPreviewing,
+    role: effectiveRole,
+    actualRole: approved ? role : null,
     accessStatus,
+    previewMember,
     user: {
       id: user.id,
       email: user.email ?? member?.email ?? "",
       displayName: member?.display_name ?? "",
-      teamMemberId: member?.team_member_id ?? null,
+      teamMemberId: previewMember?.id ?? member?.team_member_id ?? null,
     },
   };
 }
@@ -213,6 +258,7 @@ export async function updateDashboardPasswordServer(password: string) {
 }
 
 export async function logoutFromDashboardServer() {
+  clearAdminPreviewCookie();
   const supabase = createDashboardSupabaseServerClient();
   await supabase.auth.signOut();
   return { ok: true as const };
@@ -226,12 +272,47 @@ export async function requireDashboardAuth() {
 
 export async function requireAdminAuth() {
   const auth = await requireDashboardAuth();
-  if (auth.role !== "admin") throw new Error("Admin access required");
+  if (!auth.isActualAdmin || auth.isPreviewing) throw new Error("Admin access required");
   return auth;
 }
 
 export async function requireWritableDashboardAuth() {
-  return requireDashboardAuth();
+  const auth = await requireDashboardAuth();
+  if (auth.isPreviewing) {
+    throw new Error("Exit member preview before making changes.");
+  }
+  return auth;
+}
+
+export async function startAdminMemberPreviewServer(teamMemberId: string) {
+  const auth = await readAuthStateServer();
+  if (!auth.isAuthenticated || !auth.isActualAdmin || auth.isPreviewing) {
+    throw new Error("Admin access required");
+  }
+
+  const { getTeamMembersDataForServer } = await import("@/lib/team-members");
+  const teamMembers = await getTeamMembersDataForServer();
+  const member = teamMembers.activeMembers.find(
+    (item) => item.id.toLowerCase() === teamMemberId.trim().toLowerCase(),
+  );
+  if (!member) throw new Error("That active member profile could not be found.");
+
+  setCookie(ADMIN_PREVIEW_COOKIE, member.id, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 8,
+  });
+
+  return { ok: true as const, memberId: member.id, displayName: member.displayName };
+}
+
+export async function stopAdminMemberPreviewServer() {
+  const auth = await readAuthStateServer();
+  if (!auth.isAuthenticated || !auth.isActualAdmin) throw new Error("Admin access required");
+  clearAdminPreviewCookie();
+  return { ok: true as const };
 }
 
 export async function requireLinkedMemberAuth() {

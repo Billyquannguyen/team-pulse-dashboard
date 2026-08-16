@@ -1247,10 +1247,10 @@ export function buildLeaderboardData(data: DashboardSheetData): LeaderboardMembe
     );
     const currentMonthKey = getCurrentDealMonthKey();
     const monthlyActiveDeals = activeDeals.filter(
-      (deal) => normalizeDealMonthKey(deal.month) === currentMonthKey,
+      (deal) => normalizeDealMonthKey(deal.month ?? "") === currentMonthKey,
     );
     const monthlyClosedDeals = closedDeals.filter(
-      (deal) => normalizeDealMonthKey(deal.month) === currentMonthKey,
+      (deal) => normalizeDealMonthKey(deal.month ?? "") === currentMonthKey,
     );
 
     const metrics = (
@@ -1672,8 +1672,48 @@ export const fetchLeaderboardData = createServerFn({ method: "GET" }).handler(as
   await requireDashboardAuth();
   const googleSheets = await getGoogleSheetsServer();
   const result = await getDashboardDataWithServerCache(googleSheets.getGoogleSheetsConfig());
+  const sharedDeals = result.data.deals.map(
+    (deal): Deal => ({
+      id: deal.id,
+      rowNumber: deal.rowNumber,
+      manager: deal.manager,
+      brand: deal.brand,
+      creator: deal.creator,
+      platform: deal.platform,
+      month: deal.month,
+      totalPricingGbp: deal.totalPricingGbp,
+      creatorTotalGbp: deal.creatorTotalGbp,
+      profitMargin: deal.profitMargin,
+      managerTotalGbp: deal.managerTotalGbp,
+      vnd: 0,
+      netTerms: "",
+      managerTotalPaid: false,
+      managerPaidCurrentMonth: false,
+      status: deal.status,
+    }),
+  );
+  const sharedCreators = result.data.creators.map(
+    (creator): Creator => ({
+      id: creator.id,
+      handle: creator.handle,
+      owner: creator.owner,
+      platform: creator.platform,
+      niche: creator.niche,
+      email: creator.email,
+      tiktokLink: creator.tiktokLink,
+      instagramLink: creator.instagramLink,
+      youtubeLink: creator.youtubeLink,
+      followers: creator.followers,
+      relationship: creator.relationship,
+      status: creator.status,
+      activeDeals: creator.activeDeals,
+      revenue: creator.revenue,
+    }),
+  );
   return {
     members: buildLeaderboardData(result.data),
+    deals: sharedDeals,
+    creators: sharedCreators,
     updatedAt: result.data.updatedAt,
     source: result.data.source,
   };
@@ -1689,7 +1729,7 @@ export const dashboardSheetQuery = {
 };
 
 export const leaderboardQuery = {
-  queryKey: ["team-billion-leaderboard", "financial-periods-v2"],
+  queryKey: ["team-billion-leaderboard", "shared-financial-periods-v3"],
   queryFn: () => fetchLeaderboardData(),
   staleTime: QUERY_STALE_TIME_MS,
   refetchOnMount: "always" as const,

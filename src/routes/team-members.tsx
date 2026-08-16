@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
@@ -35,6 +35,7 @@ import {
   type TeamMemberStatus,
 } from "@/lib/team-members";
 import { cn } from "@/lib/utils";
+import { startAdminMemberPreview } from "@/lib/auth";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -130,6 +131,7 @@ function draftFromMember(member: TeamMemberConfig): MemberDraft {
 
 function TeamMembersPage() {
   const auth = rootRoute.useLoaderData();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery(teamMembersQuery);
   const [modal, setModal] = useState<MemberModalState>(null);
@@ -150,6 +152,22 @@ function TeamMembersPage() {
       queryClient.invalidateQueries({ queryKey: teamMembersQuery.queryKey }),
       queryClient.invalidateQueries({ queryKey: dashboardSheetQuery.queryKey }),
     ]);
+  };
+
+  const accessMemberView = async (member: TeamMemberConfig) => {
+    const key = `preview-${member.id}`;
+    setSavingKey(key);
+    setMessage("");
+    try {
+      await startAdminMemberPreview({ data: { teamMemberId: member.id } });
+      queryClient.clear();
+      await router.navigate({ to: "/" });
+      await router.invalidate();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not open the member view.");
+    } finally {
+      setSavingKey(null);
+    }
   };
 
   const openAdd = () => {
@@ -423,10 +441,13 @@ function TeamMembersPage() {
                   key={`${member.id}-${member.rowNumber ?? "profile"}`}
                   member={member}
                   canEdit={
-                    isAdmin || auth.user?.teamMemberId?.toLowerCase() === member.id.toLowerCase()
+                    !auth.isPreviewing &&
+                    (isAdmin || auth.user?.teamMemberId?.toLowerCase() === member.id.toLowerCase())
                   }
                   canAccessView={isAdmin}
                   onEdit={() => setProfileModal({ member })}
+                  onAccessView={() => void accessMemberView(member)}
+                  accessingView={savingKey === `preview-${member.id}`}
                 />
               ))}
             </div>
@@ -1042,11 +1063,15 @@ function MemberProfileCard({
   canEdit,
   canAccessView,
   onEdit,
+  onAccessView,
+  accessingView,
 }: {
   member: TeamMemberConfig;
   canEdit: boolean;
   canAccessView: boolean;
   onEdit: () => void;
+  onAccessView: () => void;
+  accessingView: boolean;
 }) {
   const socialLinks = [
     { label: "Instagram", value: normalizeExternalUrl(member.instagramUrl), Icon: Instagram },
@@ -1111,14 +1136,19 @@ function MemberProfileCard({
           )}
         </div>
         {canAccessView ? (
-          <Link
-            to="/leaderboard"
-            search={{ member: member.id }}
+          <button
+            type="button"
+            onClick={onAccessView}
+            disabled={accessingView}
             className="tb-action mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-foreground px-4 text-sm font-bold text-background hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            <UserRound className="h-4 w-4" />
+            {accessingView ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <UserRound className="h-4 w-4" />
+            )}
             Access {member.displayName}'s view
-          </Link>
+          </button>
         ) : null}
       </div>
     </article>

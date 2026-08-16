@@ -497,7 +497,9 @@ export const getThisWeeksMeetingTopics = createServerFn({ method: "GET" }).handl
 export const saveMeetingTopic = createServerFn({ method: "POST" })
   .inputValidator(saveMeetingTopicInput)
   .handler(async ({ data }) => {
-    const { requireLinkedMemberAuth } = await import("@/lib/auth.server");
+    const { requireLinkedMemberAuth, requireWritableDashboardAuth } =
+      await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
     const auth = await requireLinkedMemberAuth();
     const week = getCurrentMeetingWeek();
     const topic: MeetingTopic = {

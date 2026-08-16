@@ -14,6 +14,7 @@ import { MobileNav } from "@/components/layout/MobileNav";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
 import { TeamLoginScreen } from "@/components/auth/TeamLoginScreen";
 import { DataSourceBanner } from "@/components/layout/DataSourceBanner";
+import { AdminPreviewBanner } from "@/components/layout/AdminPreviewBanner";
 import { getAuthState } from "@/lib/auth";
 import { MemberAccessScreen } from "@/components/auth/MemberAccessScreen";
 import { z } from "zod";
@@ -129,6 +130,7 @@ function RootComponent() {
           <div className="mx-auto flex w-full max-w-[1500px]">
             <AppSidebar />
             <main className="min-w-0 flex-1 px-4 pb-28 pt-6 md:px-6 md:pt-8 lg:pb-10">
+              <AdminPreviewBanner />
               <DataSourceBanner />
               <Outlet />
             </main>

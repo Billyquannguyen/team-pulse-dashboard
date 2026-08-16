@@ -145,7 +145,7 @@ test("leaderboard output contains summaries for all members without raw deal det
   const leaderboard = buildLeaderboardData(dashboardFixture());
 
   expect(leaderboard).toHaveLength(2);
-  expect(leaderboard.find((member) => member.id === "KTrang")?.profit).toBe(500);
+  expect(leaderboard.find((member) => member.id === "KTrang")?.longTerm.profit).toBe(500);
   expect(JSON.stringify(leaderboard)).not.toContain("Private K brand");
   expect(JSON.stringify(leaderboard)).not.toContain("Private H brand");
 });
