@@ -15,6 +15,15 @@ type MemberRow = {
 };
 
 function safeOrigin() {
+  const configuredOrigin = process.env.DASHBOARD_PUBLIC_URL?.trim();
+  if (configuredOrigin) {
+    try {
+      return new URL(configuredOrigin).origin;
+    } catch {
+      throw new Error("DASHBOARD_PUBLIC_URL must be a valid absolute URL.");
+    }
+  }
+
   try {
     return new URL(getRequestUrl()).origin;
   } catch {
