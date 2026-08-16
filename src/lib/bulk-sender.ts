@@ -540,11 +540,11 @@ export const advanceBulkSenderQueue = createServerFn({ method: "POST" })
     const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
     const auth = await requireWritableDashboardAuth();
     const requestedJob = await readJob(data.jobId);
-    if (!requestedJob) throw new Error("This Bulk Sender job expired or could not be found.");
+    if (!requestedJob) throw new Error("This Bulk Outreach job expired or could not be found.");
     if (requestedJob.memberId !== auth.user?.id && !auth.isAdmin) throw new Error("Unauthorized");
     await processQueueChunk();
     const job = await readJob(data.jobId);
-    if (!job) throw new Error("This Bulk Sender job expired or could not be found.");
+    if (!job) throw new Error("This Bulk Outreach job expired or could not be found.");
     return { job: publicJob(job) };
   });
 
@@ -554,7 +554,7 @@ export const getBulkSenderJob = createServerFn({ method: "GET" })
     const { requireDashboardAuth } = await import("@/lib/auth.server");
     const auth = await requireDashboardAuth();
     const job = await readJob(data.jobId);
-    if (!job) throw new Error("This Bulk Sender job expired or could not be found.");
+    if (!job) throw new Error("This Bulk Outreach job expired or could not be found.");
     if (job.memberId !== auth.user?.id && !auth.isAdmin) throw new Error("Unauthorized");
     return { job: publicJob(job) };
   });

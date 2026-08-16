@@ -236,7 +236,7 @@ function BulkSenderPage() {
               : "border border-transparent text-background/55 hover:bg-white/5 hover:text-background",
           )}
         >
-          Bulk drafts
+          Bulk Outreach
         </button>
         <button
           type="button"
@@ -252,7 +252,7 @@ function BulkSenderPage() {
               : "border border-transparent text-background/55 hover:bg-white/5 hover:text-background",
           )}
         >
-          Bulk follow-up
+          Bulk Follow-up
         </button>
       </div>
       <div
