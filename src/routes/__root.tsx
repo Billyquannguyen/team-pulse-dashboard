@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -113,6 +114,7 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const auth = Route.useLoaderData();
   const search = Route.useSearch();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const isPasswordRecovery = search.authMode === "update-password";
   const initialError =
     search.authError === "expired_link" || search.error_code === "otp_expired"
@@ -126,13 +128,15 @@ function RootComponent() {
       {isPasswordRecovery ? (
         <TeamLoginScreen auth={auth} initialMode="update-password" initialError={initialError} />
       ) : auth.isAuthenticated ? (
-        <div className="min-h-screen bg-background text-foreground">
+        <div className="tb-workspace-shell min-h-screen bg-background text-foreground">
           <div className="mx-auto flex w-full max-w-[1500px]">
             <AppSidebar />
-            <main className="min-w-0 flex-1 px-4 pb-28 pt-6 md:px-6 md:pt-8 lg:pb-10">
-              <AdminPreviewBanner />
-              <DataSourceBanner />
-              <Outlet />
+            <main className="tb-workspace-main min-w-0 flex-1 px-4 pb-28 pt-6 md:px-6 md:pt-8 lg:pb-10">
+              <div key={pathname} className="tb-page-enter relative z-10 w-full">
+                <AdminPreviewBanner />
+                <DataSourceBanner />
+                <Outlet />
+              </div>
             </main>
           </div>
           <MobileNav />

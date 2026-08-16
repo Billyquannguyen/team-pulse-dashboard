@@ -149,6 +149,11 @@ export type DashboardSheetData = {
   updatedAt: string;
 };
 
+export type TeamCreatorsData = Pick<
+  DashboardSheetData,
+  "creators" | "outreach" | "source" | "links" | "updatedAt" | "error" | "warning"
+>;
+
 export type OutreachMemberStats = {
   memberName: string;
   initials: string;
@@ -1719,6 +1724,28 @@ export const fetchLeaderboardData = createServerFn({ method: "GET" }).handler(as
   };
 });
 
+export const fetchTeamCreatorsData = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireDashboardAuth } = await import("@/lib/auth.server");
+  await requireDashboardAuth();
+  const googleSheets = await getGoogleSheetsServer();
+  const links = googleSheets.getOptionalSheetLinks();
+  const productionRuntime = googleSheets.isProductionRuntime();
+
+  try {
+    const result = await getDashboardDataWithServerCache(googleSheets.getGoogleSheetsConfig());
+    const { creators, outreach, source, updatedAt, error, warning } = result.data;
+    return { creators, outreach, source, links: result.data.links, updatedAt, error, warning };
+  } catch (error) {
+    const message = getGoogleSheetsErrorMessage(error);
+    console.error("Team creators Google Sheets access failed:", error);
+    const data = productionRuntime
+      ? emptyDashboardData(message, links)
+      : fallbackDashboardData(message, links);
+    const { creators, outreach, source, updatedAt, warning } = data;
+    return { creators, outreach, source, links: data.links, updatedAt, error: message, warning };
+  }
+});
+
 export const dashboardSheetQuery = {
   queryKey: ["team-billion-dashboard-sheet", "universal-header-parser-v1"],
   queryFn: () => fetchDashboardSheetData(),
@@ -1731,6 +1758,13 @@ export const dashboardSheetQuery = {
 export const leaderboardQuery = {
   queryKey: ["team-billion-leaderboard", "shared-financial-periods-v3"],
   queryFn: () => fetchLeaderboardData(),
+  staleTime: QUERY_STALE_TIME_MS,
+  refetchOnMount: "always" as const,
+};
+
+export const teamCreatorsQuery = {
+  queryKey: ["team-billion-team-creators", "shared-roster-v1"],
+  queryFn: () => fetchTeamCreatorsData(),
   staleTime: QUERY_STALE_TIME_MS,
   refetchOnMount: "always" as const,
 };

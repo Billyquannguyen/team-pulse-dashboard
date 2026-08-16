@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  BarChart3,
   CalendarDays,
   Check,
   Gift,
@@ -25,6 +26,8 @@ import {
   YAxis,
 } from "recharts";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { TopExclusiveCreators } from "@/components/goals/TopExclusiveCreators";
+import { creators as fallbackCreators } from "@/data/creators";
 import { deals as fallbackDeals, isClosedCommissionDeal, type Deal } from "@/data/deals";
 import {
   team as fallbackTeam,
@@ -1273,6 +1276,279 @@ function GoalModal({
   );
 }
 
+function PersonalProgressionChart({
+  member,
+  target,
+  onOpenHistory,
+}: {
+  member: Teammate;
+  target: number;
+  onOpenHistory: () => void;
+}) {
+  const current = getPaidCommission(member);
+  const pct = getProgressPct(current, target);
+  const circumference = 2 * Math.PI * 112;
+  const dashOffset = circumference * (1 - pct / 100);
+
+  return (
+    <section className="relative overflow-hidden rounded-[2rem] border border-border bg-[#10131b] px-5 py-8 text-white shadow-sm sm:px-8 lg:px-12 lg:py-10">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -left-20 top-10 h-64 w-64 rounded-full bg-fun-blue/20 blur-3xl"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-16 bottom-0 h-72 w-72 rounded-full bg-fun-pink/20 blur-3xl"
+      />
+
+      <div className="relative mx-auto max-w-4xl text-center">
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/70">
+          <TrendingUp className="h-3.5 w-3.5 text-fun-lime" />
+          Long-term progression
+        </div>
+        <h2 className="mt-4 text-2xl font-black tracking-tight sm:text-3xl">
+          Your path to the next commission tier
+        </h2>
+        <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-white/60">
+          Paid commission accumulates here over time. Every completed milestone moves you closer to
+          your next tier.
+        </p>
+
+        <div className="relative mx-auto mt-5 flex h-[19rem] max-w-[34rem] items-center justify-center sm:h-[22rem]">
+          <div
+            aria-hidden="true"
+            className="absolute h-56 w-56 rounded-full bg-gradient-to-br from-fun-blue/20 via-fun-purple/10 to-fun-pink/20 blur-2xl motion-safe:animate-pulse sm:h-64 sm:w-64"
+          />
+          <svg
+            viewBox="0 0 280 280"
+            className="relative h-[18rem] w-[18rem] -rotate-90 sm:h-[21rem] sm:w-[21rem]"
+            role="img"
+            aria-label={`${pct}% of the long-term progression goal completed`}
+          >
+            <defs>
+              <linearGradient id="personal-progression-gradient" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="var(--fun-blue)" />
+                <stop offset="48%" stopColor="var(--fun-purple)" />
+                <stop offset="100%" stopColor="var(--fun-pink)" />
+              </linearGradient>
+            </defs>
+            <circle
+              cx="140"
+              cy="140"
+              r="112"
+              fill="none"
+              stroke="rgba(255,255,255,.09)"
+              strokeWidth="22"
+            />
+            <circle
+              cx="140"
+              cy="140"
+              r="112"
+              fill="none"
+              stroke="url(#personal-progression-gradient)"
+              strokeWidth="22"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={dashOffset}
+              className="transition-[stroke-dashoffset] duration-1000 motion-reduce:transition-none"
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-5xl font-black tracking-[-0.06em] sm:text-6xl">{pct}%</span>
+            <span className="mt-2 text-xs font-bold uppercase tracking-[0.18em] text-white/45">
+              tier progress
+            </span>
+          </div>
+        </div>
+
+        <div className="mx-auto grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-left">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-white/45">
+              Earned
+            </div>
+            <div className="mt-1 text-xl font-black">{formatMoney(current)}</div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-left">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-white/45">
+              Next tier
+            </div>
+            <div className="mt-1 text-xl font-black">{formatMoney(target)}</div>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenHistory}
+            className="tb-action col-span-2 flex min-h-20 items-center justify-between rounded-2xl bg-white px-4 text-left text-primary hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fun-blue sm:col-span-1"
+          >
+            <span>
+              <span className="block text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                Progress history
+              </span>
+              <span className="mt-1 block text-sm font-black">View chart</span>
+            </span>
+            <BarChart3 className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PersonalGoalsAnalytics({
+  member,
+  deals,
+  creators,
+  settings,
+  onOpenProgressionHistory,
+  onOpenMotivation,
+}: {
+  member: Teammate;
+  deals: Deal[];
+  creators: typeof fallbackCreators;
+  settings: GoalSettings;
+  onOpenProgressionHistory: () => void;
+  onOpenMotivation: (card: MotivationCardData) => void;
+}) {
+  const monthlyTarget = getMemberMonthlyGoal(settings, member);
+  const progressionTarget = getMemberProgressionGoal(settings, member);
+  const creatorTarget = getMemberExclusiveCreatorGoal(settings, member);
+  const totalDealValue = deals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
+  const totalProfit = deals.reduce(
+    (sum, deal) => sum + Math.max(0, deal.totalPricingGbp - deal.creatorTotalGbp),
+    0,
+  );
+  const averageDealValue = deals.length > 0 ? totalDealValue / deals.length : 0;
+  const personalExclusiveCreators = creators.filter(
+    (creator) => creator.relationship === "Exclusive",
+  );
+
+  return (
+    <div className="space-y-6">
+      <AppHeader
+        title="My Goals & Analytics"
+        subtitle="Your goals, long-term progression, and creator portfolio in one personal view."
+      />
+
+      <GoalProgressPanel
+        title="My monthly goal"
+        label="Current-month closed"
+        current={member.monthCommission}
+        target={monthlyTarget}
+        tone="lime"
+        icon={Target}
+        size="hero"
+      />
+
+      <PersonalProgressionChart
+        member={member}
+        target={progressionTarget}
+        onOpenHistory={onOpenProgressionHistory}
+      />
+
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,.65fr)]">
+        <div className="rounded-3xl border border-border bg-card p-6 sm:p-8">
+          <div className="flex items-start gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-fun-pink/45">
+              <UserCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black">Exclusive creator goal</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Build a stronger personal roster of signed creators.
+              </p>
+            </div>
+          </div>
+          <div className="mt-7 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <span className="text-4xl font-black">{formatCount(member.exclusiveCreators)}</span>
+              <span className="ml-2 text-lg font-bold text-muted-foreground">
+                / {formatCount(creatorTarget)}
+              </span>
+            </div>
+            <span className="rounded-full bg-fun-lime/55 px-3 py-1.5 text-xs font-black text-emerald-950">
+              {getProgressPct(member.exclusiveCreators, creatorTarget)}% complete
+            </span>
+          </div>
+          <div className="mt-5 h-3 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-fun-blue via-fun-purple to-fun-pink transition-[width] duration-700 motion-reduce:transition-none"
+              style={{ width: `${getProgressPct(member.exclusiveCreators, creatorTarget)}%` }}
+            />
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() =>
+            onOpenMotivation(
+              createMotivationCard(
+                member.name,
+                "Exclusive creator signing goal",
+                member.exclusiveCreators,
+                creatorTarget,
+              ),
+            )
+          }
+          className="tb-hover-lift tb-action flex min-h-48 flex-col justify-between rounded-3xl border border-border bg-gradient-to-br from-fun-yellow/55 via-fun-orange/25 to-fun-pink/35 p-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <Gift className="h-6 w-6" />
+          <span>
+            <span className="block text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Personal milestone
+            </span>
+            <span className="mt-2 block text-xl font-black">See your next creator milestone</span>
+          </span>
+        </button>
+      </section>
+
+      <section className="space-y-4 pt-2">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.16em] text-primary">
+            Personal creator analytics
+          </div>
+          <h2 className="mt-1 text-2xl font-black tracking-tight">Your creator portfolio</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Only creators and deals connected to your member profile are included.
+          </p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            ["Exclusive creators", formatCount(personalExclusiveCreators.length)],
+            ["Matched deals", formatCount(deals.length)],
+            ["Total deal value", formatMoney(totalDealValue)],
+            ["Average deal value", formatMoney(averageDealValue)],
+          ].map(([label, value], index) => (
+            <div
+              key={label}
+              className={cn(
+                "rounded-3xl border border-border p-5",
+                ["bg-fun-lime/30", "bg-fun-blue/30", "bg-fun-pink/25", "bg-fun-yellow/30"][index],
+              )}
+            >
+              <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                {label}
+              </div>
+              <div className="mt-2 text-2xl font-black">{value}</div>
+              {label === "Total deal value" ? (
+                <div className="mt-1 text-xs font-semibold text-muted-foreground">
+                  {formatMoney(totalProfit)} estimated profit
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+
+        <TopExclusiveCreators
+          creators={personalExclusiveCreators}
+          deals={deals}
+          title={`${member.name}'s Top Creators`}
+          description="Your exclusive creators ranked by the value of deals connected to your own portfolio."
+        />
+      </section>
+    </div>
+  );
+}
+
 function GoalsPage() {
   const auth = rootRoute.useLoaderData();
   const { data } = useQuery(dashboardSheetQuery);
@@ -1282,6 +1558,7 @@ function GoalsPage() {
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
   const team = data?.team ?? (canUseLocalFallback ? fallbackTeam : []);
   const deals = data?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
+  const creators = data?.creators ?? (canUseLocalFallback ? fallbackCreators : []);
   const totals = data?.totals ?? {
     totalPaid: canUseLocalFallback ? totalCommission : 0,
     totalPaidCommission: 0,
@@ -1334,6 +1611,27 @@ function GoalsPage() {
     );
   }, [team, settings]);
 
+  if (personalMember) {
+    return (
+      <>
+        <PersonalGoalsAnalytics
+          member={personalMember}
+          deals={deals}
+          creators={creators}
+          settings={settings}
+          onOpenProgressionHistory={() => setProgressionChartMember(personalMember)}
+          onOpenMotivation={setMotivationCard}
+        />
+        <MotivationCardDialog card={motivationCard} onClose={() => setMotivationCard(null)} />
+        <MonthlyClosedCommissionDialog
+          member={progressionChartMember}
+          deals={deals}
+          onClose={() => setProgressionChartMember(null)}
+        />
+      </>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <AppHeader
@@ -1355,42 +1653,44 @@ function GoalsPage() {
         size="hero"
       />
 
-      {auth.isAdmin && <section className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">Individual monthly goals</h3>
-            <p className="text-xs text-muted-foreground">
-              Each member's current-month closed commission compared with their monthly goal.
-            </p>
+      {auth.isAdmin && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold">Individual monthly goals</h3>
+              <p className="text-xs text-muted-foreground">
+                Each member's current-month closed commission compared with their monthly goal.
+              </p>
+            </div>
+            <div className="hidden rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground sm:inline-flex">
+              {team.length} members
+            </div>
           </div>
-          <div className="hidden rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground sm:inline-flex">
-            {team.length} members
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {sortedByCurrentMonth.map((member, index) => (
+              <GoalProgressPanel
+                key={member.id}
+                title={member.name}
+                label="Current-month closed"
+                current={member.monthCommission}
+                target={getMonthlyTarget(member)}
+                tone={(["yellow", "pink", "purple", "blue"] as Tone[])[index % 4]}
+                icon={Users}
+                onMotivationOpen={() =>
+                  setMotivationCard(
+                    createMotivationCard(
+                      member.name,
+                      "Monthly commission goal",
+                      member.monthCommission,
+                      getMonthlyTarget(member),
+                    ),
+                  )
+                }
+              />
+            ))}
           </div>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {sortedByCurrentMonth.map((member, index) => (
-            <GoalProgressPanel
-              key={member.id}
-              title={member.name}
-              label="Current-month closed"
-              current={member.monthCommission}
-              target={getMonthlyTarget(member)}
-              tone={(["yellow", "pink", "purple", "blue"] as Tone[])[index % 4]}
-              icon={Users}
-              onMotivationOpen={() =>
-                setMotivationCard(
-                  createMotivationCard(
-                    member.name,
-                    "Monthly commission goal",
-                    member.monthCommission,
-                    getMonthlyTarget(member),
-                  ),
-                )
-              }
-            />
-          ))}
-        </div>
-      </section>}
+        </section>
+      )}
 
       <section className="space-y-3">
         <div>

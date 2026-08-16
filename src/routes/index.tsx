@@ -7,6 +7,7 @@ import { GoalProgressCard } from "@/components/dashboard/GoalProgressCard";
 import { LeaderboardCard } from "@/components/dashboard/LeaderboardCard";
 import { HomeGoalSnapshotCard } from "@/components/dashboard/HomeGoalSnapshotCard";
 import { OutreachSummaryCard } from "@/components/dashboard/OutreachSummaryCard";
+import { WorkspaceMomentum } from "@/components/dashboard/WorkspaceMomentum";
 import { dashboardSheetQuery, leaderboardQuery } from "@/lib/sheets-public";
 import { useGoalSettings } from "@/lib/goal-settings";
 import {
@@ -94,6 +95,13 @@ function Dashboard() {
         }
       />
 
+      <WorkspaceMomentum
+        current={totals.paidThisMonth}
+        target={teamMonthlyGoal}
+        memberCount={team.length}
+        personal={!auth.isAdmin}
+      />
+
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <KpiCard
           label="All-time closed commission"
@@ -134,7 +142,7 @@ function Dashboard() {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+        <div className="h-full lg:col-span-2">
           <GoalProgressCard
             current={totals.paidThisMonth}
             target={teamMonthlyGoal}

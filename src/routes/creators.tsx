@@ -1,4 +1,4 @@
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Filter, RotateCcw, Search, Users } from "lucide-react";
@@ -6,14 +6,14 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { OutreachSummaryCard } from "@/components/dashboard/OutreachSummaryCard";
 import { DashboardSelectField } from "@/components/ui/dashboard-select";
 import { creators, type CreatorRelationship } from "@/data/creators";
-import { dashboardSheetQuery } from "@/lib/sheets-public";
+import { teamCreatorsQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/creators")({
   head: () => ({
     meta: [
-      { title: "Signed & Partnered — Team Billion" },
-      { name: "description", content: "Signed and partnered creator roster." },
+      { title: "Team Creators — Team Billion" },
+      { name: "description", content: "Shared signed and partnered creator roster." },
     ],
   }),
   component: CreatorsPage,
@@ -23,20 +23,17 @@ const relationshipStyles: Record<CreatorRelationship, string> = {
   Exclusive: "bg-fun-lime text-emerald-900",
   "Non-exclusive": "bg-fun-blue text-sky-900",
 };
-const rootRoute = getRouteApi("__root__");
-
 function uniqueSorted(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
 
 function CreatorsPage() {
-  const auth = rootRoute.useLoaderData();
   const [q, setQ] = useState("");
   const [relationship, setRelationship] = useState<CreatorRelationship | "All">("All");
   const [owner, setOwner] = useState("All owners");
   const [platform, setPlatform] = useState("All platforms");
   const [niche, setNiche] = useState("All niches");
-  const { data } = useQuery(dashboardSheetQuery);
+  const { data } = useQuery(teamCreatorsQuery);
   const canUseLocalFallback = data?.source === "fallback" || (!data && import.meta.env.DEV);
   const liveCreators = useMemo(
     () => (data ? data.creators : canUseLocalFallback ? creators : []),
@@ -103,8 +100,8 @@ function CreatorsPage() {
   return (
     <div className="space-y-6">
       <AppHeader
-        title="Signed & Partnered"
-        subtitle="Creators already signed as exclusive or partnered with the team."
+        title="Team Creators"
+        subtitle="The shared roster of creators signed or partnered across the whole team."
       />
 
       <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
@@ -162,14 +159,12 @@ function CreatorsPage() {
               options={["All", "Exclusive", "Non-exclusive"]}
               onChange={(value) => setRelationship(value as CreatorRelationship | "All")}
             />
-            {auth.isAdmin && (
-              <DashboardSelectField
-                label="Owner"
-                value={owner}
-                options={owners}
-                onChange={setOwner}
-              />
-            )}
+            <DashboardSelectField
+              label="Owner"
+              value={owner}
+              options={owners}
+              onChange={setOwner}
+            />
             <DashboardSelectField
               label="Platform"
               value={platform}

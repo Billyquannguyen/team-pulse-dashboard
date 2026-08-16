@@ -22,7 +22,7 @@ export function GoalProgressCard({
   const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
   const remaining = Math.max(0, target - current);
   return (
-    <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+    <div className="tb-hover-lift flex h-full flex-col rounded-3xl bg-card p-6 ring-1 ring-border">
       <div className="flex items-start justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -63,30 +63,34 @@ export function GoalProgressCard({
           </div>
         </div>
       )}
-      <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
-        <div className="flex -space-x-2">
-          {team.slice(0, 6).map((t, i) => (
-            <TeamAvatar
-              key={t.id}
-              name={t.name}
-              initials={t.initials}
-              avatarUrl={t.avatarUrl}
-              className="h-9 w-9 ring-2 ring-card hover:z-10"
-              fallbackClassName="bg-transparent text-xs"
-              style={{
-                background: [
-                  "var(--fun-lime)",
-                  "var(--fun-yellow)",
-                  "var(--fun-pink)",
-                  "var(--fun-purple)",
-                  "var(--fun-blue)",
-                  "var(--fun-orange)",
-                ][i],
-              }}
-            />
-          ))}
+      <div className="mt-auto pt-5">
+        <div className="flex items-center justify-between border-t border-border pt-4">
+          <div className="flex -space-x-2">
+            {team.slice(0, 6).map((t, i) => (
+              <TeamAvatar
+                key={t.id}
+                name={t.name}
+                initials={t.initials}
+                avatarUrl={t.avatarUrl}
+                className="h-9 w-9 ring-2 ring-card hover:z-10"
+                fallbackClassName="bg-transparent text-xs"
+                style={{
+                  background: [
+                    "var(--fun-lime)",
+                    "var(--fun-yellow)",
+                    "var(--fun-pink)",
+                    "var(--fun-purple)",
+                    "var(--fun-blue)",
+                    "var(--fun-orange)",
+                  ][i],
+                }}
+              />
+            ))}
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {team.length} teammates contributing
+          </span>
         </div>
-        <span className="text-xs text-muted-foreground">{team.length} teammates contributing</span>
       </div>
     </div>
   );

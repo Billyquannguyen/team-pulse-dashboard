@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 const items = [
   { to: "/", label: "Home", icon: LayoutDashboard },
   { to: "/deals", label: "Deals", icon: Table2 },
-  { to: "/creators", label: "Creators", icon: Users },
+  { to: "/creators", label: "Team Creators", icon: Users },
   { to: "/active-brands", label: "Brands", icon: Store },
   { to: "/brand-finder", label: "Finder", icon: SearchCheck },
   { to: "/bulk-sender", label: "Sender", icon: MailPlus },

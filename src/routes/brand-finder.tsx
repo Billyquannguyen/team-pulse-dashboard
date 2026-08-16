@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Check,
   Copy,
-  Database,
   Eye,
   Loader2,
   RotateCcw,
@@ -1199,6 +1198,7 @@ function BrandFinderPage() {
           ["Apollo queue", selectedBrands.length],
           ["Contacts", approvalContacts.length],
           ["Drafts", selectedContacts.length],
+          ["Saved contacts", databaseContacts.length],
         ]}
       />
 
@@ -1501,7 +1501,7 @@ function BrandFinderPage() {
           </Panel>
         </div>
 
-        <div className="min-w-0 space-y-4 xl:sticky xl:top-6 xl:self-start">
+        <div className="grid min-w-0 content-start gap-4 xl:h-full xl:grid-rows-[auto_minmax(0,1fr)]">
           <Panel title="Apollo Search Rules" subtitle="Credit-safe default: 2 contacts per brand.">
             <div className="flex flex-wrap gap-2">
               <RuleChip label="Include" value={splitList(filters.jobTitlesText).join(", ")} />
@@ -1574,7 +1574,11 @@ function BrandFinderPage() {
             </details>
           </Panel>
 
-          <Panel title="Email Template" subtitle={subjectTemplate || "No subject set"}>
+          <Panel
+            title="Email Template"
+            subtitle={subjectTemplate || "No subject set"}
+            className="xl:h-full"
+          >
             <div className="rounded-2xl border border-border bg-background p-3 text-sm font-semibold">
               {bodyTemplate.split(/\r?\n/).filter(Boolean)[0] || "Template body empty"}
             </div>
@@ -1654,20 +1658,6 @@ function BrandFinderPage() {
                       }`
                     : "Create Gmail drafts"}
                 </button>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title="Contact Database" subtitle="Used for duplicate flags.">
-            <div className="flex items-center gap-3 rounded-2xl border border-border bg-background p-3">
-              <Database className="h-5 w-5 text-primary" />
-              <div>
-                <div className="text-sm font-bold">{databaseContacts.length} stored contacts</div>
-                <div className="text-xs text-muted-foreground">
-                  {contactDatabaseData?.source === "google-sheet"
-                    ? "Live Google Sheet"
-                    : contactDatabaseData?.error || "Loading database"}
-                </div>
               </div>
             </div>
           </Panel>
@@ -1928,15 +1918,19 @@ function Panel({
   title,
   subtitle,
   action,
+  className,
   children,
 }: {
   title: string;
   subtitle?: string;
   action?: ReactNode;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-3xl bg-card p-5 ring-1 ring-border sm:p-6">
+    <section
+      className={cn("tb-hover-lift rounded-3xl bg-card p-5 ring-1 ring-border sm:p-6", className)}
+    >
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h2 className="text-base font-bold">{title}</h2>

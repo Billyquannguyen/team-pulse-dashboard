@@ -24,7 +24,7 @@ import { TeamMonthlyGoalCard } from "@/components/ui/team-monthly-goal-card";
 const items = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/deals", label: "Deals", icon: Table2 },
-  { to: "/creators", label: "Creators", icon: Users },
+  { to: "/creators", label: "Team Creators", icon: Users },
   { to: "/active-brands", label: "Active Brands", icon: Store },
   { to: "/brand-finder", label: "Brand Finder", icon: SearchCheck },
   { to: "/bulk-sender", label: "Bulk Sender", icon: MailPlus },
@@ -51,7 +51,7 @@ export function AppSidebar() {
   const showGoalCard = !path.startsWith("/goals");
 
   return (
-    <aside className="hidden lg:flex lg:w-72 shrink-0 flex-col gap-2 p-5">
+    <aside className="sticky top-0 hidden h-screen shrink-0 flex-col gap-2 overflow-y-auto p-5 lg:flex lg:w-72">
       <Link to="/" className="group flex items-center gap-2 px-3 py-2">
         <div className="tb-hover-icon flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
           <Sparkles className="h-5 w-5" />
@@ -96,10 +96,7 @@ export function AppSidebar() {
           to="/goals"
           className="mt-auto block outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <TeamMonthlyGoalCard
-            current={currentMonthCommission}
-            target={goalTarget}
-          />
+          <TeamMonthlyGoalCard current={currentMonthCommission} target={goalTarget} />
         </Link>
       )}
     </aside>

@@ -1,12 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import {
-  AtSign,
-  MessageCircle,
-  PhoneCall,
-  Percent,
-  UserCheck,
-  Users,
-} from "lucide-react";
+import { AtSign, MessageCircle, PhoneCall, Percent, UserCheck, Users } from "lucide-react";
 import { team as fallbackTeam } from "@/data/team";
 import type { DashboardSheetData, OutreachDashboardData } from "@/lib/sheets-public";
 import { TeamAvatar } from "@/components/ui/team-avatar";
@@ -88,7 +81,7 @@ export function OutreachSummaryCard({
   showTable = true,
   action,
 }: {
-  data?: DashboardSheetData;
+  data?: Pick<DashboardSheetData, "source" | "outreach">;
   title?: string;
   subtitle?: string;
   showTable?: boolean;

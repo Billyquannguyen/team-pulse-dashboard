@@ -278,6 +278,71 @@
 }
 
 @layer components {
+  @keyframes tb-page-arrive {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes tb-ambient-drift {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+
+    50% {
+      transform: translate3d(-2.5rem, 2rem, 0) scale(1.08);
+    }
+  }
+
+  .tb-workspace-shell {
+    background:
+      radial-gradient(
+        circle at 92% 2%,
+        color-mix(in oklch, var(--fun-pink) 13%, transparent),
+        transparent 28rem
+      ),
+      radial-gradient(
+        circle at 35% 100%,
+        color-mix(in oklch, var(--fun-blue) 10%, transparent),
+        transparent 34rem
+      ),
+      var(--background);
+  }
+
+  .tb-workspace-main {
+    isolation: isolate;
+    position: relative;
+  }
+
+  .tb-workspace-main::before {
+    animation: tb-ambient-drift 16s ease-in-out infinite;
+    background: radial-gradient(
+      circle,
+      color-mix(in oklch, var(--fun-purple) 13%, transparent),
+      transparent 68%
+    );
+    border-radius: 999px;
+    content: "";
+    height: 28rem;
+    pointer-events: none;
+    position: fixed;
+    right: -10rem;
+    top: 24%;
+    width: 28rem;
+    z-index: 0;
+  }
+
+  .tb-page-enter {
+    animation: tb-page-arrive 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
   .tb-hover-lift {
     transform: translateZ(0);
     transition:
@@ -402,6 +467,11 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .tb-page-enter,
+    .tb-workspace-main::before {
+      animation: none;
+    }
+
     .tb-hover-lift,
     .tb-hover-icon,
     .tb-action,

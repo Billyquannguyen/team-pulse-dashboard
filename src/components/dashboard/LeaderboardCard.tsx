@@ -24,7 +24,7 @@ export function LeaderboardCard({
 }) {
   const sorted = [...team].sort((a, b) => b.monthCommission - a.monthCommission).slice(0, limit);
   return (
-    <div className="tb-hover-lift rounded-3xl bg-card p-6 ring-1 ring-border">
+    <div className="tb-hover-lift h-full rounded-3xl bg-card p-6 ring-1 ring-border">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Trophy className="h-4 w-4 text-fun-orange" />
