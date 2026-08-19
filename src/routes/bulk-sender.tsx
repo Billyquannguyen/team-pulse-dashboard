@@ -146,6 +146,31 @@ function isEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function resolveEmailColumn(columns: Column[], rows: SenderRow[]) {
+  const selected = columns.find((column) => column.type === "email");
+  const populatedRows = rows.filter((row) => !isRowEmpty(row));
+  const validEmailCount = (column: Column) =>
+    populatedRows.filter((row) => isEmail(row.values[column.id] ?? "")).length;
+
+  // Keep an intentional selection once it contains at least one real address.
+  if (selected && validEmailCount(selected) > 0) return columns;
+
+  const likelyEmailColumn = columns
+    .map((column) => {
+      const label = `${column.label} ${column.key}`.toLowerCase();
+      const labelScore = /(^|[\s_-])(e-?mail|gmail)([\s_-]|$)/.test(label) ? 100 : 0;
+      return { column, score: labelScore + validEmailCount(column) * 10 };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => right.score - left.score)[0]?.column;
+
+  if (!likelyEmailColumn || likelyEmailColumn.id === selected?.id) return columns;
+  return columns.map((column) => ({
+    ...column,
+    type: column.id === likelyEmailColumn.id ? "email" : "text",
+  }));
+}
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -307,6 +332,7 @@ function BulkDraftCreator() {
   const nextBatch = readyRows.slice(0, MAX_DRAFTS_PER_RUN);
   const waitingCount = Math.max(0, readyRows.length - nextBatch.length);
   const invalidCount = rowValidation.filter(({ issue }) => Boolean(issue)).length;
+  const firstInvalid = rowValidation.find(({ issue }) => issue);
   const createdCount = rows.filter((row) => row.status === "created").length;
   const previewRow =
     rows.find((row) => row.id === previewRowId && !isRowEmpty(row)) ?? nonEmptyRows[0] ?? null;
@@ -317,7 +343,9 @@ function BulkDraftCreator() {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as SavedWorkspace;
-        if (saved.columns?.length) setColumns(saved.columns);
+        if (saved.columns?.length) {
+          setColumns(resolveEmailColumn(saved.columns, saved.rows ?? []));
+        }
         if (saved.rows?.length) setRows(saved.rows);
         if (typeof saved.subject === "string") setSubject(saved.subject);
         if (typeof saved.bodyHtml === "string") setBodyHtml(saved.bodyHtml);
@@ -458,7 +486,7 @@ function BulkDraftCreator() {
         if (column) nextRows[startRowIndex + rowOffset].values[column.id] = value;
       });
     });
-    setColumns(nextColumns);
+    setColumns(resolveEmailColumn(nextColumns, nextRows));
     setRows(nextRows);
   };
 
@@ -636,13 +664,16 @@ function BulkDraftCreator() {
                         }
                         onClick={() => setEmailColumn(column.id)}
                         className={cn(
-                          "flex h-8 w-8 items-center justify-center rounded-lg",
+                          "flex h-8 items-center justify-center gap-1.5 rounded-lg px-2",
                           column.type === "email"
                             ? "bg-primary text-primary-foreground"
                             : "text-muted-foreground hover:bg-accent",
                         )}
                       >
                         <Mail className="h-4 w-4" />
+                        {column.type === "email" && (
+                          <span className="whitespace-nowrap text-[10px] font-bold">Sends to</span>
+                        )}
                       </button>
                       <button
                         type="button"
@@ -734,6 +765,12 @@ function BulkDraftCreator() {
           {!emailColumn && (
             <p className="text-sm font-medium text-destructive">
               Choose one column as the recipient email using the mail icon.
+            </p>
+          )}
+          {emailColumn && firstInvalid && (
+            <p className="text-sm font-medium text-destructive" role="status">
+              Row {rows.findIndex((row) => row.id === firstInvalid.row.id) + 1}:{" "}
+              {firstInvalid.issue} in “{emailColumn.label}”.
             </p>
           )}
         </div>
