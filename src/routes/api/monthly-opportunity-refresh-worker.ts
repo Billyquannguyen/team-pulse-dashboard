@@ -1,4 +1,3 @@
-import { waitUntil } from "@vercel/functions";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   isMonthlyRefreshInternalRequest,
@@ -27,8 +26,8 @@ export const Route = createFileRoute("/api/monthly-opportunity-refresh-worker")(
         const runId = payload?.runId?.trim() ?? "";
         if (!runId) return jsonResponse({ ok: false, error: "Run ID is required." }, 400);
 
-        waitUntil(runMonthlyOpportunityRefreshStep(runId));
-        return jsonResponse({ ok: true, accepted: true, runId }, 202);
+        const state = await runMonthlyOpportunityRefreshStep(runId);
+        return jsonResponse({ ok: true, runId, state });
       },
     },
   },

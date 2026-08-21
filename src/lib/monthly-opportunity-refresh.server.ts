@@ -179,7 +179,7 @@ export async function startMonthlyOpportunityRefreshRun(startedBy: string) {
 
 export async function runMonthlyOpportunityRefreshStep(runId: string) {
   const lock = await claimMonthlyRefreshLock(runId);
-  if (!lock) return;
+  if (!lock) return readState(runId);
 
   try {
     const state = await readState(runId);
@@ -197,15 +197,7 @@ export async function runMonthlyOpportunityRefreshStep(runId: string) {
   } finally {
     await releaseMonthlyRefreshLock(lock);
   }
-}
-
-export async function runMonthlyOpportunityRefreshWorkflowStep(runId: string) {
-  "use step";
-
-  await runMonthlyOpportunityRefreshStep(runId);
-  const state = await readState(runId);
-  if (!state) throw new Error("Monthly refresh state could not be found after a workflow step.");
-  return { status: state.status, stage: state.stage };
+  return readState(runId);
 }
 
 async function runPreparationStage(state: MonthlyRefreshState) {
