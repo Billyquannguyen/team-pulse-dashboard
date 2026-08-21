@@ -102,26 +102,6 @@ async function clearActiveRun(runId: string) {
   );
 }
 
-async function queueWorker(runId: string) {
-  const { dashboardPublicOrigin } = await import("@/lib/auth.server");
-  const response = await fetch(
-    `${dashboardPublicOrigin()}/api/monthly-opportunity-refresh-worker`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${requiredEnv("CRON_SECRET")}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ runId }),
-      cache: "no-store",
-    },
-  );
-  if (!response.ok) {
-    const payload = await response.text();
-    throw new Error(`Monthly refresh worker could not start (${response.status}): ${payload}`);
-  }
-}
-
 export function isMonthlyRefreshInternalRequest(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
   return Boolean(secret && request.headers.get("authorization") === `Bearer ${secret}`);
@@ -185,9 +165,13 @@ export async function startMonthlyOpportunityRefreshRun(startedBy: string) {
 
   await saveState(state);
   try {
-    await queueWorker(runId);
+    const [{ start }, { monthlyOpportunityRefreshWorkflow }] = await Promise.all([
+      import("workflow/api"),
+      import("@/workflows/monthly-opportunity-refresh"),
+    ]);
+    await start(monthlyOpportunityRefreshWorkflow, [runId]);
   } catch (error) {
-    await markRunFailed(runId, "Queue worker", error);
+    await markRunFailed(runId, "Start workflow", error);
     throw error;
   }
   return { ok: true as const, alreadyRunning: false, state };
@@ -197,16 +181,14 @@ export async function runMonthlyOpportunityRefreshStep(runId: string) {
   const lock = await claimMonthlyRefreshLock(runId);
   if (!lock) return;
 
-  let continueRun = false;
   try {
     const state = await readState(runId);
     if (!state || state.status === "success" || state.status === "failed") return;
 
     if (state.stage === "queued" || state.stage === "preparing") {
       await runPreparationStage(state);
-      continueRun = true;
     } else if (state.stage === "ingesting") {
-      continueRun = await runIngestionStage(state);
+      await runIngestionStage(state);
     } else if (state.stage === "finalizing") {
       await runFinalizationStage(state);
     }
@@ -215,14 +197,15 @@ export async function runMonthlyOpportunityRefreshStep(runId: string) {
   } finally {
     await releaseMonthlyRefreshLock(lock);
   }
+}
 
-  if (continueRun) {
-    try {
-      await queueWorker(runId);
-    } catch (error) {
-      await markRunFailed(runId, "Queue next stage", error);
-    }
-  }
+export async function runMonthlyOpportunityRefreshWorkflowStep(runId: string) {
+  "use step";
+
+  await runMonthlyOpportunityRefreshStep(runId);
+  const state = await readState(runId);
+  if (!state) throw new Error("Monthly refresh state could not be found after a workflow step.");
+  return { status: state.status, stage: state.stage };
 }
 
 async function runPreparationStage(state: MonthlyRefreshState) {
@@ -285,19 +268,18 @@ async function runIngestionStage(state: MonthlyRefreshState) {
   if (storedCheckpoint) await writeFile(checkpointPath, storedCheckpoint);
 
   // @ts-expect-error The operational script is JavaScript and exports a runtime entrypoint.
-  const { runOpportunityIngestion } =
-    await import("../../scripts/opportunity-ingestion/runner.mjs");
+  const { runOpportunityIngestion } = await import("../../scripts/opportunity-ingestion/runner.mjs");
   const checkpoint = (await runOpportunityIngestion([
     "--checkpoint",
     checkpointPath,
     "--max-run-pages",
     "1",
     "--page-size",
-    "50",
+    "5",
     "--batch-size",
-    "25",
+    "5",
     "--concurrency",
-    "3",
+    "2",
   ])) as Record<string, unknown> | undefined;
   const serialized = await readFile(checkpointPath, "utf8");
   await monthlyRefreshRedisCommand(["SET", checkpointKey, serialized, "EX", STATE_TTL_SECONDS]);

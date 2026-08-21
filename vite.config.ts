@@ -6,12 +6,13 @@
 // You can pass additional config via defineConfig({ vite: { ... } }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { nitro } from "nitro/vite";
+import { workflow } from "workflow/vite";
 
 const isVercelBuild = process.env.VERCEL === "1";
 
 // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
 // @cloudflare/vite-plugin builds from this — wrangler.jsonc main alone is insufficient.
-export default defineConfig({
+const lovableConfig = defineConfig({
   ...(isVercelBuild
     ? {
         cloudflare: false,
@@ -22,3 +23,12 @@ export default defineConfig({
     server: { entry: "server" },
   },
 });
+
+export default async (...args: Parameters<typeof lovableConfig>) => {
+  const config = await lovableConfig(...args);
+  return {
+    ...config,
+    // Workflow must transform durable functions before TanStack Start bundles them.
+    plugins: [workflow(), ...(config.plugins ?? [])],
+  };
+};
