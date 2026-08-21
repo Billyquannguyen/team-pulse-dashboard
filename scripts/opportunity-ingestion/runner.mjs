@@ -6,7 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-const DEFAULT_QUERY =
+export const DEFAULT_QUERY =
   'in:inbox -in:spam -in:trash -from:quan@stride-social.com newer_than:45d {campaign brief creator collaboration partnership affiliate song "music promotion" UGC whitelisting "paid usage" ambassador gifted PR influencer creators sponsorship collab "paid collaboration" partnership sponsorship KOL whitelisting "Spark Ads"}';
 
 const CHECKPOINT_DIR = ".opportunity-ingestion";

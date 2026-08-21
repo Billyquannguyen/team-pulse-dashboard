@@ -18,6 +18,22 @@ const ACTIVE_KEY = "team-billion:monthly-refresh:active";
 const STATE_TTL_SECONDS = 60 * 60 * 24 * 120;
 const BACKUP_PREFIX = "monthly-opportunity-refresh/backups/";
 const PACKAGE_PREFIX = "monthly-opportunity-refresh/packages/";
+const REPORT_TIME_ZONE = "Asia/Ho_Chi_Minh";
+const REPORT_UTC_OFFSET_HOURS = 7;
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
 function stateKey(runId: string) {
   return `team-billion:monthly-refresh:run:${runId}`;
@@ -62,6 +78,33 @@ function createRunId() {
     .toISOString()
     .replace(/[-:.TZ]/g, "")
     .slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function previousCompletedMonth(now = new Date()) {
+  const local = new Date(now.getTime() + REPORT_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  const currentYear = local.getUTCFullYear();
+  const currentMonth = local.getUTCMonth();
+  const previousMonthDate = new Date(Date.UTC(currentYear, currentMonth - 1, 1));
+  const year = previousMonthDate.getUTCFullYear();
+  const month = previousMonthDate.getUTCMonth();
+  const offsetMs = REPORT_UTC_OFFSET_HOURS * 60 * 60 * 1000;
+  const start = new Date(Date.UTC(year, month, 1) - offsetMs);
+  const endExclusive = new Date(Date.UTC(currentYear, currentMonth, 1) - offsetMs);
+  return {
+    label: `${MONTH_NAMES[month]} ${year}`,
+    start: start.toISOString(),
+    endExclusive: endExclusive.toISOString(),
+    startEpoch: Math.floor(start.getTime() / 1000),
+    endExclusiveEpoch: Math.floor(endExclusive.getTime() / 1000),
+  };
+}
+
+function queryForReportPeriod(baseQuery: string, period: ReturnType<typeof previousCompletedMonth>) {
+  const withoutRollingDates = baseQuery
+    .replace(/\b(?:newer_than|older_than|after|before):(?:"[^"]*"|\S+)/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return `${withoutRollingDates} after:${period.startEpoch} before:${period.endExclusiveEpoch}`;
 }
 
 function runtimeRoot(runId: string) {
@@ -144,6 +187,7 @@ export async function startMonthlyOpportunityRefreshRun(startedBy: string) {
   if (claimed !== "OK") throw new Error("Another monthly refresh started at the same time.");
 
   const now = new Date().toISOString();
+  const reportPeriod = previousCompletedMonth();
   const state: MonthlyRefreshState = {
     runId,
     status: "queued",
@@ -153,6 +197,9 @@ export async function startMonthlyOpportunityRefreshRun(startedBy: string) {
     updatedAt: now,
     finishedAt: "",
     startedBy,
+    reportPeriodLabel: reportPeriod.label,
+    reportPeriodStart: reportPeriod.start,
+    reportPeriodEndExclusive: reportPeriod.endExclusive,
     emailsScanned: 0,
     pagesScanned: 0,
     opportunitiesCreated: 0,
@@ -204,7 +251,7 @@ async function runPreparationStage(state: MonthlyRefreshState) {
   await updateState(state.runId, {
     status: "running",
     stage: "preparing",
-    stageLabel: "Checking access and creating a safety backup",
+    stageLabel: `Preparing ${state.reportPeriodLabel}`,
   });
   const root = runtimeRoot(state.runId);
   await resetRuntimeRoot(root);
@@ -244,7 +291,7 @@ async function runPreparationStage(state: MonthlyRefreshState) {
   await updateState(state.runId, {
     status: "running",
     stage: "ingesting",
-    stageLabel: "Scanning Gmail in safe batches",
+    stageLabel: `Scanning Gmail for ${state.reportPeriodLabel}`,
     backupBlobUrl: backupBlob.url,
   });
 }
@@ -260,7 +307,19 @@ async function runIngestionStage(state: MonthlyRefreshState) {
   if (storedCheckpoint) await writeFile(checkpointPath, storedCheckpoint);
 
   // @ts-expect-error The operational script is JavaScript and exports a runtime entrypoint.
-  const { runOpportunityIngestion } = await import("../../scripts/opportunity-ingestion/runner.mjs");
+  const importedRunner = await import("../../scripts/opportunity-ingestion/runner.mjs");
+  const { runOpportunityIngestion, DEFAULT_QUERY } = importedRunner;
+  const period = {
+    label: state.reportPeriodLabel,
+    start: state.reportPeriodStart,
+    endExclusive: state.reportPeriodEndExclusive,
+    startEpoch: Math.floor(new Date(state.reportPeriodStart).getTime() / 1000),
+    endExclusiveEpoch: Math.floor(new Date(state.reportPeriodEndExclusive).getTime() / 1000),
+  };
+  const gmailQuery = queryForReportPeriod(
+    process.env.OPPORTUNITY_GMAIL_QUERY?.trim() || DEFAULT_QUERY,
+    period,
+  );
   const checkpoint = (await runOpportunityIngestion([
     "--checkpoint",
     checkpointPath,
@@ -272,6 +331,8 @@ async function runIngestionStage(state: MonthlyRefreshState) {
     "5",
     "--concurrency",
     "2",
+    "--query",
+    gmailQuery,
   ])) as Record<string, unknown> | undefined;
   const serialized = await readFile(checkpointPath, "utf8");
   await monthlyRefreshRedisCommand(["SET", checkpointKey, serialized, "EX", STATE_TTL_SECONDS]);
@@ -281,7 +342,9 @@ async function runIngestionStage(state: MonthlyRefreshState) {
   await updateState(state.runId, {
     status: "running",
     stage: done ? "finalizing" : "ingesting",
-    stageLabel: done ? "Building the monthly package" : "Scanning Gmail in safe batches",
+    stageLabel: done
+      ? `Building the ${state.reportPeriodLabel} package`
+      : `Scanning Gmail for ${state.reportPeriodLabel}`,
     emailsScanned: Number(parsed.emailsScanned ?? 0),
     pagesScanned: Number(parsed.pagesScanned ?? 0),
     opportunitiesCreated: Number(parsed.opportunitiesCreated ?? 0),
@@ -296,11 +359,15 @@ async function runFinalizationStage(state: MonthlyRefreshState) {
   await resetRuntimeRoot(root);
   process.env.OPPORTUNITY_RUNTIME_ROOT = root;
   process.env.DISCORD_WEBHOOK_URL = monthlyDiscordWebhook();
+  process.env.OPPORTUNITY_REPORT_PERIOD_LABEL = current.reportPeriodLabel;
+  process.env.OPPORTUNITY_REPORT_PERIOD_START = current.reportPeriodStart;
+  process.env.OPPORTUNITY_REPORT_PERIOD_END_EXCLUSIVE = current.reportPeriodEndExclusive;
 
   const checkpointKey = `${stateKey(state.runId)}:checkpoint`;
   const checkpointRaw = await monthlyRefreshRedisCommand<string | null>(["GET", checkpointKey]);
   if (!checkpointRaw) throw new Error("The Gmail checkpoint is missing before finalization.");
   const checkpoint = JSON.parse(checkpointRaw) as Record<string, unknown>;
+  checkpoint.reportPeriodLabel = current.reportPeriodLabel;
   await materializePrivateBlob(
     current.backupBlobUrl,
     path.join(root, ".opportunity-ingestion", "backups", "latest-backup.json"),
@@ -443,6 +510,7 @@ function buildIngestionLog(checkpoint: Record<string, unknown>) {
   return [
     "Ingestion runner summary",
     `Run ID: ${String(checkpoint.runId ?? "Unknown")}`,
+    `Report period: ${String(checkpoint.reportPeriodLabel ?? "Previous completed month")}`,
     line("Emails scanned", "emailsScanned"),
     line("Relevant emails found", "relevantEmailsFound"),
     line("Opportunities created", "opportunitiesCreated"),

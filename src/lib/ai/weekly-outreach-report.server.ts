@@ -6,7 +6,6 @@ export type WeeklyOutreachNarrativeFacts = {
   memberCount: number;
   creatorOutreachSent: number;
   brandOutreachSent: number;
-  calendlyBooked: number;
   bookedCalls: number;
   invalidTaggingThreads: number;
   missedInbound: number;
@@ -27,11 +26,9 @@ export type MissingMemberTagCandidate = {
   emailText: string;
 };
 
-export type ExclusiveCreatorAssignment = {
+export type ExclusiveCreatorReference = {
   creatorId: string;
   creatorName: string;
-  memberId: string;
-  memberName: string;
 };
 
 export type MissingMemberTagDecision = {
@@ -39,6 +36,22 @@ export type MissingMemberTagDecision = {
   report: boolean;
   creatorId: string;
   memberId: string;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+};
+
+export type BrandInboundCandidate = {
+  candidateId: string;
+  memberId: string;
+  subject: string;
+  from: string;
+  lastReceivedAt: string;
+  transcript: string;
+};
+
+export type BrandInboundDecision = {
+  candidateId: string;
+  status: "unresolved" | "closed" | "uncertain";
   confidence: "high" | "medium" | "low";
   reason: string;
 };
@@ -110,14 +123,96 @@ const missingMemberTagSchema: Record<string, unknown> = {
   },
 };
 
+const brandInboundDecision = z
+  .object({
+    candidateId: z.string().trim().min(1).max(120),
+    status: z.enum(["unresolved", "closed", "uncertain"]),
+    confidence: z.enum(["high", "medium", "low"]),
+    reason: z.string().trim().max(180),
+  })
+  .strict();
+
+const brandInboundOutput = z.object({ decisions: z.array(brandInboundDecision).max(200) }).strict();
+
+const brandInboundSchema: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["decisions"],
+  properties: {
+    decisions: {
+      type: "array",
+      maxItems: 200,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["candidateId", "status", "confidence", "reason"],
+        properties: {
+          candidateId: { type: "string", maxLength: 120 },
+          status: { type: "string", enum: ["unresolved", "closed", "uncertain"] },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          reason: { type: "string", maxLength: 180 },
+        },
+      },
+    },
+  },
+};
+
+export async function classifyBrandInboundConversations({
+  candidates,
+}: {
+  candidates: BrandInboundCandidate[];
+}): Promise<{ decisions: BrandInboundDecision[]; modelUsed: string; warnings: string[] }> {
+  if (candidates.length === 0) return { decisions: [], modelUsed: "", warnings: [] };
+
+  const aiService = createAIService();
+  const result = await aiService.generateStructured<z.infer<typeof brandInboundOutput>>({
+    schemaName: "weekly_gmail_brand_inbound_status",
+    schema: brandInboundSchema,
+    maxTokens: 3_200,
+    temperature: 0.05,
+    timeoutMs: 45_000,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You classify brand-inbound email conversations where the external party is the latest sender and the team has not replied for at least forty-eight hours.",
+          "Mark unresolved only when the latest external message still requires a reply, decision, deliverable, follow-up or acknowledgement from the team.",
+          "Mark closed when the conversation clearly ended, was declined, cancelled, resolved, acknowledged as complete, or explicitly requires no further action.",
+          "Mark spam, cold sales, newsletters, automated notices and irrelevant messages as closed.",
+          "Use uncertain when the transcript does not provide enough evidence. Do not guess.",
+          "Return one decision for every supplied candidate and use only supplied candidate IDs.",
+          "Return concise JSON only.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: JSON.stringify(
+          {
+            task: "Determine which stale brand-inbound conversations remain unresolved",
+            candidates,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  });
+  const output = brandInboundOutput.parse(result.output);
+  const decisionIds = new Set(output.decisions.map((decision) => decision.candidateId));
+  if (candidates.some((candidate) => !decisionIds.has(candidate.candidateId))) {
+    throw new Error("OpenRouter omitted one or more brand-inbound conversations.");
+  }
+  return { decisions: output.decisions, modelUsed: result.modelUsed, warnings: result.warnings };
+}
+
 export async function identifyMissingMemberTags({
   candidates,
-  assignments,
+  creators,
 }: {
   candidates: MissingMemberTagCandidate[];
-  assignments: ExclusiveCreatorAssignment[];
+  creators: ExclusiveCreatorReference[];
 }): Promise<{ decisions: MissingMemberTagDecision[]; modelUsed: string; warnings: string[] }> {
-  if (candidates.length === 0 || assignments.length === 0) {
+  if (candidates.length === 0 || creators.length === 0) {
     return { decisions: [], modelUsed: "", warnings: [] };
   }
 
@@ -132,10 +227,11 @@ export async function identifyMissingMemberTags({
       {
         role: "system",
         content: [
-          "You review inbound emails that have no team-member Gmail tag and no team reply.",
+          "You review Brand inbound emails for the tagging-rule check because they have no team-member Gmail tag.",
           "The mailbox receives spam, newsletters, automated notifications, cold sales and irrelevant mail; ignore those.",
-          "Report only when the email text gives strong evidence that it concerns one creator in the supplied exclusive-creator assignments.",
-          "Use only the supplied creatorId and memberId. Never invent a creator, member or relationship.",
+          "Report only when the email text gives strong evidence that it concerns one creator in the supplied exclusive-creator list.",
+          "Use only the supplied creatorId. Never invent a creator or relationship.",
+          "Always return an empty memberId; application code assigns the member from the exclusive creator's dashboard Owner field.",
           "Set report=true only for high confidence. Medium or low confidence must be ignored.",
           "A shared first name, vague campaign language or sender display name alone is not enough.",
           "For ignored emails, return empty creatorId and memberId and a short reason.",
@@ -146,8 +242,8 @@ export async function identifyMissingMemberTags({
         role: "user",
         content: JSON.stringify(
           {
-            task: "Find likely missed inbound emails that should carry an exclusive creator's member tag",
-            exclusiveCreatorAssignments: assignments,
+            task: "Find Brand inbound emails that violate the member-tagging rule",
+            exclusiveCreators: creators,
             inboundCandidates: candidates,
           },
           null,

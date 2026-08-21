@@ -1,12 +1,15 @@
 import "@tanstack/react-start/server-only";
 import { getMasterGmailAccessToken } from "@/lib/gmail-oauth.server";
 import {
+  classifyBrandInboundConversations,
   generateWeeklyOutreachNarrative,
   identifyMissingMemberTags,
-  type ExclusiveCreatorAssignment,
+  type BrandInboundCandidate,
+  type ExclusiveCreatorReference,
   type MissingMemberTagCandidate,
 } from "@/lib/ai/weekly-outreach-report.server";
-import { getCreatorProfilesForServer, type CreatorProfile } from "@/lib/creator-profiles";
+import type { Creator } from "@/data/creators";
+import { getExclusiveDashboardCreatorsForServer } from "@/lib/signed-creators.server";
 import { getWeeklyOutreachReportMembers, type TeamMemberConfig } from "@/lib/team-members";
 
 type GmailLabel = {
@@ -66,7 +69,6 @@ type MemberReportMetrics = {
   gmailLabelId: string | null;
   creatorOutreachSent: number;
   brandOutreachSent: number;
-  calendlyBooked: number;
   bookedCalls: number;
   invalidTaggingThreads: number;
   missedInbound: number;
@@ -100,6 +102,11 @@ type MissingMemberTagAlert = {
   sentence: string;
 };
 
+type ReportWindow = {
+  startMs: number;
+  endMs: number;
+};
+
 export class GmailAuthError extends Error {
   constructor(message: string) {
     super(message);
@@ -111,10 +118,11 @@ const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_REPORT_DAYS = 7;
 const THREAD_FETCH_CONCURRENCY = 12;
 const MAX_UNTAGGED_INBOUND_CANDIDATES = 50;
+const MAX_STALE_BRAND_INBOUND_CANDIDATES = 200;
 const MAX_AI_EMAIL_TEXT_LENGTH = 1_200;
+const BRAND_INBOUND_STALE_MS = 48 * 60 * 60 * 1_000;
 const REPORT_TIME_ZONE = "Asia/Ho_Chi_Minh";
-const DEFAULT_CALENDLY_BOOKED_QUERY =
-  '{"calendly" "calendly.com" "scheduled event" "booked" "confirmed"}';
+const REPORT_TIME_ZONE_OFFSET_MS = 7 * 60 * 60 * 1_000;
 const DEFAULT_BOOKED_CALL_LABEL_NAME = "For Quân";
 const DEFAULT_CATEGORY_LABEL_NAMES: ReportCategoryLabelNames = {
   brandInbound: "Brand inbound",
@@ -126,7 +134,6 @@ function emptyTotals(): WeeklyReportTotals {
   return {
     creatorOutreachSent: 0,
     brandOutreachSent: 0,
-    calendlyBooked: 0,
     bookedCalls: 0,
     invalidTaggingThreads: 0,
     missedInbound: 0,
@@ -174,10 +181,6 @@ function getReportDays() {
   return getPositiveIntegerEnv("WEEKLY_GMAIL_REPORT_DAYS", DEFAULT_REPORT_DAYS, 31);
 }
 
-function getConfiguredQuery(envName: string, fallback: string) {
-  return process.env[envName]?.trim() || fallback;
-}
-
 function getCategoryLabelNames(): ReportCategoryLabelNames {
   return {
     brandInbound:
@@ -196,8 +199,24 @@ function getBookedCallLabelName() {
   return process.env.WEEKLY_GMAIL_BOOKED_CALL_LABEL?.trim() || DEFAULT_BOOKED_CALL_LABEL_NAME;
 }
 
-function withReportWindow(query: string, days: number) {
-  return `${query} newer_than:${days}d -in:spam -in:trash`.replace(/\s+/g, " ").trim();
+export function getReportWindow(days: number, now: Date): ReportWindow {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: REPORT_TIME_ZONE,
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const endMs =
+    Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)) -
+    REPORT_TIME_ZONE_OFFSET_MS;
+  return { startMs: endMs - days * DAY_IN_MS, endMs };
+}
+
+function withReportWindow(query: string, window: ReportWindow) {
+  const after = Math.floor(window.startMs / 1_000);
+  const before = Math.floor(window.endMs / 1_000);
+  return `${query} after:${after} before:${before} -in:spam -in:trash`.replace(/\s+/g, " ").trim();
 }
 
 function quoteGmailSearchValue(value: string) {
@@ -235,10 +254,8 @@ function formatDate(value: Date) {
   }).format(value);
 }
 
-function getWindowLabel(days: number, now: Date) {
-  const start = new Date(now.getTime() - days * DAY_IN_MS);
-  const lastCompletedDay = new Date(now.getTime() - DAY_IN_MS);
-  return `${formatDate(start)} - ${formatDate(lastCompletedDay)}`;
+function getWindowLabel(window: ReportWindow) {
+  return `${formatDate(new Date(window.startMs))} - ${formatDate(new Date(window.endMs - 1))}`;
 }
 
 async function getGmailReadonlyAccessToken() {
@@ -330,10 +347,6 @@ async function listGmailThreadIds(
   } while (pageToken && threadIds.length < maximum);
 
   return Array.from(new Set(threadIds)).slice(0, maximum);
-}
-
-async function countGmailThreads(accessToken: string, labelIds: string[], query: string) {
-  return (await listGmailThreadIds(accessToken, labelIds, query)).length;
 }
 
 async function getGmailThread(accessToken: string, threadId: string) {
@@ -533,17 +546,11 @@ function isClearlyAutomatedEmail(message: GmailThreadMessage) {
   );
 }
 
-function hasTeamReply(thread: GmailThread) {
-  return getDeliveredThreadMessages(thread).some((message) =>
-    (message.labelIds ?? []).includes("SENT"),
-  );
-}
-
 function hasAnyMemberLabel(thread: GmailThread, memberLabelIds: Set<string>) {
   return Array.from(getThreadLabelIds(thread)).some((labelId) => memberLabelIds.has(labelId));
 }
 
-function normalizePersonKey(value: string) {
+function normalizeMentionKey(value: string) {
   return value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -552,35 +559,70 @@ function normalizePersonKey(value: string) {
     .trim();
 }
 
-function memberForTalentManager(manager: string, members: TeamMemberConfig[]) {
-  const managerKey = normalizePersonKey(manager);
-  if (!managerKey) return null;
+function creatorAliasFromUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const segment = url.pathname
+      .split("/")
+      .filter(Boolean)
+      .findLast((item) => item !== "reels");
+    return normalizeMentionKey((segment ?? "").replace(/^@/, ""));
+  } catch {
+    return "";
+  }
+}
+
+function buildExclusiveCreatorReferences(creators: Creator[]) {
+  const references = new Map<
+    string,
+    ExclusiveCreatorReference & { mentionKeys: string[]; ownerName: string }
+  >();
+
+  for (const creator of creators) {
+    if (creator.relationship !== "Exclusive" || !creator.handle.trim()) continue;
+    const creatorId = creator.id.trim();
+    const mentionKeys = Array.from(
+      new Set(
+        [
+          normalizeMentionKey(creator.handle),
+          creatorAliasFromUrl(creator.tiktokLink ?? ""),
+          creatorAliasFromUrl(creator.instagramLink ?? ""),
+          creatorAliasFromUrl(creator.youtubeLink ?? ""),
+        ].filter((value) => value.length >= 4),
+      ),
+    );
+    if (mentionKeys.length === 0) continue;
+    references.set(creatorId, {
+      creatorId,
+      creatorName: creator.handle.trim(),
+      ownerName: creator.owner.trim(),
+      mentionKeys,
+    });
+  }
+
+  return Array.from(references.values());
+}
+
+function memberForDashboardOwner(owner: string, members: TeamMemberConfig[]) {
+  const ownerKey = normalizeMentionKey(owner);
+  if (!ownerKey) return null;
   return (
     members.find((member) =>
       [member.displayName, member.gmailLabel, member.id]
-        .map(normalizePersonKey)
-        .some((value) => value === managerKey),
+        .map(normalizeMentionKey)
+        .some((value) => value === ownerKey),
     ) ?? null
   );
 }
 
-function buildExclusiveAssignments(profiles: CreatorProfile[], members: TeamMemberConfig[]) {
-  const assignments = new Map<string, ExclusiveCreatorAssignment>();
-
-  for (const profile of profiles) {
-    if (!profile.active || profile.type !== "Exclusive" || !profile.creatorName.trim()) continue;
-    const member = memberForTalentManager(profile.talentManager, members);
-    if (!member) continue;
-    const assignment: ExclusiveCreatorAssignment = {
-      creatorId: profile.creatorId,
-      creatorName: profile.creatorName.trim(),
-      memberId: member.id,
-      memberName: member.displayName,
-    };
-    assignments.set(`${assignment.creatorId}:${assignment.memberId}`, assignment);
-  }
-
-  return Array.from(assignments.values());
+export function findMentionedExclusiveCreators(
+  candidates: MissingMemberTagCandidate[],
+  creators: Creator[],
+) {
+  const candidateText = candidates.map((candidate) => normalizeMentionKey(candidate.emailText));
+  return buildExclusiveCreatorReferences(creators).filter((creator) =>
+    creator.mentionKeys.some((key) => candidateText.some((text) => text.includes(key))),
+  );
 }
 
 function discordInline(value: string, fallback: string) {
@@ -617,38 +659,34 @@ function buildMissingMemberTagSentence({
   const sender = discordInline(candidate.from, "unknown sender");
   const creator = discordInline(creatorName, "an exclusive creator");
   const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${encodeURIComponent(candidate.candidateId)}`;
+  const owner = `should be tagged **${discordInline(member.gmailLabel, member.displayName)}** for ${formatMemberName(member)}`;
   return `Email **“${subject}”** from **${sender}**, received **${formatAlertReceivedAt(
     candidate.receivedAt,
-  )}**, may be for ${formatMemberName(
-    member,
-  )} because it mentions exclusive creator **${creator}**; it has no member tag and no team reply, so please check: [open email](${gmailUrl}).`;
+  )}**, ${owner} because it mentions exclusive creator **${creator}**; please check and add the tag: [open email](${gmailUrl}).`;
 }
 
 async function collectMissingMemberTagAlerts({
   accessToken,
-  days,
+  brandInboundLabel,
+  window,
   members,
   memberLabelIds,
-  profiles,
+  creators,
 }: {
   accessToken: string;
-  days: number;
+  brandInboundLabel: GmailLabel;
+  window: ReportWindow;
   members: TeamMemberConfig[];
   memberLabelIds: Set<string>;
-  profiles: CreatorProfile[];
+  creators: Creator[];
 }) {
-  const assignments = buildExclusiveAssignments(profiles, members);
-  if (assignments.length === 0) {
-    throw new Error("No active exclusive creators could be matched to weekly-report members.");
-  }
-
   const query = withReportWindow(
-    "in:inbox -from:me -category:promotions -category:social -category:forums",
-    days,
+    `label:${quoteGmailSearchValue(brandInboundLabel.name)} -in:spam -in:trash`,
+    window,
   );
   const threadIds = await listGmailThreadIds(
     accessToken,
-    [],
+    [brandInboundLabel.id],
     query,
     MAX_UNTAGGED_INBOUND_CANDIDATES,
   );
@@ -656,7 +694,7 @@ async function collectMissingMemberTagAlerts({
   const candidates: MissingMemberTagCandidate[] = [];
 
   for (const thread of threads) {
-    if (!thread.id || hasTeamReply(thread) || hasAnyMemberLabel(thread, memberLabelIds)) continue;
+    if (!thread.id || hasAnyMemberLabel(thread, memberLabelIds)) continue;
     const messages = getDeliveredThreadMessages(thread);
     const latestInbound = [...messages]
       .reverse()
@@ -679,28 +717,41 @@ async function collectMissingMemberTagAlerts({
     });
   }
 
-  const aiResult = await identifyMissingMemberTags({ candidates, assignments });
+  const mentionedCreators = findMentionedExclusiveCreators(candidates, creators);
+  if (mentionedCreators.length === 0) {
+    return {
+      alerts: [],
+      warnings: [],
+      modelUsed: "",
+      candidatesChecked: candidates.length,
+      exclusiveCreatorsMatched: 0,
+    };
+  }
+
+  const aiResult = await identifyMissingMemberTags({
+    candidates,
+    creators: mentionedCreators.map(({ creatorId, creatorName }) => ({ creatorId, creatorName })),
+  });
   const candidateIndex = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]));
-  const assignmentIndex = new Map(
-    assignments.map((assignment) => [`${assignment.creatorId}:${assignment.memberId}`, assignment]),
-  );
-  const memberIndex = new Map(members.map((member) => [member.id, member]));
+  const creatorIndex = new Map(mentionedCreators.map((creator) => [creator.creatorId, creator]));
   const alerts = new Map<string, MissingMemberTagAlert>();
 
   for (const decision of aiResult.decisions) {
     if (!decision.report || decision.confidence !== "high") continue;
     const candidate = candidateIndex.get(decision.candidateId);
-    const assignment = assignmentIndex.get(`${decision.creatorId}:${decision.memberId}`);
-    const member = memberIndex.get(decision.memberId);
-    if (!candidate || !assignment || !member) continue;
+    const creator = creatorIndex.get(decision.creatorId);
+    const member = creator
+      ? memberForDashboardOwner(creator.ownerName, members)
+      : null;
+    if (!candidate || !creator || !member) continue;
     alerts.set(candidate.candidateId, {
       candidateId: candidate.candidateId,
       member,
-      creatorName: assignment.creatorName,
+      creatorName: creator.creatorName,
       sentence: buildMissingMemberTagSentence({
         candidate,
         member,
-        creatorName: assignment.creatorName,
+        creatorName: creator.creatorName,
       }),
     });
   }
@@ -710,6 +761,108 @@ async function collectMissingMemberTagAlerts({
     warnings: aiResult.warnings,
     modelUsed: aiResult.modelUsed,
     candidatesChecked: candidates.length,
+    exclusiveCreatorsMatched: mentionedCreators.length,
+  };
+}
+
+function buildBrandInboundTranscript(messages: GmailThreadMessage[]) {
+  return messages
+    .slice(-4)
+    .map((message) => {
+      const sender = (message.labelIds ?? []).includes("SENT") ? "TEAM" : "EXTERNAL";
+      const from = getHeader(message, "From");
+      const subject = getHeader(message, "Subject");
+      const body = cleanEmailText(
+        collectMessageText(message.payload).join(" ") || message.snippet || "",
+      ).slice(0, 900);
+      return `${sender}\nFrom: ${from}\nSubject: ${subject}\n${body}`;
+    })
+    .join("\n\n")
+    .slice(0, 3_600);
+}
+
+async function collectOverdueTaggedBrandInbound({
+  accessToken,
+  brandInboundLabel,
+  members,
+  labelIndex,
+  now,
+}: {
+  accessToken: string;
+  brandInboundLabel: GmailLabel;
+  members: TeamMemberConfig[];
+  labelIndex: Map<string, GmailLabel>;
+  now: Date;
+}) {
+  const staleBeforeMs = now.getTime() - BRAND_INBOUND_STALE_MS;
+  const query = [
+    `label:${quoteGmailSearchValue(brandInboundLabel.name)}`,
+    `before:${Math.floor(staleBeforeMs / 1_000)}`,
+    "-in:spam",
+    "-in:trash",
+  ].join(" ");
+  const threadIds = await listGmailThreadIds(
+    accessToken,
+    [brandInboundLabel.id],
+    query,
+    MAX_STALE_BRAND_INBOUND_CANDIDATES,
+  );
+  const threads = await loadFullGmailThreads(accessToken, threadIds);
+  const membersByLabelId = new Map(
+    members
+      .map((member) => {
+        const labelId = resolveLabel(labelIndex, member.gmailLabel)?.id ?? "";
+        return labelId ? ([labelId, member] as const) : null;
+      })
+      .filter((entry): entry is readonly [string, TeamMemberConfig] => entry !== null),
+  );
+  const candidates: BrandInboundCandidate[] = [];
+
+  for (const thread of threads) {
+    if (!thread.id) continue;
+    const messages = getDeliveredThreadMessages(thread);
+    const latest = messages.at(-1);
+    if (!latest || (latest.labelIds ?? []).includes("SENT")) continue;
+    const latestTimestamp = getMessageTimestamp(latest);
+    if (!latestTimestamp || latestTimestamp > staleBeforeMs) continue;
+
+    const member = Array.from(getThreadLabelIds(thread))
+      .map((labelId) => membersByLabelId.get(labelId))
+      .find((item): item is TeamMemberConfig => Boolean(item));
+    if (!member) continue;
+
+    candidates.push({
+      candidateId: thread.id,
+      memberId: member.id,
+      subject: getHeader(latest, "Subject"),
+      from: getHeader(latest, "From"),
+      lastReceivedAt: new Date(latestTimestamp).toISOString(),
+      transcript: buildBrandInboundTranscript(messages),
+    });
+  }
+
+  const aiResult = await classifyBrandInboundConversations({ candidates });
+  const candidateIndex = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]));
+  const unresolvedByMember = new Map<string, number>();
+  let uncertain = 0;
+
+  for (const decision of aiResult.decisions) {
+    const candidate = candidateIndex.get(decision.candidateId);
+    if (!candidate) continue;
+    if (decision.status === "uncertain") uncertain += 1;
+    if (decision.status !== "unresolved" || decision.confidence !== "high") continue;
+    unresolvedByMember.set(
+      candidate.memberId,
+      (unresolvedByMember.get(candidate.memberId) ?? 0) + 1,
+    );
+  }
+
+  return {
+    unresolvedByMember,
+    candidatesChecked: candidates.length,
+    uncertain,
+    modelUsed: aiResult.modelUsed,
+    warnings: aiResult.warnings,
   };
 }
 
@@ -720,7 +873,7 @@ function isNewOutboundThread(thread: GmailThread, reportStartMs: number, reportE
   return (
     Boolean(firstMessage?.labelIds?.includes("SENT")) &&
     timestamp >= reportStartMs &&
-    timestamp <= reportEndMs
+    timestamp < reportEndMs
   );
 }
 
@@ -732,9 +885,9 @@ async function collectMemberMetrics(
   categoryLabels: ReportCategoryLabels,
   categoryLabelNames: ReportCategoryLabelNames,
   bookedCallLabel: GmailLabel | null,
-  days: number,
-  now: Date,
+  window: ReportWindow,
   threadCache: Map<string, Promise<GmailThread>>,
+  countedBrandThreadIds: Set<string>,
   countedBookedThreadIds: Set<string>,
 ): Promise<MemberReportMetrics> {
   const issues: string[] = [];
@@ -762,15 +915,16 @@ async function collectMemberMetrics(
     ...emptyMemberMetrics(member, issues),
     gmailLabelId: label.id,
   };
-  const nowMs = now.getTime();
-  const reportStartMs = nowMs - days * DAY_IN_MS;
+  const reportStartMs = window.startMs;
+  const reportEndMs = window.endMs;
   const creatorExclusions = Object.values(categoryLabelNames)
     .map((name) => `-label:${quoteGmailSearchValue(name)}`)
     .join(" ");
   const creatorThreadQuery = [
     "in:sent",
     creatorExclusions,
-    `newer_than:${days}d`,
+    `after:${Math.floor(window.startMs / 1_000)}`,
+    `before:${Math.floor(window.endMs / 1_000)}`,
     "-in:spam",
     "-in:trash",
   ]
@@ -778,33 +932,10 @@ async function collectMemberMetrics(
     .join(" ");
   const brandOutreachQuery = withReportWindow(
     `in:sent label:${quoteGmailSearchValue(categoryLabelNames.brandOutreach)}`,
-    days,
-  );
-  const missedInboundQuery = withReportWindow(
-    `in:inbox is:unread -from:me label:${quoteGmailSearchValue(categoryLabelNames.brandInbound)}`,
-    days,
-  );
-  const calendlyQuery = withReportWindow(
-    getConfiguredQuery("WEEKLY_GMAIL_CALENDLY_BOOKED_QUERY", DEFAULT_CALENDLY_BOOKED_QUERY),
-    days,
+    window,
   );
   try {
-    const [
-      [missedInbound, calendlyBooked],
-      creatorThreadIds,
-      brandOutreachThreadIds,
-      bookedThreadIds,
-    ] = await Promise.all([
-      Promise.all([
-        categoryLabels.brandInbound
-          ? countGmailThreads(
-              accessToken,
-              [label.id, categoryLabels.brandInbound.id],
-              missedInboundQuery,
-            )
-          : Promise.resolve(0),
-        countGmailThreads(accessToken, [label.id], calendlyQuery),
-      ]),
+    const [creatorThreadIds, brandOutreachThreadIds, bookedThreadIds] = await Promise.all([
       listGmailThreadIds(accessToken, [label.id], creatorThreadQuery),
       categoryLabels.brandOutreach
         ? listGmailThreadIds(
@@ -817,7 +948,7 @@ async function collectMemberMetrics(
         ? listGmailMessageThreadIds(
             accessToken,
             [label.id, bookedCallLabel.id],
-            withReportWindow("", days),
+            withReportWindow("", window),
           )
         : Promise.resolve([]),
     ]);
@@ -826,11 +957,12 @@ async function collectMemberMetrics(
       loadGmailThreads(accessToken, brandOutreachThreadIds, threadCache),
     ]);
 
-    metrics.brandOutreachSent = brandOutreachThreads.filter((thread) =>
-      isNewOutboundThread(thread, reportStartMs, nowMs),
-    ).length;
-    metrics.missedInbound = missedInbound;
-    metrics.calendlyBooked = calendlyBooked;
+    for (const thread of brandOutreachThreads) {
+      if (!thread.id || !isNewOutboundThread(thread, reportStartMs, reportEndMs)) continue;
+      if (countedBrandThreadIds.has(thread.id)) continue;
+      countedBrandThreadIds.add(thread.id);
+      metrics.brandOutreachSent += 1;
+    }
     for (const threadId of bookedThreadIds) {
       if (countedBookedThreadIds.has(threadId)) continue;
       countedBookedThreadIds.add(threadId);
@@ -840,7 +972,7 @@ async function collectMemberMetrics(
     for (const thread of creatorThreads) {
       const threadLabelIds = getThreadLabelIds(thread);
       if (!isCreatorOutreachThread(threadLabelIds, label.id, customUserLabelIds)) continue;
-      if (isNewOutboundThread(thread, reportStartMs, nowMs)) {
+      if (isNewOutboundThread(thread, reportStartMs, reportEndMs)) {
         metrics.creatorOutreachSent += 1;
       }
     }
@@ -862,7 +994,6 @@ function addMetrics(left: WeeklyReportTotals, right: MemberReportMetrics): Weekl
   return {
     creatorOutreachSent: left.creatorOutreachSent + right.creatorOutreachSent,
     brandOutreachSent: left.brandOutreachSent + right.brandOutreachSent,
-    calendlyBooked: left.calendlyBooked + right.calendlyBooked,
     bookedCalls: left.bookedCalls + right.bookedCalls,
     invalidTaggingThreads: left.invalidTaggingThreads + right.invalidTaggingThreads,
     missedInbound: left.missedInbound + right.missedInbound,
@@ -871,15 +1002,15 @@ function addMetrics(left: WeeklyReportTotals, right: MemberReportMetrics): Weekl
 
 function buildFallbackVerdict(totals: WeeklyReportTotals) {
   if (totals.missedInbound > 0 && totals.invalidTaggingThreads > 0) {
-    return "Cần ưu tiên xử lý brand inbound còn sót và sửa các conversation đang gắn tag sai quy tắc.";
+    return "Cần trả lời các brand inbound đã chờ quá 48 giờ và thêm member tag cho các email đang tag sai quy tắc.";
   }
   if (totals.missedInbound > 0) {
-    return "Cần ưu tiên xử lý các brand inbound còn chưa được phản hồi.";
+    return "Cần trả lời các brand inbound đã có member tag nhưng external sender đang chờ quá 48 giờ.";
   }
   if (totals.invalidTaggingThreads > 0) {
-    return "Cần kiểm tra và sửa các conversation đang gắn tag sai quy tắc.";
+    return "Cần thêm đúng member tag cho các Brand inbound đang tag sai quy tắc.";
   }
-  return "Không phát hiện brand inbound chưa xử lý hoặc conversation chưa reply có tag sai quy tắc.";
+  return "Không phát hiện brand inbound đang chờ reply quá 48 giờ hoặc email thiếu member tag.";
 }
 
 function buildFallbackSummary() {
@@ -946,22 +1077,27 @@ function buildVietnameseReport(
   narrative: ReportNarrative,
   issues: string[],
   missingMemberTagAlertCount: number,
+  missingTagScanCompleted: boolean,
+  unresolvedBrandInboundScanCompleted: boolean,
   days: number,
-  now: Date,
+  window: ReportWindow,
 ) {
   const reportIssues = issues;
 
   const lines = [
     "**Báo cáo Gmail Outreach hằng tuần**",
-    `Thời gian: ${getWindowLabel(days, now)} (${days} ngày gần nhất)`,
+    `Thời gian: ${getWindowLabel(window)} (${days} ngày hoàn tất gần nhất)`,
     "",
     "**Tổng quan**",
     `Creator outreach mới: ${formatNumber(totals.creatorOutreachSent)}`,
     `Brand outreach mới: ${formatNumber(totals.brandOutreachSent)}`,
-    `Calendly booked: ${formatNumber(totals.calendlyBooked)}`,
     `Booked call (tag For Quân): ${formatNumber(totals.bookedCalls)}`,
-    `Brand inbound chưa xử lý: ${formatNumber(totals.missedInbound)}`,
-    `Tagging sai quy tắc (chưa reply): ${formatNumber(totals.invalidTaggingThreads)}`,
+    unresolvedBrandInboundScanCompleted
+      ? `Brand inbound chưa xử lý (đã tag, chưa reply >48 giờ, AI xác nhận): ${formatNumber(totals.missedInbound)}`
+      : "Brand inbound chưa xử lý: không xác định (AI check không hoàn tất)",
+    missingTagScanCompleted
+      ? `Tagging sai quy tắc (thiếu member tag): ${formatNumber(totals.invalidTaggingThreads)}`
+      : "Tagging sai quy tắc: không xác định (AI check không hoàn tất)",
     "",
     "**Nhận định**",
     narrative.summary,
@@ -982,7 +1118,15 @@ function buildVietnameseReport(
           item.creatorOutreachSent,
         )} | Brand mới ${formatNumber(item.brandOutreachSent)} | Booked ${formatNumber(
           item.bookedCalls,
-        )} | Missed inbound ${formatNumber(item.missedInbound)}`,
+        )} | Brand inbound >48h ${
+          unresolvedBrandInboundScanCompleted
+            ? formatNumber(item.missedInbound)
+            : "không xác định"
+        } | Thiếu tag ${
+          missingTagScanCompleted
+            ? formatNumber(item.invalidTaggingThreads)
+            : "không xác định"
+        }`,
       );
     }
   }
@@ -996,7 +1140,7 @@ function buildVietnameseReport(
   if (reportIssues.length === 0) {
     if (missingMemberTagAlertCount === 0) {
       lines.push(
-        "AI không tìm thấy email inbound chưa reply nào có khả năng cao đang thiếu member tag.",
+        "AI không tìm thấy Brand inbound nào có khả năng cao đang thiếu member tag hoặc tag sai quy tắc.",
       );
     }
   } else {
@@ -1058,6 +1202,7 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
   const members = await getWeeklyOutreachReportMembers();
   const days = getReportDays();
   const now = new Date();
+  const window = getReportWindow(days, now);
   const baseIssues = [
     ...findDuplicateLabels(members),
     ...(members.length === 0
@@ -1080,6 +1225,7 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
     const bookedCallLabel = resolveLabel(labelIndex, bookedCallLabelName);
     const metrics: MemberReportMetrics[] = [];
     const threadCache = new Map<string, Promise<GmailThread>>();
+    const countedBrandThreadIds = new Set<string>();
     const countedBookedThreadIds = new Set<string>();
 
     for (const member of members) {
@@ -1092,45 +1238,91 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
           categoryLabelResult.labels,
           categoryLabelNames,
           bookedCallLabel,
-          days,
-          now,
+          window,
           threadCache,
+          countedBrandThreadIds,
           countedBookedThreadIds,
         ),
       );
     }
 
+    let unresolvedBrandInboundScanCompleted = false;
+    let unresolvedBrandInboundModelUsed = "";
+    const unresolvedBrandInboundIssues: string[] = [];
+    const unresolvedBrandInboundWarnings: string[] = [];
+    if (categoryLabelResult.labels.brandInbound) {
+      try {
+        const scan = await collectOverdueTaggedBrandInbound({
+          accessToken,
+          brandInboundLabel: categoryLabelResult.labels.brandInbound,
+          members,
+          labelIndex,
+          now,
+        });
+        for (const item of metrics) {
+          item.missedInbound = scan.unresolvedByMember.get(item.member.id) ?? 0;
+        }
+        unresolvedBrandInboundScanCompleted = true;
+        unresolvedBrandInboundModelUsed = scan.modelUsed;
+        unresolvedBrandInboundWarnings.push(...scan.warnings);
+        if (scan.uncertain > 0) {
+          unresolvedBrandInboundWarnings.push(
+            `${scan.uncertain} tagged conversation(s) were uncertain and not counted.`,
+          );
+        }
+        console.info("[weekly-gmail-report] overdue-tagged-inbound AI scan completed", {
+          candidatesChecked: scan.candidatesChecked,
+          unresolved: Array.from(scan.unresolvedByMember.values()).reduce(
+            (sum, count) => sum + count,
+            0,
+          ),
+          uncertain: scan.uncertain,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[weekly-gmail-report] overdue-tagged-inbound AI scan failed: ${message}`);
+        unresolvedBrandInboundIssues.push(
+          `Không xác định được conversation đã tag nhưng chưa reply vì AI check thất bại (${message}).`,
+        );
+      }
+    }
+
     let missingMemberTagAlerts: MissingMemberTagAlert[] = [];
+    let missingTagScanCompleted = false;
     let missingTagModelUsed = "";
     const missingTagIssues: string[] = [];
     const missingTagWarnings: string[] = [];
-    try {
-      const creatorProfiles = await getCreatorProfilesForServer();
-      const memberLabelIds = new Set(
-        members
-          .map((member) => resolveLabel(labelIndex, member.gmailLabel)?.id ?? "")
-          .filter(Boolean),
-      );
-      const scan = await collectMissingMemberTagAlerts({
-        accessToken,
-        days,
-        members,
-        memberLabelIds,
-        profiles: creatorProfiles.profiles,
-      });
-      missingMemberTagAlerts = scan.alerts;
-      missingTagModelUsed = scan.modelUsed;
-      missingTagWarnings.push(...scan.warnings);
-      console.info("[weekly-gmail-report] missing-member-tag scan completed", {
-        candidatesChecked: scan.candidatesChecked,
-        alerts: scan.alerts.length,
-        exclusiveAssignmentsAvailable: buildExclusiveAssignments(creatorProfiles.profiles, members)
-          .length,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[weekly-gmail-report] missing-member-tag scan failed: ${message}`);
-      missingTagIssues.push(`Không chạy được AI check cho email thiếu member tag (${message}).`);
+    if (categoryLabelResult.labels.brandInbound) {
+      try {
+        const exclusiveCreators = await getExclusiveDashboardCreatorsForServer();
+        const memberLabelIds = new Set(
+          members
+            .map((member) => resolveLabel(labelIndex, member.gmailLabel)?.id ?? "")
+            .filter(Boolean),
+        );
+        const scan = await collectMissingMemberTagAlerts({
+          accessToken,
+          brandInboundLabel: categoryLabelResult.labels.brandInbound,
+          window,
+          members,
+          memberLabelIds,
+          creators: exclusiveCreators,
+        });
+        missingMemberTagAlerts = scan.alerts;
+        missingTagScanCompleted = true;
+        missingTagModelUsed = scan.modelUsed;
+        missingTagWarnings.push(...scan.warnings);
+        console.info("[weekly-gmail-report] missing-member-tag scan completed", {
+          candidatesChecked: scan.candidatesChecked,
+          alerts: scan.alerts.length,
+          exclusiveCreatorsAvailable: exclusiveCreators.length,
+          exclusiveCreatorsMatched: scan.exclusiveCreatorsMatched,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[weekly-gmail-report] missing-member-tag scan failed: ${message}`);
+        missingTagIssues.push(`Không chạy được AI check cho email thiếu member tag (${message}).`);
+      }
     }
 
     for (const alert of missingMemberTagAlerts) {
@@ -1147,6 +1339,7 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
         ? []
         : [`Không tìm thấy Gmail booked-call label "${bookedCallLabelName}".`]),
       ...metrics.flatMap((item) => item.issues),
+      ...unresolvedBrandInboundIssues,
       ...missingTagIssues,
     ];
     const content = buildVietnameseReport(
@@ -1155,8 +1348,10 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
       narrative,
       issues,
       missingMemberTagAlerts.length,
+      missingTagScanCompleted,
+      unresolvedBrandInboundScanCompleted,
       days,
-      now,
+      window,
     );
     const mentionUserIds = members
       .map((member) => member.discordUserId.trim())
@@ -1176,9 +1371,17 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
       posted: true,
       memberCount: members.length,
       totals,
-      openRouterUsed: Boolean(narrative.modelUsed || missingTagModelUsed),
-      openRouterModel: narrative.modelUsed || missingTagModelUsed,
-      issues: [...narrative.warnings, ...missingTagWarnings, ...issues],
+      openRouterUsed: Boolean(
+        narrative.modelUsed || missingTagModelUsed || unresolvedBrandInboundModelUsed
+      ),
+      openRouterModel:
+        narrative.modelUsed || missingTagModelUsed || unresolvedBrandInboundModelUsed,
+      issues: [
+        ...narrative.warnings,
+        ...unresolvedBrandInboundWarnings,
+        ...missingTagWarnings,
+        ...issues,
+      ],
     };
   } catch (error) {
     if (error instanceof GmailAuthError) {

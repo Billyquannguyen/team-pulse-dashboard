@@ -957,7 +957,7 @@ function MonthlyOpportunityRefreshControl() {
 
   const startRefresh = async () => {
     const confirmed = window.confirm(
-      "Start the monthly opportunity refresh now? It will scan Gmail, update the existing Opportunity Intelligence Sheet, create a safety backup, and post the result to Discord.",
+      "Start the monthly opportunity refresh now? It will process the previous completed calendar month, update the existing Opportunity Intelligence Sheet, create a safety backup, and post the result to Discord.",
     );
     if (!confirmed) return;
 
@@ -1001,7 +1001,7 @@ function MonthlyOpportunityRefreshControl() {
           </div>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
             Runs automatically on the first day of each month. Admins can also run it here. Results
-            go to Discord only.
+            always cover the previous completed calendar month and go to Discord only.
           </p>
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
             <span>{state?.stageLabel || "No dashboard run recorded"}</span>
@@ -1013,6 +1013,7 @@ function MonthlyOpportunityRefreshControl() {
                   : ""}
             </span>
             {state && <span>{state.emailsScanned.toLocaleString()} emails scanned</span>}
+            {state?.reportPeriodLabel && <span>Report: {state.reportPeriodLabel}</span>}
           </div>
           {(actionError || state?.error) && (
             <p className="mt-3 rounded-2xl bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">

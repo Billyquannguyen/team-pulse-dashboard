@@ -145,6 +145,11 @@ async function prepareMonthlyArtifacts(options) {
   const warnings = collectWarnings(ingestLog, summary);
   const metrics = parseIngestionMetrics(ingestLog);
   const decisionMetrics = await buildDecisionMetrics({ exportDir, backupManifest, metrics });
+  const reportPeriod = {
+    label: process.env.OPPORTUNITY_REPORT_PERIOD_LABEL?.trim() || "Previous completed month",
+    start: process.env.OPPORTUNITY_REPORT_PERIOD_START?.trim() || "",
+    endExclusive: process.env.OPPORTUNITY_REPORT_PERIOD_END_EXCLUSIVE?.trim() || "",
+  };
 
   const packagePath = path.join(options.outputDir, PACKAGE_NAME);
   const summaryPath = path.join(options.outputDir, SUMMARY_NAME);
@@ -159,6 +164,7 @@ async function prepareMonthlyArtifacts(options) {
     decisionMetrics,
     warnings,
     packagePath,
+    reportPeriod,
   });
 
   await writeFile(summaryPath, report);
@@ -176,6 +182,7 @@ async function prepareMonthlyArtifacts(options) {
         decisionMetrics,
         tierCounts: summary.tierCounts ?? {},
         warnings,
+        reportPeriod,
       },
       null,
       2,
@@ -211,6 +218,7 @@ function buildMonthlyReport({
   decisionMetrics,
   warnings,
   packagePath,
+  reportPeriod,
 }) {
   const tierCounts = summary.tierCounts ?? {};
   const outputCounts = summary.outputCounts ?? {};
@@ -221,6 +229,7 @@ function buildMonthlyReport({
   return `# Monthly GPT Refresh Summary
 
 Run date: ${new Date().toISOString()}
+Report period: ${reportPeriod.label} (${reportPeriod.start} to ${reportPeriod.endExclusive}, end exclusive)
 
 ## Gmail Ingestion
 
@@ -664,6 +673,7 @@ function buildDiscordMessage(artifact) {
     const message = [
       "**Team Billion Opportunity Intelligence monthly refresh is ready**",
       "",
+      `Report period: ${artifact.reportPeriod?.label || "Previous completed month"}`,
       `Emails scanned: ${formatMetric(metrics.emailsScanned)}`,
       `New opportunities: ${formatMetric(metrics.opportunitiesCreated)}`,
       `Updated opportunities: ${formatMetric(metrics.opportunitiesUpdated)}`,

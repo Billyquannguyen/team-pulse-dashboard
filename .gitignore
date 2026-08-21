@@ -35,3 +35,4 @@ dist-ssr
 .opportunity-ingestion/
 .brand-contact-scan/
 .env.opportunity-ingestion
+/.swc

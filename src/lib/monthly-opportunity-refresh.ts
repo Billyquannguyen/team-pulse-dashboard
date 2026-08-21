@@ -17,6 +17,9 @@ export type MonthlyRefreshState = {
   updatedAt: string;
   finishedAt: string;
   startedBy: string;
+  reportPeriodLabel: string;
+  reportPeriodStart: string;
+  reportPeriodEndExclusive: string;
   emailsScanned: number;
   pagesScanned: number;
   opportunitiesCreated: number;
