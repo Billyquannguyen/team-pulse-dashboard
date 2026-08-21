@@ -22,20 +22,6 @@ export type GmailDraftResult = {
   message: string;
 };
 
-const BRAND_FINDER_GMAIL_CLIENT_ID_ENV = "BRAND_FINDER_GMAIL_CLIENT_ID";
-const BRAND_FINDER_GMAIL_CLIENT_SECRET_ENV = "BRAND_FINDER_GMAIL_CLIENT_SECRET";
-const BRAND_FINDER_GMAIL_REFRESH_TOKEN_ENV = "BRAND_FINDER_GMAIL_REFRESH_TOKEN";
-
-function requiredBrandFinderGmailEnv(name: string) {
-  const value = process.env[name] ?? "";
-  if (!value) {
-    throw new Error(
-      `Missing ${name}. Add the Brand Finder Gmail OAuth variables in Vercel Environment Variables before creating Gmail drafts.`,
-    );
-  }
-  return value;
-}
-
 function sanitizeHeader(value: string) {
   return value.replace(/[\r\n]+/g, " ").trim();
 }
@@ -49,29 +35,8 @@ function toBase64Url(value: string) {
 }
 
 async function getGmailAccessToken() {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      client_id: requiredBrandFinderGmailEnv(BRAND_FINDER_GMAIL_CLIENT_ID_ENV),
-      client_secret: requiredBrandFinderGmailEnv(BRAND_FINDER_GMAIL_CLIENT_SECRET_ENV),
-      refresh_token: requiredBrandFinderGmailEnv(BRAND_FINDER_GMAIL_REFRESH_TOKEN_ENV),
-      grant_type: "refresh_token",
-    }),
-  });
-
-  const payload = (await response.json().catch(() => null)) as {
-    access_token?: string;
-    error?: string;
-  } | null;
-
-  if (!response.ok || !payload?.access_token) {
-    throw new Error(payload?.error || "Gmail could not create an access token.");
-  }
-
-  return payload.access_token;
+  const { getMasterGmailAccessToken } = await import("@/lib/gmail-oauth.server");
+  return getMasterGmailAccessToken();
 }
 
 async function getDefaultGmailSignature(accessToken: string) {

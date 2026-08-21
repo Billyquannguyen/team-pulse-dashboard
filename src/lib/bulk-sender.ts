@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 const draftInputSchema = z.object({
@@ -208,34 +208,11 @@ async function rememberDuplicate(fingerprint: string) {
   await redisCommand<"OK">(["SET", duplicateKey(fingerprint), "1", "EX", JOB_TTL_SECONDS]);
 }
 
-function requiredGmailEnv(name: string) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`Missing ${name} in Vercel Environment Variables.`);
-  return value;
-}
+const getGmailOAuthServer = createServerOnlyFn(async () => import("@/lib/gmail-oauth.server"));
 
 async function getGmailAccessToken() {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: requiredGmailEnv("BRAND_FINDER_GMAIL_CLIENT_ID"),
-      client_secret: requiredGmailEnv("BRAND_FINDER_GMAIL_CLIENT_SECRET"),
-      refresh_token: requiredGmailEnv("BRAND_FINDER_GMAIL_REFRESH_TOKEN"),
-      grant_type: "refresh_token",
-    }),
-  });
-  const payload = (await response.json().catch(() => null)) as {
-    access_token?: string;
-    error?: string;
-    error_description?: string;
-  } | null;
-  if (!response.ok || !payload?.access_token) {
-    throw new Error(
-      payload?.error_description ?? payload?.error ?? "Gmail could not create an access token.",
-    );
-  }
-  return payload.access_token;
+  const { getMasterGmailAccessToken } = await getGmailOAuthServer();
+  return getMasterGmailAccessToken();
 }
 
 async function gmailJson<T>(accessToken: string, path: string) {

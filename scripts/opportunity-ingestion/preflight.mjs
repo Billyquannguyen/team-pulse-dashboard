@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const DEFAULT_QUERY =
   'in:inbox -in:spam -in:trash -from:quan@stride-social.com newer_than:45d {campaign brief creator collaboration partnership affiliate song "music promotion" UGC whitelisting "paid usage" ambassador gifted PR influencer creators sponsorship collab "paid collaboration" partnership sponsorship KOL whitelisting "Spark Ads"}';
@@ -34,14 +35,16 @@ const SCOPES = {
   sheets: "https://www.googleapis.com/auth/spreadsheets",
 };
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  runOpportunityPreflight(process.argv.slice(2)).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
 
-async function main() {
+export async function runOpportunityPreflight(args = []) {
   loadEnvFiles([".env", ".env.local", ".env.opportunity-ingestion"]);
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseArgs(args);
 
   if (options.help) {
     printHelp();
@@ -81,7 +84,7 @@ async function main() {
     spreadsheetMetadata ??= await sheets.metadata();
     const sheetNames = getSheetNames(spreadsheetMetadata);
     if (sheetNames.length === 0) throw new Error("Spreadsheet has no tabs to snapshot.");
-    const backupDir = path.join(process.cwd(), ".opportunity-ingestion", "backups");
+    const backupDir = path.join(runtimeRoot(), ".opportunity-ingestion", "backups");
     const testFile = path.join(backupDir, "preflight-backup-test.json");
     await mkdir(backupDir, { recursive: true });
     await writeFile(
@@ -98,7 +101,8 @@ async function main() {
     );
     const roundTrip = JSON.parse(await readFile(testFile, "utf8"));
     await rm(testFile, { force: true });
-    if (roundTrip.kind !== "backup-preflight-test") throw new Error("Backup folder write/read round trip failed.");
+    if (roundTrip.kind !== "backup-preflight-test")
+      throw new Error("Backup folder write/read round trip failed.");
     return `Sheets-only backup ready. ${sheetNames.length} tabs can be snapshotted locally.`;
   });
 
@@ -136,7 +140,7 @@ async function main() {
   });
 
   await runCheck(checks, "Resume checkpoint system operational", async () => {
-    const checkpointDir = path.join(process.cwd(), ".opportunity-ingestion", "preflight");
+    const checkpointDir = path.join(runtimeRoot(), ".opportunity-ingestion", "preflight");
     const checkpointFile = path.join(checkpointDir, "checkpoint-test.json");
     const payload = {
       kind: "preflight-checkpoint-test",
@@ -146,7 +150,8 @@ async function main() {
     await writeFile(checkpointFile, JSON.stringify(payload, null, 2));
     const roundTrip = JSON.parse(await readFile(checkpointFile, "utf8"));
     await rm(checkpointFile, { force: true });
-    if (roundTrip.kind !== payload.kind) throw new Error("Checkpoint read/write round trip failed.");
+    if (roundTrip.kind !== payload.kind)
+      throw new Error("Checkpoint read/write round trip failed.");
     return "Local checkpoint folder can be written and read.";
   });
 
@@ -159,7 +164,9 @@ async function main() {
     const diagnostics = [];
     for (const tab of INTELLIGENCE_TABS) {
       const row = await sheets.valuesGet(`${quoteSheet(tab)}!A2:ZZ2`, "FORMULA");
-      const formulas = (row.values?.[0] ?? []).filter((cell) => String(cell).trim().startsWith("="));
+      const formulas = (row.values?.[0] ?? []).filter((cell) =>
+        String(cell).trim().startsWith("="),
+      );
       if (formulas.length === 0) {
         throw new Error(`${tab} row 2 has no formulas to refresh/extend.`);
       }
@@ -178,8 +185,12 @@ async function main() {
   printReport({ startedAt, finishedAt, checks, query: config.query });
 
   if (failed.length > 0) {
-    process.exitCode = 1;
+    throw new Error(
+      `Opportunity preflight failed: ${failed.map((check) => check.name).join(", ")}`,
+    );
   }
+
+  return { startedAt, finishedAt, checks, query: config.query };
 }
 
 function parseArgs(args) {
@@ -224,9 +235,9 @@ Drive API is not required because rollback uses a local Sheets API snapshot.
 function loadConfig(options) {
   const missing = [];
   const config = {
-    gmailClientId: env("GMAIL_CLIENT_ID", missing),
-    gmailClientSecret: env("GMAIL_CLIENT_SECRET", missing),
-    gmailRefreshToken: env("GMAIL_REFRESH_TOKEN", missing),
+    gmailClientId: env("MASTER_GMAIL_CLIENT_ID", missing),
+    gmailClientSecret: env("MASTER_GMAIL_CLIENT_SECRET", missing),
+    gmailRefreshToken: env("MASTER_GMAIL_REFRESH_TOKEN", missing),
     serviceAccountEmail: env("GOOGLE_SERVICE_ACCOUNT_EMAIL", missing),
     privateKey: normalizePrivateKey(env("GOOGLE_PRIVATE_KEY", missing)),
     spreadsheetId: env("OPPORTUNITY_DATABASE_SPREADSHEET_ID", missing),
@@ -309,7 +320,9 @@ function createGmailTokenProvider(config) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.access_token) {
-      throw new Error(`Gmail OAuth failed (${response.status}): ${result.error_description ?? result.error ?? "No access token returned"}`);
+      throw new Error(
+        `Gmail OAuth failed (${response.status}): ${result.error_description ?? result.error ?? "No access token returned"}`,
+      );
     }
     cached = {
       accessToken: result.access_token,
@@ -334,7 +347,9 @@ function createGoogleTokenProvider(config) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.access_token) {
-      throw new Error(`Google service account auth failed (${response.status}): ${result.error_description ?? result.error ?? "No access token returned"}`);
+      throw new Error(
+        `Google service account auth failed (${response.status}): ${result.error_description ?? result.error ?? "No access token returned"}`,
+      );
     }
     cached = {
       accessToken: result.access_token,
@@ -427,20 +442,20 @@ async function googleFetch(url, tokenProvider, init = {}) {
       await sleep(Number.isFinite(retryAfter) ? retryAfter * 1000 : 1000 * 2 ** attempt);
       continue;
     }
-    throw new Error(`Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`);
+    throw new Error(
+      `Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`,
+    );
   }
   throw new Error(`Google API failed after retries: ${url.pathname}`);
 }
 
 function getSheetNames(metadata) {
-  return (metadata.sheets ?? [])
-    .map((sheet) => sheet.properties?.title)
-    .filter(Boolean);
+  return (metadata.sheets ?? []).map((sheet) => sheet.properties?.title).filter(Boolean);
 }
 
 function loadEnvFiles(files) {
   for (const file of files) {
-    const fullPath = path.resolve(process.cwd(), file);
+    const fullPath = path.resolve(runtimeRoot(), file);
     if (!existsSync(fullPath)) continue;
     const raw = readFileSyncSafe(fullPath);
     for (const line of raw.split(/\r?\n/)) {
@@ -453,6 +468,10 @@ function loadEnvFiles(files) {
   }
 }
 
+function runtimeRoot() {
+  return process.env.OPPORTUNITY_RUNTIME_ROOT?.trim() || process.cwd();
+}
+
 function readFileSyncSafe(file) {
   return existsSync(file) ? Buffer.from(readFileSync(file)).toString("utf8") : "";
 }
@@ -463,13 +482,20 @@ function normalizePrivateKey(value) {
 
 function pemToArrayBuffer(pem) {
   return Buffer.from(
-    pem.replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\s/g, ""),
+    pem
+      .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+      .replace(/-----END PRIVATE KEY-----/g, "")
+      .replace(/\s/g, ""),
     "base64",
   );
 }
 
 function base64Url(input) {
-  return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function quoteSheet(name) {

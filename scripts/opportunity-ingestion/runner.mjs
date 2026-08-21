@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile, rm, readdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const DEFAULT_QUERY =
   'in:inbox -in:spam -in:trash -from:quan@stride-social.com newer_than:45d {campaign brief creator collaboration partnership affiliate song "music promotion" UGC whitelisting "paid usage" ambassador gifted PR influencer creators sponsorship collab "paid collaboration" partnership sponsorship KOL whitelisting "Spark Ads"}';
@@ -185,14 +186,16 @@ const NON_ACTIONABLE_MARKETING_PATTERNS = [
   /\b(security alert|verify your account|password reset|receipt|invoice|delivery status notification|out of office|calendar invitation)\b/i,
 ];
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  runOpportunityIngestion(process.argv.slice(2)).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
 
-async function main() {
+export async function runOpportunityIngestion(args = []) {
   loadEnvFiles([".env", ".env.local", ".env.opportunity-ingestion"]);
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseArgs(args);
 
   if (options.help) {
     printHelp();
@@ -216,7 +219,11 @@ async function main() {
     return;
   }
 
-  console.log(options.dryRun ? "DRY RUN: no sheet writes will happen." : "LIVE RUN: sheet writes are enabled.");
+  console.log(
+    options.dryRun
+      ? "DRY RUN: no sheet writes will happen."
+      : "LIVE RUN: sheet writes are enabled.",
+  );
   console.log(`Database: ${config.spreadsheetId}`);
   console.log(`Query: ${config.query}`);
 
@@ -256,11 +263,13 @@ async function main() {
   }
 
   let processedThisRun = 0;
+  let pagesThisRun = 0;
   let hasMore = true;
 
   while (hasMore) {
     if (config.maxEmails && state.emailsScanned >= config.maxEmails) break;
     if (config.maxPages && state.pagesScanned >= config.maxPages) break;
+    if (options.maxRunPages && pagesThisRun >= options.maxRunPages) break;
 
     const page = await gmail.searchMessages({
       query: config.query,
@@ -270,6 +279,7 @@ async function main() {
 
     const messageIds = (page.messages ?? []).map((message) => message.id).filter(Boolean);
     state.pagesScanned += 1;
+    pagesThisRun += 1;
     state.nextPageToken = page.nextPageToken ?? "";
 
     if (messageIds.length === 0) {
@@ -285,7 +295,9 @@ async function main() {
     const batches = chunk(unreadIds, config.batchSize);
 
     for (const batch of batches) {
-      const messages = await mapWithConcurrency(batch, config.concurrency, (id) => gmail.getMessage(id));
+      const messages = await mapWithConcurrency(batch, config.concurrency, (id) =>
+        gmail.getMessage(id),
+      );
       const plan = await createWritePlan(messages, {
         aliasMap,
         indexes,
@@ -326,13 +338,18 @@ async function main() {
   if (!options.dryRun) {
     await refreshIntelligenceTabs(sheets, workbook.metadata, 10000);
     state.finishedAt = new Date().toISOString();
-    state.done = !state.nextPageToken || Boolean(config.maxEmails || config.maxPages);
+    state.done = !state.nextPageToken;
     await saveCheckpoint(config, state);
     await updateIngestionLog(sheets, workbook, state);
     await saveCheckpoint(config, state);
   }
 
   printSummary(state, options);
+  return state;
+}
+
+function runtimeRoot() {
+  return process.env.OPPORTUNITY_RUNTIME_ROOT?.trim() || process.cwd();
 }
 
 function parseArgs(args) {
@@ -345,11 +362,12 @@ function parseArgs(args) {
     help: false,
     maxEmails: 0,
     maxPages: 0,
+    maxRunPages: 0,
     pageSize: 100,
     batchSize: 50,
     concurrency: 3,
     query: DEFAULT_QUERY,
-    checkpointPath: path.join(process.cwd(), CHECKPOINT_DIR, CHECKPOINT_FILE),
+    checkpointPath: path.join(runtimeRoot(), CHECKPOINT_DIR, CHECKPOINT_FILE),
     checkpointExplicit: false,
     updateExisting: true,
   };
@@ -364,8 +382,7 @@ function parseArgs(args) {
     else if (arg === "--validate-sample") {
       options.validateSample = true;
       options.dryRun = true;
-    }
-    else if (arg === "--help" || arg === "-h") options.help = true;
+    } else if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--no-update-existing") options.updateExisting = false;
     else if (arg === "--query") {
       options.query = next;
@@ -375,6 +392,9 @@ function parseArgs(args) {
       index += 1;
     } else if (arg === "--max-pages") {
       options.maxPages = Number(next);
+      index += 1;
+    } else if (arg === "--max-run-pages") {
+      options.maxRunPages = Number(next);
       index += 1;
     } else if (arg === "--page-size") {
       options.pageSize = Number(next);
@@ -401,12 +421,16 @@ function loadConfig(options) {
   const missing = [];
   let checkpointPath = options.checkpointPath;
   if (!options.checkpointExplicit && !options.dryRun && options.maxEmails > 0) {
-    checkpointPath = path.join(process.cwd(), CHECKPOINT_DIR, `checkpoint.max-${options.maxEmails}.json`);
+    checkpointPath = path.join(
+      runtimeRoot(),
+      CHECKPOINT_DIR,
+      `checkpoint.max-${options.maxEmails}.json`,
+    );
   }
   const config = {
-    gmailClientId: env("GMAIL_CLIENT_ID", missing),
-    gmailClientSecret: env("GMAIL_CLIENT_SECRET", missing),
-    gmailRefreshToken: env("GMAIL_REFRESH_TOKEN", missing),
+    gmailClientId: env("MASTER_GMAIL_CLIENT_ID", missing),
+    gmailClientSecret: env("MASTER_GMAIL_CLIENT_SECRET", missing),
+    gmailRefreshToken: env("MASTER_GMAIL_REFRESH_TOKEN", missing),
     serviceAccountEmail: env("GOOGLE_SERVICE_ACCOUNT_EMAIL", missing),
     privateKey: normalizePrivateKey(env("GOOGLE_PRIVATE_KEY", missing)),
     spreadsheetId: env("OPPORTUNITY_DATABASE_SPREADSHEET_ID", missing),
@@ -449,6 +473,7 @@ Options:
   --dry-run                 Read Gmail and plan writes without updating Sheets
   --max-emails <number>     Stop after N scanned candidate emails
   --max-pages <number>      Stop after N Gmail search pages
+  --max-run-pages <number>  Process at most N pages now, then preserve the resumable checkpoint
   --page-size <number>      Gmail search page size, max 500
   --batch-size <number>     Message write batch size
   --concurrency <number>    Parallel Gmail reads, default 3
@@ -467,7 +492,9 @@ async function validateCredentials(config) {
   console.log(`Gmail client ID: ${maskValue(config.gmailClientId)}`);
   console.log(`Gmail refresh token: ${maskValue(config.gmailRefreshToken)}`);
   console.log(`Service account: ${config.serviceAccountEmail}`);
-  console.log(`Private key loaded: ${config.privateKey.includes("BEGIN PRIVATE KEY") ? "yes" : "no"}`);
+  console.log(
+    `Private key loaded: ${config.privateKey.includes("BEGIN PRIVATE KEY") ? "yes" : "no"}`,
+  );
   console.log(`Database spreadsheet ID: ${config.spreadsheetId}`);
   console.log(`OpenRouter API key: ${maskValue(config.openRouter.apiKey)}`);
   console.log(`OpenRouter default model: ${config.openRouter.defaultModel}`);
@@ -525,7 +552,7 @@ async function resetCheckpoints(config, options) {
     return;
   }
 
-  const checkpointDir = path.join(process.cwd(), CHECKPOINT_DIR);
+  const checkpointDir = path.join(runtimeRoot(), CHECKPOINT_DIR);
   if (!existsSync(checkpointDir)) {
     console.log("No checkpoint folder found. Nothing to reset.");
     return;
@@ -536,7 +563,9 @@ async function resetCheckpoints(config, options) {
   for (const file of checkpointFiles) {
     await rm(path.join(checkpointDir, file), { force: true });
   }
-  console.log(`Removed ${checkpointFiles.length} local checkpoint file(s). Sheet data was not changed.`);
+  console.log(
+    `Removed ${checkpointFiles.length} local checkpoint file(s). Sheet data was not changed.`,
+  );
 }
 
 function createInitialCheckpoint(runId, startedAt, query) {
@@ -591,7 +620,10 @@ async function saveCheckpoint(config, state) {
 }
 
 function createRunId() {
-  const stamp = new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[-:T.Z]/g, "")
+    .slice(0, 14);
   return `RUN-${stamp}-FULL`;
 }
 
@@ -636,7 +668,9 @@ function createSheetsTokenProvider(config) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.access_token) {
-      throw new Error(`Google Sheets service account auth failed (${response.status}): ${formatGoogleError(result)}`);
+      throw new Error(
+        `Google Sheets service account auth failed (${response.status}): ${formatGoogleError(result)}`,
+      );
     }
     cached = {
       accessToken: result.access_token,
@@ -746,11 +780,15 @@ async function googleFetch(url, tokenProvider, init = {}) {
     if (response.ok) return body;
     if ([429, 500, 502, 503, 504].includes(response.status) && attempt < maxAttempts - 1) {
       const delayMs = retryDelayMs(response, url, init, attempt);
-      console.warn(`Google API asked us to slow down (${response.status}) on ${url.pathname}. Waiting ${Math.round(delayMs / 1000)}s before retry ${attempt + 2}/${maxAttempts}.`);
+      console.warn(
+        `Google API asked us to slow down (${response.status}) on ${url.pathname}. Waiting ${Math.round(delayMs / 1000)}s before retry ${attempt + 2}/${maxAttempts}.`,
+      );
       await sleep(delayMs);
       continue;
     }
-    throw new Error(`Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`);
+    throw new Error(
+      `Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`,
+    );
   }
   throw new Error(`Google API failed after retries: ${url.pathname}`);
 }
@@ -758,7 +796,9 @@ async function googleFetch(url, tokenProvider, init = {}) {
 function retryDelayMs(response, url, init, attempt) {
   const retryAfter = Number(response.headers.get("retry-after"));
   if (Number.isFinite(retryAfter) && retryAfter > 0) return retryAfter * 1000;
-  const isSheetsWrite = url.hostname.includes("sheets.googleapis.com") && String(init.method ?? "GET").toUpperCase() !== "GET";
+  const isSheetsWrite =
+    url.hostname.includes("sheets.googleapis.com") &&
+    String(init.method ?? "GET").toUpperCase() !== "GET";
   if (response.status === 429 && isSheetsWrite) return 65_000 + attempt * 5_000;
   return Math.min(30_000, 1000 * 2 ** attempt);
 }
@@ -775,7 +815,8 @@ async function loadWorkbook(sheets) {
     `${quoteSheet(TAB_NAMES.alias)}!A1:G`,
   ];
   const result = await sheets.batchGet(ranges);
-  const [opportunities, organizations, brands, contacts, review, log, alias] = result.valueRanges.map(parseTable);
+  const [opportunities, organizations, brands, contacts, review, log, alias] =
+    result.valueRanges.map(parseTable);
   return { metadata, opportunities, organizations, brands, contacts, review, log, alias };
 }
 
@@ -803,7 +844,8 @@ function buildOpportunityDuplicateIndex(table) {
   for (const row of table.rows) {
     const keys = buildExistingOpportunityDuplicateKeys(row, headerMap);
     for (const key of keys) {
-      if (!index.has(key)) index.set(key, getCell(row, headerMap, "Opportunity ID") || "existing opportunity");
+      if (!index.has(key))
+        index.set(key, getCell(row, headerMap, "Opportunity ID") || "existing opportunity");
     }
   }
   return index;
@@ -817,7 +859,9 @@ function buildExistingOpportunityDuplicateKeys(row, headerMap) {
   const summary = getCell(row, headerMap, "Campaign Summary");
   return unique([
     subjectDuplicateKey(subject),
-    brandName && sourceName && date ? `brand-source-week:${normalizeKey(brandName)}:${normalizeKey(sourceName)}:${weekKey(date)}` : "",
+    brandName && sourceName && date
+      ? `brand-source-week:${normalizeKey(brandName)}:${normalizeKey(sourceName)}:${weekKey(date)}`
+      : "",
     brandName && summary ? `brand-summary:${normalizeKey(brandName)}:${summaryKey(summary)}` : "",
   ]);
 }
@@ -926,14 +970,19 @@ async function createWritePlan(messages, context) {
         const existing = context.workbook.opportunities.rows[sourceIndex.rowIndex] ?? [];
         plan.opportunityUpdates.push({
           rowNumber: sourceIndex.rowNumber,
-          values: mergeOpportunityRows(existing, opportunityRow, context.workbook.opportunities.headers),
+          values: mergeOpportunityRows(
+            existing,
+            opportunityRow,
+            context.workbook.opportunities.headers,
+          ),
         });
         context.state.relevantEmailsFound += 1;
         recordClassification(context.state, {
           email,
           classification: "Opportunity Created",
           reason: extracted.reasonCode,
-          detail: "Source Email ID already exists, so the existing opportunity row will be updated instead of duplicated.",
+          detail:
+            "Source Email ID already exists, so the existing opportunity row will be updated instead of duplicated.",
           brandName: extracted.brandName,
           sourceOrganizationName: extracted.sourceOrganizationName,
           opportunityType: extracted.opportunityType,
@@ -943,7 +992,9 @@ async function createWritePlan(messages, context) {
         continue;
       }
 
-      const duplicate = sourceIndex ? { reason: RELEVANCE_REASONS.duplicate, detail: "Source Email ID already exists." } : findDuplicateOpportunity(extracted, context);
+      const duplicate = sourceIndex
+        ? { reason: RELEVANCE_REASONS.duplicate, detail: "Source Email ID already exists." }
+        : findDuplicateOpportunity(extracted, context);
 
       if (duplicate) {
         recordClassification(context.state, {
@@ -1006,7 +1057,8 @@ async function extractOpportunity(email, aliasMap, openRouter) {
     return buildNonOpportunityResult(email, {
       classification: "Skipped Irrelevant",
       reasonCode: RELEVANCE_REASONS.internal,
-      reasonDetail: "Operational, personal, billing, or account email without creator opportunity context.",
+      reasonDetail:
+        "Operational, personal, billing, or account email without creator opportunity context.",
     });
   }
 
@@ -1039,7 +1091,8 @@ async function extractOpportunity(email, aliasMap, openRouter) {
     return buildNonOpportunityResult(email, {
       classification: "Skipped Irrelevant",
       reasonCode: RELEVANCE_REASONS.noOpportunity,
-      reasonDetail: "Gmail result did not contain a clear creator, campaign, brand, or commercial opportunity signal.",
+      reasonDetail:
+        "Gmail result did not contain a clear creator, campaign, brand, or commercial opportunity signal.",
     });
   }
 
@@ -1057,7 +1110,11 @@ async function extractOpportunity(email, aliasMap, openRouter) {
   });
 
   if (shouldUseOpenRouterReview({ brandName, source, initialValidation })) {
-    aiReview = await reviewAmbiguousEmailWithOpenRouter(email, { sender, brandName, source }, openRouter);
+    aiReview = await reviewAmbiguousEmailWithOpenRouter(
+      email,
+      { sender, brandName, source },
+      openRouter,
+    );
     if (aiReview.notOpportunity) {
       return {
         ...buildNonOpportunityResult(email, {
@@ -1117,7 +1174,9 @@ async function extractOpportunity(email, aliasMap, openRouter) {
   });
   if (aiReview.attempted && !aiReview.approved) {
     entityValidation.valid = false;
-    entityValidation.reasons.push(aiReview.reason || "OpenRouter could not verify the extracted entities.");
+    entityValidation.reasons.push(
+      aiReview.reason || "OpenRouter could not verify the extracted entities.",
+    );
   }
   if (
     aiReview.approved &&
@@ -1175,7 +1234,13 @@ async function extractOpportunity(email, aliasMap, openRouter) {
     exclusivity: extractExclusivity(text),
     timeline: extractTimeline(text),
     applicationProcess: extractApplicationProcess(text),
-    matchingKeywords: buildKeywords(brandName, sourceOrganizationName, opportunityType, creator, text),
+    matchingKeywords: buildKeywords(
+      brandName,
+      sourceOrganizationName,
+      opportunityType,
+      creator,
+      text,
+    ),
     confidenceScore,
     needsHumanReview: review.issues.length > 0,
     reviewNotes: aiReview.approved
@@ -1184,7 +1249,8 @@ async function extractOpportunity(email, aliasMap, openRouter) {
     reviewIssues: review.issues,
     brandPreferenceTags: buildPreferenceTags(creator, opportunityType, text),
     creatorMatchTags: buildCreatorMatchTags(creator, opportunityType, text),
-    requirementConfidence: confidenceScore >= 85 ? "High" : confidenceScore >= 70 ? "Medium" : "Low",
+    requirementConfidence:
+      confidenceScore >= 85 ? "High" : confidenceScore >= 70 ? "Medium" : "Low",
     commercialQuality: commercial.quality,
     budgetRating: commercial.rating,
     budgetFloorConcern: commercial.budgetFloorConcern,
@@ -1267,26 +1333,49 @@ function evaluateOpportunityIntent({
   const hasKnownSource = sourceOrganizationName !== "Unknown";
   const hasBudget = budget.amount !== "Unknown";
   const hasDeliverables = deliverables !== "Unknown";
-  const hasCreatorRequirements = Object.values(creator).some((value) => value && value !== "Not specified");
+  const hasCreatorRequirements = Object.values(creator).some(
+    (value) => value && value !== "Not specified",
+  );
   const hasFixedFee = budget.fixedFeePresent === "Yes";
-  const hasBriefLanguage = /\b(brief|creator brief|brand brief|campaign brief|requirements?|deliverables?|casting|looking for)\b/.test(lower);
-  const hasCampaignLanguage = /\b(campaign|collaboration|partnership|sponsorship|opportunity|promotion|ambassador|whitelisting|usage rights|spark ads?|ugc)\b/.test(lower);
-  const hasPaidLanguage = /\b(paid|budget|rate|fee|flat rate|fixed fee|offer|payment|compensation)\b/.test(lower);
-  const isNewsletterish = /\b(newsletter|digest|roundup|webinar|report|case study|blog|product update|manage preferences|view in browser)\b/.test(lower);
+  const hasBriefLanguage =
+    /\b(brief|creator brief|brand brief|campaign brief|requirements?|deliverables?|casting|looking for)\b/.test(
+      lower,
+    );
+  const hasCampaignLanguage =
+    /\b(campaign|collaboration|partnership|sponsorship|opportunity|promotion|ambassador|whitelisting|usage rights|spark ads?|ugc)\b/.test(
+      lower,
+    );
+  const hasPaidLanguage =
+    /\b(paid|budget|rate|fee|flat rate|fixed fee|offer|payment|compensation)\b/.test(lower);
+  const isNewsletterish =
+    /\b(newsletter|digest|roundup|webinar|report|case study|blog|product update|manage preferences|view in browser)\b/.test(
+      lower,
+    );
   const hasUnsubscribe = /\bunsubscribe\b/.test(lower);
-  const actionableContext = hasBrand || hasKnownSource || hasCreatorRequirements || hasBudget || hasDeliverables;
-  const realOpportunityContext = (hasBrand || hasKnownSource) && (hasCreatorRequirements || hasBudget || hasDeliverables || hasBriefLanguage);
-  const nonActionableMarketing = isNonActionableMarketingEmail(lower) && !hasFixedFee && !hasDeliverables && !hasBriefLanguage;
+  const actionableContext =
+    hasBrand || hasKnownSource || hasCreatorRequirements || hasBudget || hasDeliverables;
+  const realOpportunityContext =
+    (hasBrand || hasKnownSource) &&
+    (hasCreatorRequirements || hasBudget || hasDeliverables || hasBriefLanguage);
+  const nonActionableMarketing =
+    isNonActionableMarketingEmail(lower) && !hasFixedFee && !hasDeliverables && !hasBriefLanguage;
 
   if (nonActionableMarketing) {
     return {
       classification: "Skipped Irrelevant",
       reasonCode: RELEVANCE_REASONS.newsletter,
-      reasonDetail: "Newsletter, no-reply, account, or marketing-style email without actionable creator brief details.",
+      reasonDetail:
+        "Newsletter, no-reply, account, or marketing-style email without actionable creator brief details.",
     };
   }
 
-  if (isNewsletterish && (hasUnsubscribe || sourceStrength === "Newsletter") && !hasPaidLanguage && !hasBudget && !hasDeliverables) {
+  if (
+    isNewsletterish &&
+    (hasUnsubscribe || sourceStrength === "Newsletter") &&
+    !hasPaidLanguage &&
+    !hasBudget &&
+    !hasDeliverables
+  ) {
     return {
       classification: "Skipped Irrelevant",
       reasonCode: RELEVANCE_REASONS.newsletter,
@@ -1302,7 +1391,11 @@ function evaluateOpportunityIntent({
     };
   }
 
-  if (opportunityType === "Song Promotion" && /\b(song|music|artist|track|audio)\b/.test(lower) && (hasPaidLanguage || hasBudget || hasCampaignLanguage)) {
+  if (
+    opportunityType === "Song Promotion" &&
+    /\b(song|music|artist|track|audio)\b/.test(lower) &&
+    (hasPaidLanguage || hasBudget || hasCampaignLanguage)
+  ) {
     return {
       classification: "Opportunity Created",
       reasonCode: RELEVANCE_REASONS.songPromotion,
@@ -1310,7 +1403,11 @@ function evaluateOpportunityIntent({
     };
   }
 
-  if (opportunityType === "Affiliate" && /\b(affiliate|commission|tiktok shop|creator marketplace)\b/.test(lower) && realOpportunityContext) {
+  if (
+    opportunityType === "Affiliate" &&
+    /\b(affiliate|commission|tiktok shop|creator marketplace)\b/.test(lower) &&
+    realOpportunityContext
+  ) {
     return {
       classification: "Opportunity Created",
       reasonCode: RELEVANCE_REASONS.affiliateOffer,
@@ -1318,7 +1415,11 @@ function evaluateOpportunityIntent({
     };
   }
 
-  if (opportunityType === "PR Gifting" && /\b(pr box|gifted|free product|sample|gifting)\b/.test(lower) && realOpportunityContext) {
+  if (
+    opportunityType === "PR Gifting" &&
+    /\b(pr box|gifted|free product|sample|gifting)\b/.test(lower) &&
+    realOpportunityContext
+  ) {
     return {
       classification: "Opportunity Created",
       reasonCode: RELEVANCE_REASONS.prGifting,
@@ -1326,7 +1427,14 @@ function evaluateOpportunityIntent({
     };
   }
 
-  if ((source.type === "Agency" || source.type === "PR Agency" || source.type === "Talent Platform" || sourceStrength === "Agency Brief") && hasCampaignLanguage && realOpportunityContext) {
+  if (
+    (source.type === "Agency" ||
+      source.type === "PR Agency" ||
+      source.type === "Talent Platform" ||
+      sourceStrength === "Agency Brief") &&
+    hasCampaignLanguage &&
+    realOpportunityContext
+  ) {
     return {
       classification: "Opportunity Created",
       reasonCode: RELEVANCE_REASONS.agencyBrief,
@@ -1342,7 +1450,12 @@ function evaluateOpportunityIntent({
     };
   }
 
-  if ((opportunityType === "Paid Campaign" || hasPaidLanguage) && hasCampaignLanguage && (hasBrand || hasKnownSource) && (hasBudget || hasDeliverables || hasCreatorRequirements)) {
+  if (
+    (opportunityType === "Paid Campaign" || hasPaidLanguage) &&
+    hasCampaignLanguage &&
+    (hasBrand || hasKnownSource) &&
+    (hasBudget || hasDeliverables || hasCreatorRequirements)
+  ) {
     return {
       classification: "Opportunity Created",
       reasonCode: RELEVANCE_REASONS.paidCampaign,
@@ -1354,12 +1467,18 @@ function evaluateOpportunityIntent({
     return {
       classification: "Review Needed",
       reasonCode: RELEVANCE_REASONS.tooVague,
-      reasonDetail: "Potential opportunity, but not enough clear brand, creator, budget, or deliverable detail to create a confident opportunity row.",
+      reasonDetail:
+        "Potential opportunity, but not enough clear brand, creator, budget, or deliverable detail to create a confident opportunity row.",
       reviewIssue: REVIEW_ISSUES.lowConfidence,
     };
   }
 
-  if (isNewsletterish || hasUnsubscribe || sourceStrength === "Newsletter" || sourceStrength === "Mass Creator Blast") {
+  if (
+    isNewsletterish ||
+    hasUnsubscribe ||
+    sourceStrength === "Newsletter" ||
+    sourceStrength === "Mass Creator Blast"
+  ) {
     return {
       classification: "Skipped Irrelevant",
       reasonCode: RELEVANCE_REASONS.newsletter,
@@ -1460,7 +1579,8 @@ function buildOpportunityRow(extracted, headers) {
     "Approx Deal Value": extracted.budget.expectedValue,
     "Success Signal": "Unknown",
     "Budget Penalty Score": extracted.budgetFloorConcern === "Yes" ? "40" : "0",
-    "Affiliate Penalty Score": extracted.affiliateOnly === "Yes" ? "50" : extracted.affiliatePresent === "Yes" ? "10" : "0",
+    "Affiliate Penalty Score":
+      extracted.affiliateOnly === "Yes" ? "50" : extracted.affiliatePresent === "Yes" ? "10" : "0",
     "Disqualifier Penalty Score": extracted.disqualifierFlags ? "15" : "0",
     "Source Strength": extracted.sourceStrength,
   };
@@ -1478,7 +1598,8 @@ function mergeOpportunityRows(existing, incoming, headers) {
     const current = existing[index] ?? "";
     const next = incoming[index] ?? "";
     if (!current && next) merged[index] = next;
-    else if (incomingConfidence > existingConfidence && next && !isManualField(header)) merged[index] = next;
+    else if (incomingConfidence > existingConfidence && next && !isManualField(header))
+      merged[index] = next;
   });
 
   setCell(merged, headerMap, "Last Updated", new Date().toISOString());
@@ -1532,20 +1653,29 @@ function buildReviewReason(extracted, issues) {
 function buildReviewSuggestedFix(extracted, issues) {
   const fixes = issues.map((issue) => reviewIssueDetail(issue)?.suggestedFix).filter(Boolean);
   if (extracted.reasonCode === RELEVANCE_REASONS.tooVague) {
-    fixes.unshift("Open the source email and confirm whether this is an actual creator opportunity before creating an Opportunity row.");
+    fixes.unshift(
+      "Open the source email and confirm whether this is an actual creator opportunity before creating an Opportunity row.",
+    );
   }
-  return unique(fixes).join(" | ") || "Review brand, source organization, opportunity type, creator requirements, and commercial terms.";
+  return (
+    unique(fixes).join(" | ") ||
+    "Review brand, source organization, opportunity type, creator requirements, and commercial terms."
+  );
 }
 
 function reviewIssueDetail(issue) {
   const details = {
     [REVIEW_ISSUES.unclearBrand]: {
-      whyItMatters: "Brand is unclear, so future creator matching could point to the wrong company.",
-      suggestedFix: "Identify the actual brand from the email body/signature, not just the sender domain.",
+      whyItMatters:
+        "Brand is unclear, so future creator matching could point to the wrong company.",
+      suggestedFix:
+        "Identify the actual brand from the email body/signature, not just the sender domain.",
     },
     [REVIEW_ISSUES.unclearAgency]: {
-      whyItMatters: "Source organization is unclear, so relationship history may be attached to the wrong agency/contact.",
-      suggestedFix: "Confirm whether the sender is a brand, agency, platform, label, or unknown source.",
+      whyItMatters:
+        "Source organization is unclear, so relationship history may be attached to the wrong agency/contact.",
+      suggestedFix:
+        "Confirm whether the sender is a brand, agency, platform, label, or unknown source.",
     },
     [REVIEW_ISSUES.missingBudget]: {
       whyItMatters: "Budget is missing, so commercial priority cannot be scored reliably.",
@@ -1553,15 +1683,20 @@ function reviewIssueDetail(issue) {
     },
     [REVIEW_ISSUES.vagueRequirements]: {
       whyItMatters: "Creator requirements are vague, so matching signals may be weak.",
-      suggestedFix: "Add country, niche, platform, gender, audience, or follower requirements if visible.",
+      suggestedFix:
+        "Add country, niche, platform, gender, audience, or follower requirements if visible.",
     },
     [REVIEW_ISSUES.lowConfidence]: {
-      whyItMatters: "Extractor confidence is low, so the row may mix brand, agency, or campaign details.",
-      suggestedFix: "Review the extracted guess against the source email before using this for matching.",
+      whyItMatters:
+        "Extractor confidence is low, so the row may mix brand, agency, or campaign details.",
+      suggestedFix:
+        "Review the extracted guess against the source email before using this for matching.",
     },
     [REVIEW_ISSUES.lowBudget]: {
-      whyItMatters: "Low-budget opportunities should not rank highly for normal paid campaign pitching.",
-      suggestedFix: "Confirm whether this is low-value, affiliate-only, or a song-promotion exception.",
+      whyItMatters:
+        "Low-budget opportunities should not rank highly for normal paid campaign pitching.",
+      suggestedFix:
+        "Confirm whether this is low-value, affiliate-only, or a song-promotion exception.",
     },
     [REVIEW_ISSUES.affiliate]: {
       whyItMatters: "Pure affiliate offers usually cannot support manager commission.",
@@ -1572,8 +1707,10 @@ function reviewIssueDetail(issue) {
       suggestedFix: "Mark relevance type as historical signal if the campaign is no longer active.",
     },
     [REVIEW_ISSUES.duplicate]: {
-      whyItMatters: "Possible duplicate records can inflate opportunity and brand intelligence counts.",
-      suggestedFix: "Compare source subject, brand, sender, and campaign summary before keeping both rows.",
+      whyItMatters:
+        "Possible duplicate records can inflate opportunity and brand intelligence counts.",
+      suggestedFix:
+        "Compare source subject, brand, sender, and campaign summary before keeping both rows.",
     },
   };
   return details[issue] ?? null;
@@ -1599,19 +1736,30 @@ function upsertReferenceRows(extracted, context, plan) {
   const brandKey = normalizeKey(extracted.brandName);
   if (brandKey && brandKey !== "unknown" && !context.indexes.brandsByName.has(brandKey)) {
     plan.brandCreates.push(buildBrandRow(extracted, context.workbook.brands.headers));
-    context.indexes.brandsByName.set(brandKey, { rowIndex: context.workbook.brands.rows.length + plan.brandCreates.length - 1, rowNumber: context.workbook.brands.rows.length + plan.brandCreates.length + 1 });
+    context.indexes.brandsByName.set(brandKey, {
+      rowIndex: context.workbook.brands.rows.length + plan.brandCreates.length - 1,
+      rowNumber: context.workbook.brands.rows.length + plan.brandCreates.length + 1,
+    });
   }
 
   const orgKey = normalizeKey(extracted.sourceOrganizationName);
   if (orgKey && orgKey !== "unknown" && !context.indexes.organizationsByName.has(orgKey)) {
-    plan.organizationCreates.push(buildOrganizationRow(extracted, context.workbook.organizations.headers));
-    context.indexes.organizationsByName.set(orgKey, { rowIndex: context.workbook.organizations.rows.length + plan.organizationCreates.length - 1, rowNumber: context.workbook.organizations.rows.length + plan.organizationCreates.length + 1 });
+    plan.organizationCreates.push(
+      buildOrganizationRow(extracted, context.workbook.organizations.headers),
+    );
+    context.indexes.organizationsByName.set(orgKey, {
+      rowIndex: context.workbook.organizations.rows.length + plan.organizationCreates.length - 1,
+      rowNumber: context.workbook.organizations.rows.length + plan.organizationCreates.length + 1,
+    });
   }
 
   const contactKey = normalizeKey(extracted.contactEmail);
   if (contactKey && contactKey !== "unknown" && !context.indexes.contactsByEmail.has(contactKey)) {
     plan.contactCreates.push(buildContactRow(extracted, context.workbook.contacts.headers));
-    context.indexes.contactsByEmail.set(contactKey, { rowIndex: context.workbook.contacts.rows.length + plan.contactCreates.length - 1, rowNumber: context.workbook.contacts.rows.length + plan.contactCreates.length + 1 });
+    context.indexes.contactsByEmail.set(contactKey, {
+      rowIndex: context.workbook.contacts.rows.length + plan.contactCreates.length - 1,
+      rowNumber: context.workbook.contacts.rows.length + plan.contactCreates.length + 1,
+    });
   }
 }
 
@@ -1707,7 +1855,8 @@ function buildContactRow(extracted, headers) {
     "Typical Opportunity Types": extracted.opportunityType,
     "Typical Creator Preferences": extracted.creatorMatchTags,
     "Commercial Quality": extracted.commercialQuality,
-    "Best Use": "Use this contact when creator profile matches the extracted brand/category signal.",
+    "Best Use":
+      "Use this contact when creator profile matches the extracted brand/category signal.",
   });
   return row;
 }
@@ -1743,8 +1892,18 @@ function appendRange(writes, table, sheetName, rows) {
 }
 
 function applyPlanToMemory(workbook, indexes, plan) {
-  appendMemory(workbook.opportunities, indexes.opportunitiesByEmailId, plan.opportunityCreates, "Source Email ID");
-  appendMemory(workbook.organizations, indexes.organizationsByName, plan.organizationCreates, "Organization Name");
+  appendMemory(
+    workbook.opportunities,
+    indexes.opportunitiesByEmailId,
+    plan.opportunityCreates,
+    "Source Email ID",
+  );
+  appendMemory(
+    workbook.organizations,
+    indexes.organizationsByName,
+    plan.organizationCreates,
+    "Organization Name",
+  );
   appendMemory(workbook.brands, indexes.brandsByName, plan.brandCreates, "Brand Name");
   appendMemory(workbook.contacts, indexes.contactsByEmail, plan.contactCreates, "Email");
   workbook.review.rows.push(...plan.reviewCreates);
@@ -1759,7 +1918,10 @@ function appendMemory(table, index, rows, keyHeader) {
   for (const row of rows) {
     table.rows.push(row);
     const rowNumber = table.rows.length + 1;
-    index.set(normalizeKey(getCell(row, headerMap, keyHeader)), { rowIndex: table.rows.length - 1, rowNumber });
+    index.set(normalizeKey(getCell(row, headerMap, keyHeader)), {
+      rowIndex: table.rows.length - 1,
+      rowNumber,
+    });
   }
 }
 
@@ -1772,8 +1934,12 @@ function updateCounters(state, plan) {
   state.contactsCreated += plan.contactCreates.length;
   state.reviewItemsCreated += plan.reviewCreates.length;
   state.aliasesCreated += plan.aliasCreates.length;
-  state.duplicatesSkipped += plan.skipped.filter((item) => item.duplicate || item.reason === RELEVANCE_REASONS.duplicate).length;
-  state.skippedIrrelevant += plan.skipped.filter((item) => !(item.duplicate || item.reason === RELEVANCE_REASONS.duplicate)).length;
+  state.duplicatesSkipped += plan.skipped.filter(
+    (item) => item.duplicate || item.reason === RELEVANCE_REASONS.duplicate,
+  ).length;
+  state.skippedIrrelevant += plan.skipped.filter(
+    (item) => !(item.duplicate || item.reason === RELEVANCE_REASONS.duplicate),
+  ).length;
   state.rowsCreated +=
     plan.opportunityCreates.length +
     plan.organizationCreates.length +
@@ -1820,9 +1986,14 @@ function recordClassification(state, sample) {
     state.relevanceDistribution.skippedIrrelevant += 1;
   }
 
-  const shouldCountUnknowns = sample.classification === "Opportunity Created" || sample.classification === "Review Needed";
+  const shouldCountUnknowns =
+    sample.classification === "Opportunity Created" || sample.classification === "Review Needed";
   if (shouldCountUnknowns && isProbablyUnknownBrand(sample.brandName)) state.unknownBrandCount += 1;
-  if (shouldCountUnknowns && (!sample.sourceOrganizationName || sample.sourceOrganizationName === "Unknown")) state.unknownAgencyCount += 1;
+  if (
+    shouldCountUnknowns &&
+    (!sample.sourceOrganizationName || sample.sourceOrganizationName === "Unknown")
+  )
+    state.unknownAgencyCount += 1;
 
   if (state.classificationSamples.length < 100) {
     state.classificationSamples.push({
@@ -1869,7 +2040,9 @@ async function updateIngestionLogSafely(sheets, workbook, state) {
   try {
     await updateIngestionLog(sheets, workbook, state);
   } catch (error) {
-    console.warn(`Could not update ingestion log right now: ${safeError(error)}. Checkpoint was still saved locally.`);
+    console.warn(
+      `Could not update ingestion log right now: ${safeError(error)}. Checkpoint was still saved locally.`,
+    );
   }
 }
 
@@ -1891,7 +2064,9 @@ function buildIngestionLogRow(state, headers) {
     "Duplicates Skipped": String(state.duplicatesSkipped),
     "Review Items Created": String(state.reviewItemsCreated),
     Errors: state.errors.slice(-10).join(" | "),
-    Notes: state.done ? "Full historical scan finished or stopped by configured limit." : "Full historical scan in progress. Resume uses local checkpoint.",
+    Notes: state.done
+      ? "Full historical scan finished or stopped by configured limit."
+      : "Full historical scan in progress. Resume uses local checkpoint.",
     "Scan Mode": "Gmail API Runner",
     "Pilot / Full / Weekly": "Full",
     "Last Successful Scan Date": state.lastProcessedAt,
@@ -1900,11 +2075,17 @@ function buildIngestionLogRow(state, headers) {
     "Rows Updated": String(state.rowsUpdated),
     "Rows Skipped": String(state.rowsSkipped),
     "Manual Review Required": String(state.reviewItemsCreated),
-    "Relevant Email Rate": state.emailsScanned ? formatPercent((state.opportunitiesCreated + state.opportunitiesUpdated) / state.emailsScanned) : "",
+    "Relevant Email Rate": state.emailsScanned
+      ? formatPercent(
+          (state.opportunitiesCreated + state.opportunitiesUpdated) / state.emailsScanned,
+        )
+      : "",
     "Skipped Irrelevant": String(state.skippedIrrelevant ?? 0),
     "Review Needed Emails": String(state.reviewNeededEmails ?? 0),
     "Weekly Automation Ready?": "No",
-    "Notes For Next Scan": state.nextPageToken ? "Resume from checkpoint before starting another run." : "Refresh alias mapping and intelligence after reviewing output.",
+    "Notes For Next Scan": state.nextPageToken
+      ? "Resume from checkpoint before starting another run."
+      : "Refresh alias mapping and intelligence after reviewing output.",
   });
   return row;
 }
@@ -2001,7 +2182,9 @@ function normalizeGmailMessage(message) {
     from: headers.from ?? "",
     to: headers.to ?? "",
     subject: headers.subject ?? "(no subject)",
-    date: headers.date ? new Date(headers.date) : new Date(Number(message.internalDate ?? Date.now())),
+    date: headers.date
+      ? new Date(headers.date)
+      : new Date(Number(message.internalDate ?? Date.now())),
     snippet: message.snippet ?? "",
     body,
     displayUrl: `https://mail.google.com/mail/#all/${message.id}`,
@@ -2075,7 +2258,9 @@ function findKnownSourceOrg(domain) {
 }
 
 function rootDomainName(domain) {
-  const parts = String(domain ?? "").split(".").filter(Boolean);
+  const parts = String(domain ?? "")
+    .split(".")
+    .filter(Boolean);
   if (parts.length <= 2) return parts[0] ?? "";
   const secondLevel = parts.at(-2) ?? parts[0];
   const thirdLevel = parts.at(-3) ?? "";
@@ -2105,8 +2290,10 @@ function inferAgencyType(value) {
   if (lower.includes("affiliate")) return "Affiliate Network";
   if (lower.includes("pr")) return "PR Agency";
   if (lower.includes("music") || lower.includes("label")) return "Label";
-  if (lower.includes("platform") || lower.includes("creator") || lower.includes("talent")) return "Talent Platform";
-  if (lower.includes("agency") || lower.includes("media") || lower.includes("marketing")) return "Agency";
+  if (lower.includes("platform") || lower.includes("creator") || lower.includes("talent"))
+    return "Talent Platform";
+  if (lower.includes("agency") || lower.includes("media") || lower.includes("marketing"))
+    return "Agency";
   return "Other";
 }
 
@@ -2129,9 +2316,12 @@ function inferBrand(subject, text, source) {
   const subjectSplit = subject.split(/[:|]/)[0];
   if (subjectSplit && /collab|campaign|partnership|promotion|invite|paid/i.test(subject)) {
     const subjectCandidate = cleanEntityName(
-      subjectSplit.replace(/re$/i, "").replace(/paid|collaboration|invitation|opportunity|exclusive|offer/gi, ""),
+      subjectSplit
+        .replace(/re$/i, "")
+        .replace(/paid|collaboration|invitation|opportunity|exclusive|offer/gi, ""),
     );
-    if (subjectCandidate && !isBadBrandCandidate(subjectCandidate)) candidates.push(subjectCandidate);
+    if (subjectCandidate && !isBadBrandCandidate(subjectCandidate))
+      candidates.push(subjectCandidate);
   }
   if (source.type === "Brand" && source.name !== "Unknown") candidates.push(source.name);
   return chooseBestBrandCandidate(candidates, source) ?? "Unknown";
@@ -2145,7 +2335,9 @@ function canonicalizeExtractedBrand(value) {
 
 function extractSubjectBrandCandidates(subject) {
   const candidates = [];
-  const cleanedSubject = String(subject ?? "").replace(/^(re|fw|fwd)\s*:\s*/i, "").trim();
+  const cleanedSubject = String(subject ?? "")
+    .replace(/^(re|fw|fwd)\s*:\s*/i, "")
+    .trim();
   const subjectPatterns = [
     /\bx\s+([^:|]{2,60})\s*:/i,
     /(?:campaign|collaboration|opportunity|partnership|promo|promotion)[^:|]{0,80}\bwith\s+([^:|,]{2,60})/i,
@@ -2162,7 +2354,9 @@ function extractSubjectBrandCandidates(subject) {
 }
 
 function chooseBestBrandCandidate(candidates, source) {
-  const uniqueCandidates = unique(candidates).filter((candidate) => !isBadBrandCandidate(candidate));
+  const uniqueCandidates = unique(candidates).filter(
+    (candidate) => !isBadBrandCandidate(candidate),
+  );
   if (uniqueCandidates.length === 0) return null;
   const sourceKey = normalizeKey(source.name);
   const scored = uniqueCandidates.map((candidate, index) => {
@@ -2229,17 +2423,26 @@ function validateExtractedEntities({ brandName, source, subject, text }) {
   if (isPollutedEntityName(brandName) || /\uFFFD|�/.test(brandName)) {
     reasons.push(`Rejected sentence fragment or damaged brand text: ${brandName}.`);
   }
-  if (isKnownCreatorName(brandName) || appearsAsCreatorReference(brandName, `${subject}\n${text}`)) {
+  if (
+    isKnownCreatorName(brandName) ||
+    appearsAsCreatorReference(brandName, `${subject}\n${text}`)
+  ) {
     reasons.push(`Rejected creator name being used as a brand: ${brandName}.`);
   }
   if (looksLikeAgencyName(brandName)) {
     reasons.push(`Rejected agency name being used as a brand: ${brandName}.`);
   }
-  if (source.name === "Unknown" || isBadSourceCandidate(source.name) || isPollutedEntityName(source.name)) {
+  if (
+    source.name === "Unknown" ||
+    isBadSourceCandidate(source.name) ||
+    isPollutedEntityName(source.name)
+  ) {
     reasons.push("No reliable source organization was found.");
   }
   if (source.type !== "Brand" && normalizeKey(source.name) === normalizeKey(brandName)) {
-    reasons.push(`Source organization ${source.name} cannot also be stored as the brand without evidence.`);
+    reasons.push(
+      `Source organization ${source.name} cannot also be stored as the brand without evidence.`,
+    );
   }
   return { valid: reasons.length === 0, reasons: unique(reasons) };
 }
@@ -2262,7 +2465,9 @@ function looksLikeAgencyName(value) {
   const normalized = normalizeKey(value);
   if (KNOWN_AGENCY_NAMES.has(normalized)) return true;
   if ([...KNOWN_AGENCY_NAMES].some((name) => normalized.startsWith(name))) return true;
-  return /\b(agency|talent|management|influencer network|creator network|creator agency|marketing agency|pr agency)\b/i.test(value);
+  return /\b(agency|talent|management|influencer network|creator network|creator agency|marketing agency|pr agency)\b/i.test(
+    value,
+  );
 }
 
 function looksLikeSentenceFragmentBrand(value) {
@@ -2270,7 +2475,9 @@ function looksLikeSentenceFragmentBrand(value) {
   return (
     /^[^A-Za-z0-9]/.test(text) ||
     /!$/.test(text) ||
-    /\b(collab(?:oration)?|campaign|pitch competition|opportunity|invitation|invite|for you|versions of)\b/i.test(text) ||
+    /\b(collab(?:oration)?|campaign|pitch competition|opportunity|invitation|invite|for you|versions of)\b/i.test(
+      text,
+    ) ||
     /\b(sending over|invoice|who|up for grabs)\b/i.test(text) ||
     /^a\s+(founder|strong|new|potential|paid|creator|brand)\b/i.test(text) ||
     /^ai\s+(healthcare|dating|chat|photo|video|productivity)\s+app$/i.test(text)
@@ -2280,7 +2487,10 @@ function looksLikeSentenceFragmentBrand(value) {
 function appearsAsCreatorReference(value, text) {
   const escaped = String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   if (!escaped) return false;
-  return new RegExp(`(?:creator|influencer|talent|featuring)\\s*[:\\-]?\\s*${escaped}\\b`, "i").test(text);
+  return new RegExp(
+    `(?:creator|influencer|talent|featuring)\\s*[:\\-]?\\s*${escaped}\\b`,
+    "i",
+  ).test(text);
 }
 
 async function runSelfTests() {
@@ -2303,7 +2513,9 @@ async function runSelfTests() {
   ];
   const failures = cases.filter(([name, expectedBad]) => isBadBrandCandidate(name) !== expectedBad);
   if (failures.length > 0) {
-    throw new Error(`Opportunity extraction self-test failed: ${failures.map(([name]) => name).join(", ")}`);
+    throw new Error(
+      `Opportunity extraction self-test failed: ${failures.map(([name]) => name).join(", ")}`,
+    );
   }
   if (canonicalizeExtractedBrand("TikTok CapCut US") !== "CapCut") {
     throw new Error("Opportunity extraction self-test failed: CapCut normalization.");
@@ -2314,7 +2526,9 @@ async function runSelfTests() {
     { name: "Tec Do", type: "Agency" },
   );
   if (recoveredBrand !== "JOYBUY") {
-    throw new Error(`Opportunity extraction self-test failed: expected JOYBUY, got ${recoveredBrand}.`);
+    throw new Error(
+      `Opportunity extraction self-test failed: expected JOYBUY, got ${recoveredBrand}.`,
+    );
   }
   if (
     !shouldUseOpenRouterReview({
@@ -2323,7 +2537,9 @@ async function runSelfTests() {
       initialValidation: { valid: false },
     })
   ) {
-    throw new Error("Opportunity extraction self-test failed: ambiguous email did not route to OpenRouter.");
+    throw new Error(
+      "Opportunity extraction self-test failed: ambiguous email did not route to OpenRouter.",
+    );
   }
 
   const originalFetch = globalThis.fetch;
@@ -2368,13 +2584,21 @@ async function runSelfTests() {
       },
       { apiKey: "self-test-key", defaultModel: "self-test-model", fallbackModel: "" },
     );
-    if (!aiResult.approved || aiResult.brandName !== "CapCut" || aiResult.sourceOrganizationType !== "Agency") {
-      throw new Error("Opportunity extraction self-test failed: OpenRouter review was not approved correctly.");
+    if (
+      !aiResult.approved ||
+      aiResult.brandName !== "CapCut" ||
+      aiResult.sourceOrganizationType !== "Agency"
+    ) {
+      throw new Error(
+        "Opportunity extraction self-test failed: OpenRouter review was not approved correctly.",
+      );
     }
   } finally {
     globalThis.fetch = originalFetch;
   }
-  console.log(`Opportunity extraction self-test passed: ${cases.length} entity cases plus OpenRouter structured review.`);
+  console.log(
+    `Opportunity extraction self-test passed: ${cases.length} entity cases plus OpenRouter structured review.`,
+  );
 }
 
 function shouldUseOpenRouterReview({ brandName, source, initialValidation }) {
@@ -2398,7 +2622,11 @@ async function reviewAmbiguousEmailWithOpenRouter(email, deterministic, config) 
   };
   const models = unique([config?.defaultModel, config?.fallbackModel].filter(Boolean));
   if (!config?.apiKey || models.length === 0) {
-    return { ...base, failed: true, reason: "OpenRouter credentials or model configuration is missing." };
+    return {
+      ...base,
+      failed: true,
+      reason: "OpenRouter credentials or model configuration is missing.",
+    };
   }
 
   const messages = [
@@ -2440,7 +2668,11 @@ async function reviewAmbiguousEmailWithOpenRouter(email, deterministic, config) 
   let lastError = null;
   for (const model of models) {
     try {
-      const output = await requestOpenRouterEntityReview({ apiKey: config.apiKey, model, messages });
+      const output = await requestOpenRouterEntityReview({
+        apiKey: config.apiKey,
+        model,
+        messages,
+      });
       const confidence = clamp(Number(output.confidence) || 0, 0, 1);
       const result = {
         ...base,
@@ -2457,16 +2689,28 @@ async function reviewAmbiguousEmailWithOpenRouter(email, deterministic, config) 
         return { ...result, notOpportunity: true };
       }
       if (output.isOpportunity !== true) {
-        return { ...result, reason: `OpenRouter was not confident this is an opportunity. ${result.reason}` };
+        return {
+          ...result,
+          reason: `OpenRouter was not confident this is an opportunity. ${result.reason}`,
+        };
       }
       if (confidence < 0.82) {
-        return { ...result, reason: `OpenRouter confidence ${Math.round(confidence * 100)}% is below the 82% approval threshold. ${result.reason}` };
+        return {
+          ...result,
+          reason: `OpenRouter confidence ${Math.round(confidence * 100)}% is below the 82% approval threshold. ${result.reason}`,
+        };
       }
       if (isProbablyUnknownBrand(result.brandName) || result.sourceOrganizationName === "Unknown") {
-        return { ...result, reason: `OpenRouter could not identify both the brand and source organization. ${result.reason}` };
+        return {
+          ...result,
+          reason: `OpenRouter could not identify both the brand and source organization. ${result.reason}`,
+        };
       }
       if (result.sourceOrganizationType === "Other") {
-        return { ...result, reason: `OpenRouter could not classify the source organization type. ${result.reason}` };
+        return {
+          ...result,
+          reason: `OpenRouter could not classify the source organization type. ${result.reason}`,
+        };
       }
       return { ...result, approved: true };
     } catch (error) {
@@ -2501,7 +2745,15 @@ function openRouterEntitySchema() {
       sourceOrganizationName: { type: "string" },
       sourceOrganizationType: {
         type: "string",
-        enum: ["Brand", "Agency", "PR Agency", "Talent Platform", "Affiliate Network", "Label", "Other"],
+        enum: [
+          "Brand",
+          "Agency",
+          "PR Agency",
+          "Talent Platform",
+          "Affiliate Network",
+          "Label",
+          "Other",
+        ],
       },
       creatorNames: { type: "array", items: { type: "string" }, maxItems: 12 },
       confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -2524,7 +2776,11 @@ async function requestOpenRouterEntityReview({ apiKey, model, messages }) {
     if (strictSchema) {
       body.response_format = {
         type: "json_schema",
-        json_schema: { name: "opportunity_entity_review", strict: true, schema: openRouterEntitySchema() },
+        json_schema: {
+          name: "opportunity_entity_review",
+          strict: true,
+          schema: openRouterEntitySchema(),
+        },
       };
       body.provider = { require_parameters: true };
     }
@@ -2565,13 +2821,21 @@ function extractOpenRouterContent(payload) {
   const content = payload?.choices?.[0]?.message?.content;
   if (typeof content === "string") return content.trim();
   if (Array.isArray(content)) {
-    return content.map((item) => item?.text || "").filter(Boolean).join("\n").trim();
+    return content
+      .map((item) => item?.text || "")
+      .filter(Boolean)
+      .join("\n")
+      .trim();
   }
   throw new Error("OpenRouter returned an empty response.");
 }
 
 function parseOpenRouterJson(content) {
-  const cleaned = String(content ?? "").replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
+  const cleaned = String(content ?? "")
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
   try {
     return JSON.parse(cleaned);
   } catch {
@@ -2596,7 +2860,9 @@ function normalizeAiSourceType(value) {
 }
 
 function isBadSourceCandidate(value) {
-  const lower = String(value ?? "").trim().toLowerCase();
+  const lower = String(value ?? "")
+    .trim()
+    .toLowerCase();
   return (
     !lower ||
     lower.length < 3 ||
@@ -2617,21 +2883,39 @@ function isPollutedEntityName(value) {
 }
 
 function classifyOpportunityType(lower, brandName, sourceOrganizationName) {
-  if (lower.includes("song promotion") || lower.includes("music promotion") || lower.includes("campaign audio") || / - .* \| song promotion/i.test(lower)) return "Song Promotion";
-  if (lower.includes("affiliate") || lower.includes("commission") || lower.includes("tiktok shop")) return "Affiliate";
-  if (lower.includes("pr box") || lower.includes("gifted") || lower.includes("free product") || lower.includes("sample")) return "PR Gifting";
+  if (
+    lower.includes("song promotion") ||
+    lower.includes("music promotion") ||
+    lower.includes("campaign audio") ||
+    / - .* \| song promotion/i.test(lower)
+  )
+    return "Song Promotion";
+  if (lower.includes("affiliate") || lower.includes("commission") || lower.includes("tiktok shop"))
+    return "Affiliate";
+  if (
+    lower.includes("pr box") ||
+    lower.includes("gifted") ||
+    lower.includes("free product") ||
+    lower.includes("sample")
+  )
+    return "PR Gifting";
   if (lower.includes("ugc")) return "UGC";
-  if (lower.includes("whitelisting") || lower.includes("paid usage") || lower.includes("licensing")) return "Whitelisting";
+  if (lower.includes("whitelisting") || lower.includes("paid usage") || lower.includes("licensing"))
+    return "Whitelisting";
   if (lower.includes("ambassador")) return "Ambassador Program";
-  if (lower.includes("event") || lower.includes("expo") || lower.includes("invitation to attend")) return "Event";
-  if (lower.includes("app") || /chat|ai|game|dating|download/.test(lower) || /app/i.test(brandName)) return "App Promotion";
-  if (lower.includes("paid") || lower.includes("budget") || lower.includes("rate")) return "Paid Campaign";
+  if (lower.includes("event") || lower.includes("expo") || lower.includes("invitation to attend"))
+    return "Event";
+  if (lower.includes("app") || /chat|ai|game|dating|download/.test(lower) || /app/i.test(brandName))
+    return "App Promotion";
+  if (lower.includes("paid") || lower.includes("budget") || lower.includes("rate"))
+    return "Paid Campaign";
   if (sourceOrganizationName.toLowerCase().includes("platform")) return "Platform Invite";
   return "Other";
 }
 
 function extractBudget(text, opportunityType) {
-  const amountPattern = /(?:\$|USD|GBP|£|EUR|€|JPY|¥)\s?([0-9][0-9,]*(?:\.[0-9]+)?)(?:\s?(?:-|to|–)\s?(?:\$|USD|GBP|£|EUR|€|JPY|¥)?\s?([0-9][0-9,]*(?:\.[0-9]+)?))?/gi;
+  const amountPattern =
+    /(?:\$|USD|GBP|£|EUR|€|JPY|¥)\s?([0-9][0-9,]*(?:\.[0-9]+)?)(?:\s?(?:-|to|–)\s?(?:\$|USD|GBP|£|EUR|€|JPY|¥)?\s?([0-9][0-9,]*(?:\.[0-9]+)?))?/gi;
   const matches = [...text.matchAll(amountPattern)];
   const values = matches
     .map((match) => [parseNumber(match[1]), parseNumber(match[2])].filter(Boolean))
@@ -2639,9 +2923,13 @@ function extractBudget(text, opportunityType) {
   const currency = inferCurrency(text);
   const max = values.length ? Math.max(...values) : "";
   const min = values.length ? Math.min(...values) : "";
-  const fixedFeePresent = /flat rate|fixed fee|fixed rate|budget|rate|offer|fee/i.test(text) && values.length > 0 ? "Yes" : "Unknown";
+  const fixedFeePresent =
+    /flat rate|fixed fee|fixed rate|budget|rate|offer|fee/i.test(text) && values.length > 0
+      ? "Yes"
+      : "Unknown";
   const affiliatePresent = /affiliate|commission/i.test(text) ? "Yes" : "No";
-  const affiliateOnly = affiliatePresent === "Yes" && !/fixed|flat|fee|budget|paid/i.test(text) ? "Yes" : "No";
+  const affiliateOnly =
+    affiliatePresent === "Yes" && !/fixed|flat|fee|budget|paid/i.test(text) ? "Yes" : "No";
   const amount = values.length ? (min === max ? String(max) : `${min}-${max}`) : "Unknown";
   return {
     amount,
@@ -2664,20 +2952,32 @@ function classifyCommercialQuality({ budget, opportunityType }) {
   }
   if (!value) return { quality: "Unknown", rating: "Unknown", budgetFloorConcern: "Unknown" };
   if (opportunityType === "Song Promotion") {
-    if (value >= 300) return { quality: "Acceptable", rating: "Acceptable", budgetFloorConcern: "No" };
+    if (value >= 300)
+      return { quality: "Acceptable", rating: "Acceptable", budgetFloorConcern: "No" };
     return { quality: "Low", rating: "Low", budgetFloorConcern: "Yes" };
   }
   if (value >= 1000) return { quality: "Strong", rating: "Strong", budgetFloorConcern: "No" };
-  if (value >= 500) return { quality: "Acceptable", rating: "Acceptable", budgetFloorConcern: "No" };
+  if (value >= 500)
+    return { quality: "Acceptable", rating: "Acceptable", budgetFloorConcern: "No" };
   return { quality: "Low", rating: "Low", budgetFloorConcern: "Yes" };
 }
 
 function extractCreatorRequirements(text) {
   const lower = text.toLowerCase();
   return {
-    gender: /female|women|woman|mom|mother/i.test(text) ? "Female" : /male|men|man/i.test(text) ? "Male" : "Not specified",
+    gender: /female|women|woman|mom|mother/i.test(text)
+      ? "Female"
+      : /male|men|man/i.test(text)
+        ? "Male"
+        : "Not specified",
     country: extractCountries(text),
-    language: /english/i.test(text) ? "English" : /spanish/i.test(text) ? "Spanish" : /french/i.test(text) ? "French" : "Not specified",
+    language: /english/i.test(text)
+      ? "English"
+      : /spanish/i.test(text)
+        ? "Spanish"
+        : /french/i.test(text)
+          ? "French"
+          : "Not specified",
     platforms: extractPlatforms(text),
     niche: extractNiches(lower),
     audience: extractAudience(text),
@@ -2768,7 +3068,9 @@ function extractDeliverables(text) {
 }
 
 function extractUsageRights(text) {
-  const match = text.match(/([0-9]+\s*(?:day|month|year)[^.\n]{0,40}(?:usage|rights|licensing)|usage rights|content usage|raw video)/i);
+  const match = text.match(
+    /([0-9]+\s*(?:day|month|year)[^.\n]{0,40}(?:usage|rights|licensing)|usage rights|content usage|raw video)/i,
+  );
   return match ? cleanSentence(match[0]) : "Unknown";
 }
 
@@ -2808,7 +3110,8 @@ function inferOpportunityStatus(lower, date) {
 }
 
 function inferSourceStrength(source, lower, email) {
-  if (source.type === "Brand" && !GENERIC_EMAIL_DOMAINS.has(parseSender(email.from).domain)) return "Direct Brand Outreach";
+  if (source.type === "Brand" && !GENERIC_EMAIL_DOMAINS.has(parseSender(email.from).domain))
+    return "Direct Brand Outreach";
   if (/reply|re:/.test(email.subject.toLowerCase())) return "Personal Contact";
   if (source.type === "Affiliate Network") return "Platform Invite";
   if (source.type === "Talent Platform") return "Platform Invite";
@@ -2825,7 +3128,16 @@ function classifyRelevance({ opportunityType, commercial, status }) {
   return "Historical Preference Signal";
 }
 
-function scoreConfidence({ brandName, sourceOrganizationName, contactEmail, opportunityType, budget, creator, deliverables, sourceStrength }) {
+function scoreConfidence({
+  brandName,
+  sourceOrganizationName,
+  contactEmail,
+  opportunityType,
+  budget,
+  creator,
+  deliverables,
+  sourceStrength,
+}) {
   let score = 30;
   if (!isProbablyUnknownBrand(brandName)) score += 15;
   if (sourceOrganizationName !== "Unknown") score += 10;
@@ -2839,16 +3151,33 @@ function scoreConfidence({ brandName, sourceOrganizationName, contactEmail, oppo
   return clamp(score, 30, 98);
 }
 
-function buildReviewSignals({ brandName, source, opportunityType, budget, creator, confidenceScore, commercial, sourceStrength }) {
+function buildReviewSignals({
+  brandName,
+  source,
+  opportunityType,
+  budget,
+  creator,
+  confidenceScore,
+  commercial,
+  sourceStrength,
+}) {
   const issues = [];
-  if (isProbablyUnknownBrand(brandName) || isPollutedEntityName(brandName)) issues.push(REVIEW_ISSUES.unclearBrand);
-  if (source.name === "Unknown" || sourceStrength === "Unknown" || isBadSourceCandidate(source.name)) issues.push(REVIEW_ISSUES.unclearAgency);
+  if (isProbablyUnknownBrand(brandName) || isPollutedEntityName(brandName))
+    issues.push(REVIEW_ISSUES.unclearBrand);
+  if (
+    source.name === "Unknown" ||
+    sourceStrength === "Unknown" ||
+    isBadSourceCandidate(source.name)
+  )
+    issues.push(REVIEW_ISSUES.unclearAgency);
   if (budget.amount === "Unknown") issues.push(REVIEW_ISSUES.missingBudget);
-  if (creator.niche === "Not specified" && creator.platforms === "Not specified") issues.push(REVIEW_ISSUES.vagueRequirements);
+  if (creator.niche === "Not specified" && creator.platforms === "Not specified")
+    issues.push(REVIEW_ISSUES.vagueRequirements);
   if (confidenceScore < 70) issues.push(REVIEW_ISSUES.lowConfidence);
   if (commercial.budgetFloorConcern === "Yes") issues.push(REVIEW_ISSUES.lowBudget);
   if (budget.affiliateOnly === "Yes") issues.push(REVIEW_ISSUES.affiliate);
-  if (!["Open", "Negotiating"].includes(opportunityType) && opportunityType === "Other") issues.push(REVIEW_ISSUES.historical);
+  if (!["Open", "Negotiating"].includes(opportunityType) && opportunityType === "Other")
+    issues.push(REVIEW_ISSUES.historical);
   return {
     issues: unique(issues),
     notes: unique(issues).join("; ") || "No major extraction issue detected.",
@@ -2856,24 +3185,38 @@ function buildReviewSignals({ brandName, source, opportunityType, budget, creato
 }
 
 function isIgnorableEmail(lower) {
-  if (isNonActionableMarketingEmail(lower) && !/(campaign brief|creator brief|deliverables?|fixed fee|flat rate|usage rights|whitelisting|spark ads?)/.test(lower)) return true;
-  return [
-    "security alert",
-    "verify your account",
-    "password reset",
-    "receipt",
-    "invoice",
-    "delivery status notification",
-    "out of office",
-    "calendar invitation",
-    "unsubscribe from this newsletter",
-  ].some((term) => lower.includes(term)) && !/(campaign|collaboration|creator|brief|affiliate|paid)/.test(lower);
+  if (
+    isNonActionableMarketingEmail(lower) &&
+    !/(campaign brief|creator brief|deliverables?|fixed fee|flat rate|usage rights|whitelisting|spark ads?)/.test(
+      lower,
+    )
+  )
+    return true;
+  return (
+    [
+      "security alert",
+      "verify your account",
+      "password reset",
+      "receipt",
+      "invoice",
+      "delivery status notification",
+      "out of office",
+      "calendar invitation",
+      "unsubscribe from this newsletter",
+    ].some((term) => lower.includes(term)) &&
+    !/(campaign|collaboration|creator|brief|affiliate|paid)/.test(lower)
+  );
 }
 
 function isNonActionableMarketingEmail(lower) {
-  const hasMarketingPattern = NON_ACTIONABLE_MARKETING_PATTERNS.some((pattern) => pattern.test(lower));
+  const hasMarketingPattern = NON_ACTIONABLE_MARKETING_PATTERNS.some((pattern) =>
+    pattern.test(lower),
+  );
   if (!hasMarketingPattern) return false;
-  const hasConcreteCreatorBrief = /\b(campaign brief|creator brief|deliverables?|usage rights|whitelisting|spark ads?|fixed fee|flat rate|\$\s?[0-9]|usd\s?[0-9]|£\s?[0-9]|€\s?[0-9])\b/i.test(lower);
+  const hasConcreteCreatorBrief =
+    /\b(campaign brief|creator brief|deliverables?|usage rights|whitelisting|spark ads?|fixed fee|flat rate|\$\s?[0-9]|usd\s?[0-9]|£\s?[0-9]|€\s?[0-9])\b/i.test(
+      lower,
+    );
   return !hasConcreteCreatorBrief;
 }
 
@@ -2909,14 +3252,16 @@ function summarizeCampaign(brandName, opportunityType, text) {
 }
 
 function buildPreferenceTags(creator, opportunityType, text) {
-  return unique([
-    ...splitCsv(creator.country),
-    ...splitCsv(creator.gender),
-    ...splitCsv(creator.language),
-    ...splitCsv(creator.niche),
-    ...splitCsv(creator.platforms),
-    opportunityType,
-  ].filter((value) => value && !["Not specified", "Unknown"].includes(value))).join(", ");
+  return unique(
+    [
+      ...splitCsv(creator.country),
+      ...splitCsv(creator.gender),
+      ...splitCsv(creator.language),
+      ...splitCsv(creator.niche),
+      ...splitCsv(creator.platforms),
+      opportunityType,
+    ].filter((value) => value && !["Not specified", "Unknown"].includes(value)),
+  ).join(", ");
 }
 
 function buildCreatorMatchTags(creator, opportunityType, text) {
@@ -2924,20 +3269,25 @@ function buildCreatorMatchTags(creator, opportunityType, text) {
 }
 
 function buildKeywords(brandName, sourceOrganizationName, opportunityType, creator) {
-  return unique([
-    brandName,
-    sourceOrganizationName,
-    opportunityType,
-    ...splitCsv(creator.country),
-    ...splitCsv(creator.platforms),
-    ...splitCsv(creator.niche),
-  ].filter((value) => value && !["Unknown", "Not specified"].includes(value))).join(", ").toLowerCase();
+  return unique(
+    [
+      brandName,
+      sourceOrganizationName,
+      opportunityType,
+      ...splitCsv(creator.country),
+      ...splitCsv(creator.platforms),
+      ...splitCsv(creator.niche),
+    ].filter((value) => value && !["Unknown", "Not specified"].includes(value)),
+  )
+    .join(", ")
+    .toLowerCase();
 }
 
 function buildCommercialNotes(value, affiliateOnly, opportunityType) {
   if (affiliateOnly === "Yes") return "Affiliate-only or commission-led opportunity.";
   if (!value) return "Commercial terms unclear.";
-  if (opportunityType === "Song Promotion") return "Song promotion rates can be lower than normal brand campaigns.";
+  if (opportunityType === "Song Promotion")
+    return "Song promotion rates can be lower than normal brand campaigns.";
   if (value >= 800) return "Strong fixed-fee signal.";
   if (value >= 300) return "Acceptable fixed-fee signal.";
   return "Low fixed-fee signal.";
@@ -2945,7 +3295,8 @@ function buildCommercialNotes(value, affiliateOnly, opportunityType) {
 
 function buildAgeNotes(date, relevance) {
   const days = daysSince(date);
-  if (days > 365) return `Historical email, ${days} days old. Use as preference signal unless manually confirmed active.`;
+  if (days > 365)
+    return `Historical email, ${days} days old. Use as preference signal unless manually confirmed active.`;
   if (relevance === "Active Opportunity") return "Recent or active-looking opportunity.";
   return "Use as preference or relationship signal.";
 }
@@ -2963,8 +3314,11 @@ function buildRankingNotes(commercial, relevance, confidenceScore) {
 }
 
 function buildPitchAngle(creator, opportunityType, brandName) {
-  const tags = [creator.country, creator.niche, creator.platforms].filter((value) => value && value !== "Not specified");
-  if (tags.length === 0) return `${brandName} has historical ${opportunityType.toLowerCase()} signal.`;
+  const tags = [creator.country, creator.niche, creator.platforms].filter(
+    (value) => value && value !== "Not specified",
+  );
+  if (tags.length === 0)
+    return `${brandName} has historical ${opportunityType.toLowerCase()} signal.`;
   return `Historical interest in ${tags.join(", ")} creators.`;
 }
 
@@ -2976,7 +3330,8 @@ function commercialScore(value) {
 }
 
 function relationshipScore(sourceStrength) {
-  if (sourceStrength === "Direct Brand Outreach" || sourceStrength === "Personal Contact") return "75";
+  if (sourceStrength === "Direct Brand Outreach" || sourceStrength === "Personal Contact")
+    return "75";
   if (sourceStrength === "Agency Brief") return "60";
   if (sourceStrength === "Platform Invite") return "45";
   return "";
@@ -3007,7 +3362,9 @@ function communicationStatus(date) {
 }
 
 function extractAffiliateCommission(text) {
-  const match = text.match(/([0-9]{1,3}%[^.\n]{0,50}(?:commission|affiliate)|commission[^.\n]{0,50}[0-9]{1,3}%)/i);
+  const match = text.match(
+    /([0-9]{1,3}%[^.\n]{0,50}(?:commission|affiliate)|commission[^.\n]{0,50}[0-9]{1,3}%)/i,
+  );
   return match ? cleanSentence(match[0]) : "";
 }
 
@@ -3046,15 +3403,23 @@ function printSummary(state, options) {
   );
   console.log(`Unknown brand count: ${state.unknownBrandCount}`);
   console.log(`Unknown agency/source count: ${state.unknownAgencyCount}`);
-  console.log(`OpenRouter reviews: attempted ${state.aiReviewsAttempted}, approved ${state.aiReviewsApproved}, failed ${state.aiReviewsFailed}`);
-  console.log(`Confidence distribution: high ${state.confidenceDistribution.high}, medium ${state.confidenceDistribution.medium}, low ${state.confidenceDistribution.low}`);
+  console.log(
+    `OpenRouter reviews: attempted ${state.aiReviewsAttempted}, approved ${state.aiReviewsApproved}, failed ${state.aiReviewsFailed}`,
+  );
+  console.log(
+    `Confidence distribution: high ${state.confidenceDistribution.high}, medium ${state.confidenceDistribution.medium}, low ${state.confidenceDistribution.low}`,
+  );
   printReasonCounts(state);
   if (options.dryRun || options.validateSample) printSampleClassifications(state);
   printSafetyWarnings(state, options);
   if (options.dryRun) {
     console.log("Dry run complete. No checkpoint was saved and no Sheet rows were changed.");
   } else {
-    console.log(state.nextPageToken ? "Checkpoint saved. Run again to resume." : "No next page token. Scan is complete for this query.");
+    console.log(
+      state.nextPageToken
+        ? "Checkpoint saved. Run again to resume."
+        : "No next page token. Scan is complete for this query.",
+    );
   }
 }
 
@@ -3083,7 +3448,9 @@ function printSampleClassifications(state) {
     console.log(`- ${sample.classification} | ${sample.reason} | confidence ${sample.confidence}`);
     console.log(`  Subject: ${sample.subject}`);
     console.log(`  Sender: ${sample.sender}`);
-    console.log(`  Brand: ${sample.brand} | Source: ${sample.sourceOrganization} | Type: ${sample.opportunityType}`);
+    console.log(
+      `  Brand: ${sample.brand} | Source: ${sample.sourceOrganization} | Type: ${sample.opportunityType}`,
+    );
     if (sample.detail) console.log(`  Detail: ${sample.detail}`);
   }
 }
@@ -3091,7 +3458,10 @@ function printSampleClassifications(state) {
 function printSafetyWarnings(state, options) {
   const warnings = buildSafetyWarnings(state);
   if (warnings.length === 0) {
-    if (options.validateSample) console.log("\nValidation recommendation: sample looks safe enough for the next controlled step.");
+    if (options.validateSample)
+      console.log(
+        "\nValidation recommendation: sample looks safe enough for the next controlled step.",
+      );
     return;
   }
 
@@ -3113,11 +3483,26 @@ function buildSafetyWarnings(state) {
   const unknownAgencyRate = totalPotential ? state.unknownAgencyCount / totalPotential : 0;
   const duplicateRate = scanned ? state.duplicatesSkipped / scanned : 0;
 
-  if (scanned >= 25 && relevantRate > 0.85) warnings.push(`Relevant email rate is high (${formatPercent(relevantRate)}). The classifier may still be permissive.`);
-  if (totalPotential >= 10 && reviewRate > 0.6) warnings.push(`Review item rate is high (${formatPercent(reviewRate)}). The review queue may need cleaner extraction rules.`);
-  if (scanned >= 100 && duplicateRate === 0) warnings.push("Duplicate skip rate is 0 after a larger sample. Confirm duplicate detection is catching repeated threads/campaigns.");
-  if (totalPotential >= 10 && unknownBrandRate > 0.3) warnings.push(`Unknown brand rate is high (${formatPercent(unknownBrandRate)}). Brand extraction may need review.`);
-  if (totalPotential >= 10 && unknownAgencyRate > 0.35) warnings.push(`Unknown agency/source rate is high (${formatPercent(unknownAgencyRate)}). Source organization extraction may need review.`);
+  if (scanned >= 25 && relevantRate > 0.85)
+    warnings.push(
+      `Relevant email rate is high (${formatPercent(relevantRate)}). The classifier may still be permissive.`,
+    );
+  if (totalPotential >= 10 && reviewRate > 0.6)
+    warnings.push(
+      `Review item rate is high (${formatPercent(reviewRate)}). The review queue may need cleaner extraction rules.`,
+    );
+  if (scanned >= 100 && duplicateRate === 0)
+    warnings.push(
+      "Duplicate skip rate is 0 after a larger sample. Confirm duplicate detection is catching repeated threads/campaigns.",
+    );
+  if (totalPotential >= 10 && unknownBrandRate > 0.3)
+    warnings.push(
+      `Unknown brand rate is high (${formatPercent(unknownBrandRate)}). Brand extraction may need review.`,
+    );
+  if (totalPotential >= 10 && unknownAgencyRate > 0.35)
+    warnings.push(
+      `Unknown agency/source rate is high (${formatPercent(unknownAgencyRate)}). Source organization extraction may need review.`,
+    );
   return warnings;
 }
 
@@ -3184,12 +3569,19 @@ function columnName(index) {
 }
 
 function base64Url(input) {
-  return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function pemToArrayBuffer(pem) {
   return Buffer.from(
-    pem.replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\s/g, ""),
+    pem
+      .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+      .replace(/-----END PRIVATE KEY-----/g, "")
+      .replace(/\s/g, ""),
     "base64",
   );
 }
@@ -3200,7 +3592,7 @@ function normalizePrivateKey(value) {
 
 function loadEnvFiles(files) {
   for (const file of files) {
-    const fullPath = path.resolve(process.cwd(), file);
+    const fullPath = path.resolve(runtimeRoot(), file);
     if (!existsSync(fullPath)) continue;
     const raw = readFileSyncSafe(fullPath);
     for (const line of raw.split(/\r?\n/)) {
@@ -3218,11 +3610,16 @@ function readFileSyncSafe(file) {
 }
 
 function normalizeHeader(value) {
-  return String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function normalizeKey(value) {
-  return String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 function normalizeSubject(value) {
@@ -3264,7 +3661,10 @@ function isSpecificDuplicateSubject(subject) {
 
 function summaryKey(value) {
   return normalizeKey(value)
-    .replace(/\b(the|and|for|with|from|campaign|collaboration|opportunity|paid|creator|brand)\b/g, " ")
+    .replace(
+      /\b(the|and|for|with|from|campaign|collaboration|opportunity|paid|creator|brand)\b/g,
+      " ",
+    )
     .replace(/[^a-z0-9 ]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -3293,7 +3693,9 @@ function cleanEntityName(value) {
 }
 
 function cleanSentence(value) {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function toTitleCase(value) {
@@ -3345,7 +3747,8 @@ function sleep(ms) {
 
 function chunk(values, size) {
   const chunks = [];
-  for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size));
+  for (let index = 0; index < values.length; index += size)
+    chunks.push(values.slice(index, index + size));
   return chunks;
 }
 

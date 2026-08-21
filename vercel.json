@@ -68,6 +68,10 @@
     {
       "path": "/api/weekly-gmail-outreach-report",
       "schedule": "0 17 * * 5"
+    },
+    {
+      "path": "/api/monthly-opportunity-refresh",
+      "schedule": "0 8 1 * *"
     }
   ]
 }

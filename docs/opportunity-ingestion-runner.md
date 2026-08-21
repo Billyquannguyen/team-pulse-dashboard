@@ -32,9 +32,9 @@ The checkpoint and local env file are ignored by Git.
 Create `.env.opportunity-ingestion` in the project root:
 
 ```bash
-GMAIL_CLIENT_ID=your_google_oauth_client_id
-GMAIL_CLIENT_SECRET=your_google_oauth_client_secret
-GMAIL_REFRESH_TOKEN=your_gmail_refresh_token
+MASTER_GMAIL_CLIENT_ID=your_google_oauth_client_id
+MASTER_GMAIL_CLIENT_SECRET=your_google_oauth_client_secret
+MASTER_GMAIL_REFRESH_TOKEN=your_gmail_refresh_token
 
 GOOGLE_SERVICE_ACCOUNT_EMAIL=your_service_account_email
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"

@@ -1,12 +1,7 @@
 import "@tanstack/react-start/server-only";
+import { getMasterGmailAccessToken } from "@/lib/gmail-oauth.server";
 
 const DEFAULT_ADMIN_EMAIL = "anhquan2016048@gmail.com";
-
-function requiredGmailEnv(name: string) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`Missing ${name}.`);
-  return value;
-}
 
 function cleanHeader(value: string) {
   return value.replace(/[\r\n]+/g, " ").trim();
@@ -34,25 +29,7 @@ function encodedSubject(value: string) {
 }
 
 async function gmailAccessToken() {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: requiredGmailEnv("BRAND_FINDER_GMAIL_CLIENT_ID"),
-      client_secret: requiredGmailEnv("BRAND_FINDER_GMAIL_CLIENT_SECRET"),
-      refresh_token: requiredGmailEnv("BRAND_FINDER_GMAIL_REFRESH_TOKEN"),
-      grant_type: "refresh_token",
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  const payload = (await response.json().catch(() => null)) as {
-    access_token?: string;
-    error_description?: string;
-  } | null;
-  if (!response.ok || !payload?.access_token) {
-    throw new Error(payload?.error_description || "Gmail access token could not be created.");
-  }
-  return payload.access_token;
+  return getMasterGmailAccessToken();
 }
 
 export async function notifyAdminOfVerifiedMember(input: {

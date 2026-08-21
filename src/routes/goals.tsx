@@ -6,8 +6,10 @@ import {
   BarChart3,
   CalendarDays,
   Check,
+  Download,
   Gift,
   Lock,
+  RefreshCw,
   SlidersHorizontal,
   Target,
   TrendingUp,
@@ -53,6 +55,11 @@ import {
 import { cn } from "@/lib/utils";
 import type { AuthRole } from "@/lib/auth";
 import { getCurrentDealMonthKey, normalizeDealMonthKey } from "@/lib/sheet-normalizer";
+import {
+  getMonthlyOpportunityRefreshStatus,
+  startMonthlyOpportunityRefresh,
+  type MonthlyRefreshState,
+} from "@/lib/monthly-opportunity-refresh";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -920,6 +927,131 @@ function GoalEditCard({
   );
 }
 
+function formatRefreshTimestamp(value: string) {
+  if (!value) return "Not run from the dashboard yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date unavailable";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function MonthlyOpportunityRefreshControl() {
+  const [starting, setStarting] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const statusQuery = useQuery({
+    queryKey: ["monthly-opportunity-refresh-status"],
+    queryFn: () => getMonthlyOpportunityRefreshStatus(),
+    staleTime: 5_000,
+    refetchInterval: (query) => {
+      const state = query.state.data as MonthlyRefreshState | null | undefined;
+      return state?.status === "queued" || state?.status === "running" ? 5_000 : false;
+    },
+  });
+  const state = statusQuery.data;
+  const isRunning = state?.status === "queued" || state?.status === "running";
+
+  const startRefresh = async () => {
+    const confirmed = window.confirm(
+      "Start the monthly opportunity refresh now? It will scan Gmail, update the existing Opportunity Intelligence Sheet, create a safety backup, and post the result to Discord.",
+    );
+    if (!confirmed) return;
+
+    setStarting(true);
+    setActionError("");
+    try {
+      await startMonthlyOpportunityRefresh();
+      await statusQuery.refetch();
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "The monthly refresh could not start.",
+      );
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  return (
+    <section className="overflow-hidden rounded-3xl bg-card ring-1 ring-border">
+      <div className="flex flex-col gap-5 p-5 md:flex-row md:items-center md:justify-between md:p-6">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-semibold">Monthly opportunity refresh</h3>
+            <span
+              className={cn(
+                "rounded-full px-2.5 py-1 text-[11px] font-bold",
+                state?.status === "success" && "bg-fun-lime/25 text-foreground",
+                state?.status === "failed" && "bg-destructive/10 text-destructive",
+                isRunning && "bg-fun-yellow/30 text-foreground",
+                !state && "bg-muted text-muted-foreground",
+              )}
+            >
+              {state?.status === "success"
+                ? "Complete"
+                : state?.status === "failed"
+                  ? "Needs attention"
+                  : isRunning
+                    ? "Running"
+                    : "Ready"}
+            </span>
+          </div>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+            Runs automatically on the first day of each month. Admins can also run it here. Results
+            go to Discord only.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+            <span>{state?.stageLabel || "No dashboard run recorded"}</span>
+            <span>
+              {state?.finishedAt
+                ? `Finished ${formatRefreshTimestamp(state.finishedAt)}`
+                : state?.startedAt
+                  ? `Started ${formatRefreshTimestamp(state.startedAt)}`
+                  : ""}
+            </span>
+            {state && <span>{state.emailsScanned.toLocaleString()} emails scanned</span>}
+          </div>
+          {(actionError || state?.error) && (
+            <p className="mt-3 rounded-2xl bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+              {actionError || state?.error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {state?.packageReady && (
+            <a
+              href={`/api/monthly-opportunity-refresh-package?runId=${encodeURIComponent(state.runId)}`}
+              className="tb-action inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-muted px-4 text-sm font-semibold hover:bg-accent focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <Download className="h-4 w-4" />
+              Download package
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={startRefresh}
+            disabled={starting || isRunning}
+            className="tb-action inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <RefreshCw className={cn("h-4 w-4", (starting || isRunning) && "animate-spin")} />
+            {starting ? "Starting" : isRunning ? "Refresh running" : "Run monthly refresh"}
+          </button>
+        </div>
+      </div>
+
+      {isRunning && (
+        <div className="h-1.5 overflow-hidden bg-muted">
+          <div className="h-full w-2/5 animate-pulse rounded-r-full bg-gradient-to-r from-fun-blue via-fun-purple to-fun-pink" />
+        </div>
+      )}
+    </section>
+  );
+}
+
 function AdminGoalControls({
   members,
   settings,
@@ -1656,6 +1788,8 @@ function GoalsPage() {
             : "Your commission, progression, creator portfolio, and outreach performance."
         }
       />
+
+      {auth.isAdmin && <MonthlyOpportunityRefreshControl />}
 
       <GoalProgressPanel
         title={auth.isAdmin ? "Team monthly goal" : "My monthly goal"}

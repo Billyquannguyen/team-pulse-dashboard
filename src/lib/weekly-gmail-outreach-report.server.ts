@@ -1,4 +1,5 @@
 import "@tanstack/react-start/server-only";
+import { getMasterGmailAccessToken } from "@/lib/gmail-oauth.server";
 import {
   generateWeeklyOutreachNarrative,
   identifyMissingMemberTags,
@@ -242,31 +243,7 @@ function getWindowLabel(days: number, now: Date) {
 
 async function getGmailReadonlyAccessToken() {
   try {
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        client_id: requiredGmailEnv("GMAIL_CLIENT_ID"),
-        client_secret: requiredGmailEnv("GMAIL_CLIENT_SECRET"),
-        refresh_token: requiredGmailEnv("WEEKLY_GMAIL_READONLY_REFRESH_TOKEN"),
-        grant_type: "refresh_token",
-      }),
-    });
-    const payload = (await response.json().catch(() => null)) as {
-      access_token?: string;
-      error?: string;
-      error_description?: string;
-    } | null;
-
-    if (!response.ok || !payload?.access_token) {
-      throw new GmailAuthError(
-        payload?.error_description || payload?.error || "Gmail could not create an access token.",
-      );
-    }
-
-    return payload.access_token;
+    return await getMasterGmailAccessToken();
   } catch (error) {
     if (error instanceof GmailAuthError) throw error;
     throw new GmailAuthError(
@@ -1071,7 +1048,7 @@ async function postGmailAuthErrorToDiscord() {
     [
       "**Báo cáo Gmail Outreach hằng tuần: lỗi Gmail**",
       "Không đọc được Gmail bằng quyền readonly.",
-      "Kiểm tra `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `WEEKLY_GMAIL_READONLY_REFRESH_TOKEN`, và scope `gmail.readonly`.",
+      "Kiểm tra `MASTER_GMAIL_CLIENT_ID`, `MASTER_GMAIL_CLIENT_SECRET`, `MASTER_GMAIL_REFRESH_TOKEN`, và các Gmail scopes của master token.",
     ].join("\n"),
     [],
   );

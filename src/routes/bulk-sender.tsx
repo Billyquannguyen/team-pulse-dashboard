@@ -34,6 +34,7 @@ import {
   useState,
   type ClipboardEvent,
   type FormEvent,
+  type KeyboardEvent,
   type MouseEvent,
 } from "react";
 import { AppHeader } from "@/components/layout/AppHeader";
@@ -82,6 +83,16 @@ type SenderRow = {
   statusMessage?: string;
 };
 
+type CellPosition = {
+  rowIndex: number;
+  columnIndex: number;
+};
+
+type CellSelection = {
+  anchor: CellPosition;
+  focus: CellPosition;
+};
+
 type SavedWorkspace = {
   columns?: Column[];
   rows?: SenderRow[];
@@ -114,6 +125,20 @@ function makeEmptyRow(): SenderRow {
 
 function starterRows() {
   return Array.from({ length: MIN_VISIBLE_ROWS }, makeEmptyRow);
+}
+
+function ensureMinimumRows(rows: SenderRow[]) {
+  if (rows.length >= MIN_VISIBLE_ROWS) return rows;
+  return [...rows, ...Array.from({ length: MIN_VISIBLE_ROWS - rows.length }, makeEmptyRow)];
+}
+
+function selectionBounds(selection: CellSelection) {
+  return {
+    firstRow: Math.min(selection.anchor.rowIndex, selection.focus.rowIndex),
+    lastRow: Math.max(selection.anchor.rowIndex, selection.focus.rowIndex),
+    firstColumn: Math.min(selection.anchor.columnIndex, selection.focus.columnIndex),
+    lastColumn: Math.max(selection.anchor.columnIndex, selection.focus.columnIndex),
+  };
 }
 
 function slugify(value: string) {
@@ -304,10 +329,12 @@ function BulkDraftCreator() {
   const [loaded, setLoaded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastEditorTarget, setLastEditorTarget] = useState<"subject" | "body">("body");
+  const [cellSelection, setCellSelection] = useState<CellSelection | null>(null);
   const bodyEditorRef = useRef<HTMLDivElement>(null);
   const subjectRef = useRef<HTMLInputElement>(null);
   const processingJobRef = useRef<string | null>(null);
   const stoppedRef = useRef(false);
+  const selectingCellsRef = useRef(false);
 
   const emailColumn = columns.find((column) => column.type === "email");
   const nonEmptyRows = useMemo(() => rows.filter((row) => !isRowEmpty(row)), [rows]);
@@ -346,7 +373,7 @@ function BulkDraftCreator() {
         if (saved.columns?.length) {
           setColumns(resolveEmailColumn(saved.columns, saved.rows ?? []));
         }
-        if (saved.rows?.length) setRows(saved.rows);
+        if (saved.rows?.length) setRows(ensureMinimumRows(saved.rows));
         if (typeof saved.subject === "string") setSubject(saved.subject);
         if (typeof saved.bodyHtml === "string") setBodyHtml(saved.bodyHtml);
         if (saved.activeJobId) void driveQueue(saved.activeJobId);
@@ -377,6 +404,14 @@ function BulkDraftCreator() {
       editor.innerHTML = bodyHtml;
     }
   }, [bodyHtml]);
+
+  useEffect(() => {
+    const stopSelecting = () => {
+      selectingCellsRef.current = false;
+    };
+    window.addEventListener("mouseup", stopSelecting);
+    return () => window.removeEventListener("mouseup", stopSelecting);
+  }, []);
 
   const applyJobResults = (completedJob: BulkSenderJob) => {
     const results = new Map(completedJob.results.map((result) => [result.rowId, result]));
@@ -456,6 +491,65 @@ function BulkDraftCreator() {
     );
   };
 
+  const selectCell = (rowIndex: number, columnIndex: number, extend = false) => {
+    const position = { rowIndex, columnIndex };
+    setCellSelection((current) =>
+      extend && current ? { ...current, focus: position } : { anchor: position, focus: position },
+    );
+  };
+
+  const selectAllCells = () => {
+    if (!rows.length || !columns.length) return;
+    setCellSelection({
+      anchor: { rowIndex: 0, columnIndex: 0 },
+      focus: { rowIndex: rows.length - 1, columnIndex: columns.length - 1 },
+    });
+  };
+
+  const clearSelectedCells = () => {
+    if (!cellSelection) return;
+    const bounds = selectionBounds(cellSelection);
+    const selectedColumnIds = new Set(
+      columns.slice(bounds.firstColumn, bounds.lastColumn + 1).map((column) => column.id),
+    );
+    setRows((current) =>
+      ensureMinimumRows(
+        current.map((row, rowIndex) => {
+          if (rowIndex < bounds.firstRow || rowIndex > bounds.lastRow) return row;
+          const values = { ...row.values };
+          selectedColumnIds.forEach((columnId) => {
+            values[columnId] = "";
+          });
+          return {
+            ...row,
+            values,
+            status: row.status === "failed" ? undefined : row.status,
+            statusMessage: row.status === "failed" ? undefined : row.statusMessage,
+          };
+        }),
+      ),
+    );
+  };
+
+  const handleGridKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target;
+    const isGridCell = target instanceof HTMLInputElement && target.dataset.gridCell === "true";
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a" && isGridCell) {
+      event.preventDefault();
+      selectAllCells();
+      return;
+    }
+    if ((event.key === "Delete" || event.key === "Backspace") && cellSelection) {
+      const bounds = selectionBounds(cellSelection);
+      const selectedCount =
+        (bounds.lastRow - bounds.firstRow + 1) * (bounds.lastColumn - bounds.firstColumn + 1);
+      if (selectedCount > 1 || !isGridCell) {
+        event.preventDefault();
+        clearSelectedCells();
+      }
+    }
+  };
+
   const pasteGrid = (
     event: ClipboardEvent<HTMLInputElement>,
     startRowIndex: number,
@@ -500,6 +594,23 @@ function BulkDraftCreator() {
     });
   };
 
+  const addDefaultColumn = (defaultColumn: Column) => {
+    setColumns((current) => {
+      if (current.some((column) => column.id === defaultColumn.id)) return current;
+      const prepared = current.map((column) =>
+        defaultColumn.type === "email" ? { ...column, type: "text" as const } : column,
+      );
+      return [
+        ...prepared,
+        {
+          ...defaultColumn,
+          key: uniqueKey(defaultColumn.label, prepared),
+        },
+      ];
+    });
+    setCellSelection(null);
+  };
+
   const renameColumn = (id: string, label: string) => {
     setColumns((current) =>
       current.map((column) =>
@@ -523,6 +634,7 @@ function BulkDraftCreator() {
         return { ...row, values };
       }),
     );
+    setCellSelection(null);
   };
 
   const executeEditorCommand = (command: string, value?: string) => {
@@ -630,6 +742,7 @@ function BulkDraftCreator() {
         </div>
 
         <div
+          onKeyDown={handleGridKeyDown}
           className={cn(
             "mt-4 overflow-auto rounded-2xl border bg-background",
             expandedGrid ? "h-[70vh]" : "h-[420px]",
@@ -638,8 +751,16 @@ function BulkDraftCreator() {
           <table className="min-w-max border-separate border-spacing-0 text-sm">
             <thead className="sticky top-0 z-20 bg-muted/95 backdrop-blur">
               <tr>
-                <th className="sticky left-0 z-30 w-14 border-b border-r bg-muted px-3 py-3 text-center text-xs text-muted-foreground">
-                  #
+                <th className="sticky left-0 z-30 w-14 border-b border-r bg-muted p-0 text-center text-xs text-muted-foreground">
+                  <button
+                    type="button"
+                    onClick={selectAllCells}
+                    className="flex h-full min-h-14 w-full items-center justify-center transition hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    aria-label="Select all recipient cells"
+                    title="Select all cells"
+                  >
+                    #
+                  </button>
                 </th>
                 {columns.map((column) => (
                   <th key={column.id} className="min-w-56 border-b border-r p-2 text-left">
@@ -715,30 +836,67 @@ function BulkDraftCreator() {
                         {rowIndex + 1}
                       </div>
                     </td>
-                    {columns.map((column, columnIndex) => (
-                      <td key={column.id} className="border-b border-r p-0">
-                        <input
-                          value={row.values[column.id] ?? ""}
-                          onChange={(event) => updateCell(row.id, column.id, event.target.value)}
-                          onPaste={(event) => pasteGrid(event, rowIndex, columnIndex)}
-                          title={validation?.issue || row.statusMessage}
+                    {columns.map((column, columnIndex) => {
+                      const bounds = cellSelection ? selectionBounds(cellSelection) : null;
+                      const selected = Boolean(
+                        bounds &&
+                        rowIndex >= bounds.firstRow &&
+                        rowIndex <= bounds.lastRow &&
+                        columnIndex >= bounds.firstColumn &&
+                        columnIndex <= bounds.lastColumn,
+                      );
+                      return (
+                        <td
+                          key={column.id}
                           className={cn(
-                            "h-11 w-full min-w-56 bg-transparent px-3 outline-none focus:bg-card focus:ring-2 focus:ring-inset focus:ring-ring",
-                            column.type === "email" &&
-                              validation?.issue &&
-                              !isRowEmpty(row) &&
-                              "text-destructive",
+                            "relative border-b border-r p-0",
+                            selected && "bg-primary/10 ring-2 ring-inset ring-primary/70",
                           )}
-                        />
-                      </td>
-                    ))}
+                        >
+                          <input
+                            data-grid-cell="true"
+                            aria-selected={selected}
+                            value={row.values[column.id] ?? ""}
+                            onChange={(event) => updateCell(row.id, column.id, event.target.value)}
+                            onPaste={(event) => pasteGrid(event, rowIndex, columnIndex)}
+                            onMouseDown={(event) => {
+                              selectingCellsRef.current = true;
+                              selectCell(rowIndex, columnIndex, event.shiftKey);
+                              if (event.shiftKey) event.preventDefault();
+                            }}
+                            onMouseEnter={() => {
+                              if (!selectingCellsRef.current) return;
+                              setCellSelection((current) =>
+                                current
+                                  ? { ...current, focus: { rowIndex, columnIndex } }
+                                  : {
+                                      anchor: { rowIndex, columnIndex },
+                                      focus: { rowIndex, columnIndex },
+                                    },
+                              );
+                            }}
+                            title={validation?.issue || row.statusMessage}
+                            className={cn(
+                              "h-11 w-full min-w-56 bg-transparent px-3 outline-none focus:bg-card focus:ring-2 focus:ring-inset focus:ring-ring",
+                              column.type === "email" &&
+                                validation?.issue &&
+                                !isRowEmpty(row) &&
+                                "text-destructive",
+                            )}
+                          />
+                        </td>
+                      );
+                    })}
                     <td className="border-b px-2">
                       <button
                         type="button"
                         aria-label={`Delete row ${rowIndex + 1}`}
-                        onClick={() =>
-                          setRows((current) => current.filter((item) => item.id !== row.id))
-                        }
+                        onClick={() => {
+                          setRows((current) =>
+                            ensureMinimumRows(current.filter((item) => item.id !== row.id)),
+                          );
+                          setCellSelection(null);
+                        }}
                         className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus:opacity-100"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -751,17 +909,37 @@ function BulkDraftCreator() {
           </table>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              setRows((current) => [...current, ...Array.from({ length: 5 }, makeEmptyRow)])
-            }
-          >
-            <Plus className="h-4 w-4" /> Add 5 rows
-          </Button>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setRows((current) => [...current, ...Array.from({ length: 5 }, makeEmptyRow)])
+              }
+            >
+              <Plus className="h-4 w-4" /> Add 5 rows
+            </Button>
+            {DEFAULT_COLUMNS.filter(
+              (defaultColumn) => !columns.some((column) => column.id === defaultColumn.id),
+            ).map((defaultColumn) => (
+              <Button
+                key={defaultColumn.id}
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => addDefaultColumn(defaultColumn)}
+              >
+                <Plus className="h-4 w-4" /> Add {defaultColumn.label}
+              </Button>
+            ))}
+            {cellSelection && (
+              <span className="text-xs font-medium text-muted-foreground">
+                Drag or Shift-click to select. Press Delete to clear.
+              </span>
+            )}
+          </div>
           {!emailColumn && (
             <p className="text-sm font-medium text-destructive">
               Choose one column as the recipient email using the mail icon.
@@ -986,7 +1164,7 @@ function BulkDraftCreator() {
         </section>
       )}
 
-      <div className="sticky bottom-4 z-30 rounded-3xl bg-foreground p-3 text-background shadow-xl ring-1 ring-border/30 md:p-4 lg:mr-40">
+      <div className="sticky bottom-20 z-30 rounded-3xl bg-foreground p-3 text-background shadow-xl ring-1 ring-border/30 md:bottom-4 md:p-4 lg:mr-40">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="font-semibold">

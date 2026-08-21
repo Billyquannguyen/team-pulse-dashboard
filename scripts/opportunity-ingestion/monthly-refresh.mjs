@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
-import { readdir, readFile, stat, writeFile, mkdir } from "node:fs/promises";
+import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,7 +16,6 @@ const DEFAULT_OUTPUT_DIR = ".opportunity-ingestion/monthly-refresh/latest";
 const DEFAULT_LOGS_DIR = ".opportunity-ingestion/monthly-refresh/logs";
 const PACKAGE_NAME = "team-billion-gpt-knowledge-refresh.zip";
 const SUMMARY_NAME = "monthly-gpt-refresh-summary.md";
-const DEFAULT_ATTACHMENT_LIMIT_BYTES = 40 * 1024 * 1024;
 
 const KNOWLEDGE_PACKAGE_FILES = [
   "team-billion-matching-intelligence.csv",
@@ -30,13 +30,15 @@ const KNOWLEDGE_PACKAGE_FILES = [
   "team-billion-brand-matching-playbook.md",
 ];
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  runMonthlyRefreshHelper(process.argv.slice(2)).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
 
-async function main() {
-  const [command, ...args] = process.argv.slice(2);
+export async function runMonthlyRefreshHelper(cliArgs = []) {
+  const [command, ...args] = cliArgs;
   const options = parseArgs(args);
 
   if (!command || command === "--help" || command === "-h") {
@@ -49,13 +51,8 @@ async function main() {
     return;
   }
 
-  if (command === "notify-success") {
-    await notifySuccess(options);
-    return;
-  }
-
-  if (command === "notify-failure") {
-    await notifyFailure(options);
+  if (command === "notify-discord-failure") {
+    await notifyDiscordFailure(options);
     return;
   }
 
@@ -101,8 +98,8 @@ function parseArgs(args) {
     }
   }
 
-  options.outputDir = path.resolve(process.cwd(), options.outputDir);
-  options.logsDir = path.resolve(process.cwd(), options.logsDir);
+  options.outputDir = path.resolve(runtimeRoot(), options.outputDir);
+  options.logsDir = path.resolve(runtimeRoot(), options.logsDir);
   return options;
 }
 
@@ -117,15 +114,14 @@ Monthly Opportunity Intelligence refresh helper
 
 Commands:
   node scripts/opportunity-ingestion/monthly-refresh.mjs prepare
-  node scripts/opportunity-ingestion/monthly-refresh.mjs notify-success
-  node scripts/opportunity-ingestion/monthly-refresh.mjs notify-failure --failed-step "Gmail ingestion"
+  node scripts/opportunity-ingestion/monthly-refresh.mjs notify-discord
+  node scripts/opportunity-ingestion/monthly-refresh.mjs notify-discord-failure --failed-step "Gmail ingestion"
   node scripts/opportunity-ingestion/monthly-refresh.mjs notify-test
 
 What it does:
   - packages only approved Custom GPT Knowledge files
   - creates monthly-gpt-refresh-summary.md
-  - sends success or failure email through Resend
-  - optionally posts a no-files summary to Discord
+  - posts success or failure notifications to Discord
 `);
 }
 
@@ -219,7 +215,7 @@ function buildMonthlyReport({
   const tierCounts = summary.tierCounts ?? {};
   const outputCounts = summary.outputCounts ?? {};
   const backupLine = backupManifest
-    ? `Created: ${path.relative(process.cwd(), backupManifest)}`
+    ? `Created: ${path.relative(runtimeRoot(), backupManifest)}`
     : (backupLog.match(/^Manifest:\s*(.+)$/m)?.[1] ?? "Not found in this run output.");
 
   return `# Monthly GPT Refresh Summary
@@ -262,8 +258,8 @@ ${formatCounts(tierCounts)}
 
 ## Export
 
-- Export folder location: ${path.relative(process.cwd(), exportDir)}
-- Upload package: ${path.relative(process.cwd(), packagePath)}
+- Export folder location: ${path.relative(runtimeRoot(), exportDir)}
+- Upload package: ${path.relative(runtimeRoot(), packagePath)}
 - Backup created: ${backupLine}
 
 ## Warnings
@@ -326,9 +322,7 @@ async function buildDecisionMetrics({ exportDir, backupManifest, metrics }) {
       id && !oldOpportunityIds.has(compactKey(id)) && (priorityScore >= 80 || tier === "Tier 1")
     );
   });
-  const priorityById = new Map(
-    priorityRows.map((row) => [compactKey(row["Opportunity ID"]), row]),
-  );
+  const priorityById = new Map(priorityRows.map((row) => [compactKey(row["Opportunity ID"]), row]));
   const actionableOpportunities = opportunityRows
     .filter((row) => {
       const id = row["Opportunity ID"]?.trim();
@@ -378,7 +372,10 @@ function toActionableOpportunity(row, priorityRow = {}) {
     contactEmail: row["Contact Email"]?.trim() || "Unknown",
     sourceOrganization: row["Source Organization Name"]?.trim() || "Unknown source",
     opportunityType: row["Opportunity Type"]?.trim() || "Opportunity",
-    summary: row["Campaign Summary"]?.trim() || row["Source Email Subject"]?.trim() || "No summary captured",
+    summary:
+      row["Campaign Summary"]?.trim() ||
+      row["Source Email Subject"]?.trim() ||
+      "No summary captured",
     budget: budget || row["Budget Notes"]?.trim() || "budget not stated",
     deadline: cleanDeadline(row["Timeline / Deadline"]),
     sourceLink: row["Source Email Link"]?.trim() || "",
@@ -387,10 +384,19 @@ function toActionableOpportunity(row, priorityRow = {}) {
 }
 
 function cleanDeadline(value) {
-  const text = String(value ?? "").replace(/&(?:#39|apos);/g, "'").replace(/\s+/g, " ").trim();
+  const text = String(value ?? "")
+    .replace(/&(?:#39|apos);/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!text || text.length > 90) return "deadline not stated";
-  const hasDate = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\s+\d{1,2}/i.test(text);
-  const hasBoundedWindow = /\b(?:by|before|deadline|due|within)\b.{0,45}\b(?:\d{1,2}[\/.\-]\d{1,2}|\d+\s+(?:hours?|days?|weeks?))\b/i.test(text);
+  const hasDate =
+    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\s+\d{1,2}/i.test(
+      text,
+    );
+  const hasBoundedWindow =
+    /\b(?:by|before|deadline|due|within)\b.{0,45}\b(?:\d{1,2}[\/.\-]\d{1,2}|\d+\s+(?:hours?|days?|weeks?))\b/i.test(
+      text,
+    );
   return hasDate || hasBoundedWindow ? text : "deadline not stated";
 }
 
@@ -508,35 +514,6 @@ function collectWarnings(ingestLog, summary) {
   return unique(warnings);
 }
 
-async function notifySuccess(options) {
-  const artifact = await readArtifacts(options.outputDir);
-  const packageStats = await stat(artifact.packagePath);
-  const limit = Number(process.env.EMAIL_ATTACHMENT_MAX_BYTES || DEFAULT_ATTACHMENT_LIMIT_BYTES);
-  const estimatedBase64Size = Math.ceil(packageStats.size / 3) * 4;
-  const canAttach = estimatedBase64Size <= limit;
-  const report = await readFile(artifact.summaryPath, "utf8");
-  const runUrl = githubRunUrl();
-  const artifactName = "team-billion-gpt-knowledge-refresh";
-  const attachmentNote = canAttach
-    ? "The GPT upload package is attached."
-    : `The ZIP is too large for email attachment. Download the ${artifactName} artifact from this GitHub Actions run: ${runUrl}`;
-
-  await sendResendEmail({
-    subject: "Team Billion GPT Knowledge Refresh Ready",
-    text: `${report}\n\n${attachmentNote}\n\nGitHub Actions run: ${runUrl}\n`,
-    attachments: canAttach
-      ? [
-          {
-            filename: PACKAGE_NAME,
-            content: await readBase64(artifact.packagePath),
-          },
-        ]
-      : [],
-  });
-
-  console.log("Success notification sent.");
-}
-
 async function notifyDiscord(options) {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL?.trim();
   if (!webhookUrl) {
@@ -551,26 +528,8 @@ async function notifyDiscord(options) {
 }
 
 async function notifyTest() {
-  const runUrl = githubRunUrl();
+  const runUrl = runStatusUrl();
   const timestamp = new Date().toISOString();
-  const emailText = `Team Billion notification test.
-
-This is only a test of the monthly refresh email setup.
-No Gmail ingestion ran.
-No Sheet rows were changed.
-No GPT export files were regenerated.
-
-Sent at: ${timestamp}
-GitHub Actions run: ${runUrl}
-`;
-
-  await sendResendEmail({
-    subject: "Team Billion Monthly Refresh Notification Test",
-    text: emailText,
-    attachments: [],
-  });
-  console.log("Test email notification sent.");
-
   const webhookUrl = requiredEnv("DISCORD_WEBHOOK_URL").trim();
   await sendDiscordMessage(
     webhookUrl,
@@ -588,63 +547,34 @@ GitHub Actions run: ${runUrl}
   console.log("Test Discord notification sent.");
 }
 
-async function notifyFailure(options) {
+async function notifyDiscordFailure(options) {
   const failure = await readFailure(options);
-  const runUrl = githubRunUrl();
+  const runUrl = runStatusUrl();
   const backupManifest = await latestPath(
     BACKUP_BASE_DIR,
     (name) => name.startsWith("backup-") && name.endsWith(".json"),
   );
   const backupStatus = backupManifest
-    ? `Latest backup manifest in this runner: ${path.relative(process.cwd(), backupManifest)}`
+    ? `Latest backup manifest in this runner: ${path.relative(runtimeRoot(), backupManifest)}`
     : "No backup manifest found in this runner.";
   const recovery = backupManifest
     ? "Review the failed stage, then rerun manually from GitHub Actions. If the Sheet looks wrong, use the backup manifest with npm run opportunity:restore-backup."
     : "Fix the failed stage, then rerun manually from GitHub Actions. If ingestion started before backup completed, inspect the Sheet before rerunning.";
 
-  await sendResendEmail({
-    subject: "Team Billion GPT Knowledge Refresh Failed",
-    text: `Team Billion monthly opportunity refresh failed.
+  const webhookUrl = requiredEnv("DISCORD_WEBHOOK_URL").trim();
+  await sendDiscordMessage(
+    webhookUrl,
+    [
+      "**Team Billion monthly refresh failed**",
+      `Failed step: ${failure.failedStep}`,
+      `Error: ${failure.errorMessage}`,
+      `Backup: ${backupStatus}`,
+      `Recovery: ${recovery}`,
+      `Run: ${runUrl}`,
+    ].join("\n"),
+  );
 
-Failed step: ${failure.failedStep}
-Error message: ${failure.errorMessage}
-Backup status: ${backupStatus}
-Suggested recovery action: ${recovery}
-GitHub Actions run: ${runUrl}
-`,
-    attachments: [],
-  });
-
-  console.log("Failure notification sent.");
-}
-
-async function sendResendEmail({ subject, text, attachments }) {
-  const apiKey = requiredEnv("EMAIL_PROVIDER_API_KEY");
-  const to = requiredEnv("MONTHLY_REFRESH_EMAIL_TO");
-  const from = requiredEnv("MONTHLY_REFRESH_EMAIL_FROM");
-
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: to
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean),
-      subject,
-      text,
-      attachments,
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Resend email failed (${response.status}): ${body}`);
-  }
+  console.log("Discord failure notification sent.");
 }
 
 async function sendDiscordMessage(webhookUrl, content) {
@@ -677,10 +607,6 @@ async function readFailure(options) {
   };
 }
 
-async function readBase64(filePath) {
-  return (await readFile(filePath)).toString("base64");
-}
-
 async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, "utf8"));
 }
@@ -699,7 +625,7 @@ async function readOptionalLog(logsDir, names) {
 }
 
 async function latestPath(baseDir, predicate) {
-  const absoluteBase = path.resolve(process.cwd(), baseDir);
+  const absoluteBase = path.resolve(runtimeRoot(), baseDir);
   if (!existsSync(absoluteBase)) return null;
   const entries = await readdir(absoluteBase, { withFileTypes: true });
   const matches = entries
@@ -707,6 +633,10 @@ async function latestPath(baseDir, predicate) {
     .map((entry) => path.join(absoluteBase, entry.name))
     .sort();
   return matches.at(-1) ?? null;
+}
+
+function runtimeRoot() {
+  return process.env.OPPORTUNITY_RUNTIME_ROOT?.trim() || process.cwd();
 }
 
 function formatMetric(value) {
@@ -728,7 +658,7 @@ function buildDiscordMessage(artifact) {
   const metrics = artifact.metrics ?? {};
   const decision = artifact.decisionMetrics ?? {};
   const tierCounts = artifact.tierCounts ?? {};
-  const runUrl = githubRunUrl();
+  const runUrl = runStatusUrl();
 
   for (let itemLimit = 4; itemLimit >= 1; itemLimit -= 1) {
     const message = [
@@ -748,12 +678,12 @@ function buildDiscordMessage(artifact) {
       "**Actionable new opportunities**",
       compactOpportunityList(decision.actionableOpportunities, itemLimit),
       "",
-      "No files are attached in Discord. Billy gets the ZIP + full summary by email.",
+      "The ZIP package is available to admins in Goals & Analytics.",
       `Run: ${runUrl}`,
     ].join("\n");
     if (message.length <= 1950) return message;
   }
-  return `Monthly Opportunity Intelligence refresh is ready. The full actionable summary was emailed to Billy. Run: ${runUrl}`;
+  return `Monthly Opportunity Intelligence refresh is ready. Open Goals & Analytics as an admin to download the package. Run: ${runUrl}`;
 }
 
 function compactCounts(counts) {
@@ -771,7 +701,8 @@ function compactEntityList(items) {
 }
 
 function compactOpportunityList(items, limit = 4) {
-  if (!items?.length) return "No verified new opportunity with a contact email was captured this run.";
+  if (!items?.length)
+    return "No verified new opportunity with a contact email was captured this run.";
   return items
     .slice(0, limit)
     .map((item, index) => {
@@ -858,13 +789,14 @@ function requiredEnv(name) {
   return value;
 }
 
-function githubRunUrl() {
-  if (
-    !process.env.GITHUB_SERVER_URL ||
-    !process.env.GITHUB_REPOSITORY ||
-    !process.env.GITHUB_RUN_ID
-  ) {
-    return "GitHub Actions run URL not available outside Actions.";
+function runStatusUrl() {
+  if (process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID) {
+    return `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
   }
-  return `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+  const origin =
+    process.env.DASHBOARD_PUBLIC_URL?.trim() ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : "");
+  return origin ? `${origin.replace(/\/$/, "")}/goals` : "Open Goals & Analytics in the dashboard.";
 }

@@ -25,6 +25,9 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiWeeklyGmailOutreachReportRouteImport } from './routes/api/weekly-gmail-outreach-report'
 import { Route as ApiSlackLinkAlertsRouteImport } from './routes/api/slack-link-alerts'
 import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
+import { Route as ApiMonthlyOpportunityRefreshWorkerRouteImport } from './routes/api/monthly-opportunity-refresh-worker'
+import { Route as ApiMonthlyOpportunityRefreshPackageRouteImport } from './routes/api/monthly-opportunity-refresh-package'
+import { Route as ApiMonthlyOpportunityRefreshRouteImport } from './routes/api/monthly-opportunity-refresh'
 import { Route as ApiBulkFollowUpWorkerRouteImport } from './routes/api/bulk-follow-up-worker'
 import { Route as ApiSlackLinkAlertsSlotRouteImport } from './routes/api/slack-link-alerts.$slot'
 import { Route as ApiCalendlyRemindersWebhookRouteImport } from './routes/api/calendly-reminders/webhook'
@@ -112,6 +115,24 @@ const ApiSlackFollowupsRoute = ApiSlackFollowupsRouteImport.update({
   path: '/api/slack-followups',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMonthlyOpportunityRefreshWorkerRoute =
+  ApiMonthlyOpportunityRefreshWorkerRouteImport.update({
+    id: '/api/monthly-opportunity-refresh-worker',
+    path: '/api/monthly-opportunity-refresh-worker',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiMonthlyOpportunityRefreshPackageRoute =
+  ApiMonthlyOpportunityRefreshPackageRouteImport.update({
+    id: '/api/monthly-opportunity-refresh-package',
+    path: '/api/monthly-opportunity-refresh-package',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiMonthlyOpportunityRefreshRoute =
+  ApiMonthlyOpportunityRefreshRouteImport.update({
+    id: '/api/monthly-opportunity-refresh',
+    path: '/api/monthly-opportunity-refresh',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiBulkFollowUpWorkerRoute = ApiBulkFollowUpWorkerRouteImport.update({
   id: '/api/bulk-follow-up-worker',
   path: '/api/bulk-follow-up-worker',
@@ -154,6 +175,9 @@ export interface FileRoutesByFullPath {
   '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
   '/api/bulk-follow-up-worker': typeof ApiBulkFollowUpWorkerRoute
+  '/api/monthly-opportunity-refresh': typeof ApiMonthlyOpportunityRefreshRoute
+  '/api/monthly-opportunity-refresh-package': typeof ApiMonthlyOpportunityRefreshPackageRoute
+  '/api/monthly-opportunity-refresh-worker': typeof ApiMonthlyOpportunityRefreshWorkerRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
@@ -177,6 +201,9 @@ export interface FileRoutesByTo {
   '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
   '/api/bulk-follow-up-worker': typeof ApiBulkFollowUpWorkerRoute
+  '/api/monthly-opportunity-refresh': typeof ApiMonthlyOpportunityRefreshRoute
+  '/api/monthly-opportunity-refresh-package': typeof ApiMonthlyOpportunityRefreshPackageRoute
+  '/api/monthly-opportunity-refresh-worker': typeof ApiMonthlyOpportunityRefreshWorkerRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
@@ -201,6 +228,9 @@ export interface FileRoutesById {
   '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
   '/api/bulk-follow-up-worker': typeof ApiBulkFollowUpWorkerRoute
+  '/api/monthly-opportunity-refresh': typeof ApiMonthlyOpportunityRefreshRoute
+  '/api/monthly-opportunity-refresh-package': typeof ApiMonthlyOpportunityRefreshPackageRoute
+  '/api/monthly-opportunity-refresh-worker': typeof ApiMonthlyOpportunityRefreshWorkerRoute
   '/api/slack-followups': typeof ApiSlackFollowupsRoute
   '/api/slack-link-alerts': typeof ApiSlackLinkAlertsRouteWithChildren
   '/api/weekly-gmail-outreach-report': typeof ApiWeeklyGmailOutreachReportRoute
@@ -226,6 +256,9 @@ export interface FileRouteTypes {
     | '/pitching-sheets'
     | '/team-members'
     | '/api/bulk-follow-up-worker'
+    | '/api/monthly-opportunity-refresh'
+    | '/api/monthly-opportunity-refresh-package'
+    | '/api/monthly-opportunity-refresh-worker'
     | '/api/slack-followups'
     | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
@@ -249,6 +282,9 @@ export interface FileRouteTypes {
     | '/pitching-sheets'
     | '/team-members'
     | '/api/bulk-follow-up-worker'
+    | '/api/monthly-opportunity-refresh'
+    | '/api/monthly-opportunity-refresh-package'
+    | '/api/monthly-opportunity-refresh-worker'
     | '/api/slack-followups'
     | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
@@ -272,6 +308,9 @@ export interface FileRouteTypes {
     | '/pitching-sheets'
     | '/team-members'
     | '/api/bulk-follow-up-worker'
+    | '/api/monthly-opportunity-refresh'
+    | '/api/monthly-opportunity-refresh-package'
+    | '/api/monthly-opportunity-refresh-worker'
     | '/api/slack-followups'
     | '/api/slack-link-alerts'
     | '/api/weekly-gmail-outreach-report'
@@ -296,6 +335,9 @@ export interface RootRouteChildren {
   PitchingSheetsRoute: typeof PitchingSheetsRoute
   TeamMembersRoute: typeof TeamMembersRoute
   ApiBulkFollowUpWorkerRoute: typeof ApiBulkFollowUpWorkerRoute
+  ApiMonthlyOpportunityRefreshRoute: typeof ApiMonthlyOpportunityRefreshRoute
+  ApiMonthlyOpportunityRefreshPackageRoute: typeof ApiMonthlyOpportunityRefreshPackageRoute
+  ApiMonthlyOpportunityRefreshWorkerRoute: typeof ApiMonthlyOpportunityRefreshWorkerRoute
   ApiSlackFollowupsRoute: typeof ApiSlackFollowupsRoute
   ApiSlackLinkAlertsRoute: typeof ApiSlackLinkAlertsRouteWithChildren
   ApiWeeklyGmailOutreachReportRoute: typeof ApiWeeklyGmailOutreachReportRoute
@@ -418,6 +460,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSlackFollowupsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/monthly-opportunity-refresh-worker': {
+      id: '/api/monthly-opportunity-refresh-worker'
+      path: '/api/monthly-opportunity-refresh-worker'
+      fullPath: '/api/monthly-opportunity-refresh-worker'
+      preLoaderRoute: typeof ApiMonthlyOpportunityRefreshWorkerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/monthly-opportunity-refresh-package': {
+      id: '/api/monthly-opportunity-refresh-package'
+      path: '/api/monthly-opportunity-refresh-package'
+      fullPath: '/api/monthly-opportunity-refresh-package'
+      preLoaderRoute: typeof ApiMonthlyOpportunityRefreshPackageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/monthly-opportunity-refresh': {
+      id: '/api/monthly-opportunity-refresh'
+      path: '/api/monthly-opportunity-refresh'
+      fullPath: '/api/monthly-opportunity-refresh'
+      preLoaderRoute: typeof ApiMonthlyOpportunityRefreshRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/bulk-follow-up-worker': {
       id: '/api/bulk-follow-up-worker'
       path: '/api/bulk-follow-up-worker'
@@ -482,6 +545,11 @@ const rootRouteChildren: RootRouteChildren = {
   PitchingSheetsRoute: PitchingSheetsRoute,
   TeamMembersRoute: TeamMembersRoute,
   ApiBulkFollowUpWorkerRoute: ApiBulkFollowUpWorkerRoute,
+  ApiMonthlyOpportunityRefreshRoute: ApiMonthlyOpportunityRefreshRoute,
+  ApiMonthlyOpportunityRefreshPackageRoute:
+    ApiMonthlyOpportunityRefreshPackageRoute,
+  ApiMonthlyOpportunityRefreshWorkerRoute:
+    ApiMonthlyOpportunityRefreshWorkerRoute,
   ApiSlackFollowupsRoute: ApiSlackFollowupsRoute,
   ApiSlackLinkAlertsRoute: ApiSlackLinkAlertsRouteWithChildren,
   ApiWeeklyGmailOutreachReportRoute: ApiWeeklyGmailOutreachReportRoute,

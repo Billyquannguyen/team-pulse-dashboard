@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const BACKUP_DIR = ".opportunity-ingestion/backups";
 const LATEST_BACKUP_FILE = "latest-backup.json";
@@ -11,14 +12,16 @@ const SCOPES = {
   sheets: "https://www.googleapis.com/auth/spreadsheets",
 };
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  runOpportunityBackup(process.argv.slice(2)).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
 
-async function main() {
+export async function runOpportunityBackup(args = []) {
   loadEnvFiles([".env", ".env.local", ".env.opportunity-ingestion"]);
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseArgs(args);
 
   if (options.help || !options.command) {
     printHelp();
@@ -30,8 +33,7 @@ async function main() {
   const sheets = createSheetsClient(config.spreadsheetId, tokenProvider);
 
   if (options.command === "create") {
-    await createBackup({ config, sheets });
-    return;
+    return createBackup({ config, sheets });
   }
 
   if (options.command === "restore") {
@@ -122,7 +124,8 @@ async function createBackup({ config, sheets }) {
   const timestamp = new Date().toISOString();
   const safeTimestamp = timestamp.replace(/[:.]/g, "-");
   const metadata = await sheets.metadata();
-  const sourceTitle = metadata.properties?.title ?? "Team Billion Opportunity Intelligence Database";
+  const sourceTitle =
+    metadata.properties?.title ?? "Team Billion Opportunity Intelligence Database";
   const tabs = {};
   const rowCountsByTab = {};
 
@@ -134,7 +137,10 @@ async function createBackup({ config, sheets }) {
 
     const title = properties.title;
     const formulaValues = await sheets.valuesGet(`${quoteSheet(title)}!A1:ZZZ`, "FORMULA");
-    const formattedValues = await sheets.valuesGet(`${quoteSheet(title)}!A1:ZZZ`, "FORMATTED_VALUE");
+    const formattedValues = await sheets.valuesGet(
+      `${quoteSheet(title)}!A1:ZZZ`,
+      "FORMATTED_VALUE",
+    );
     const values = formulaValues.values ?? [];
 
     tabs[title] = {
@@ -177,9 +183,9 @@ async function createBackup({ config, sheets }) {
     ],
   };
 
-  await mkdir(BACKUP_DIR, { recursive: true });
-  const manifestPath = path.join(process.cwd(), BACKUP_DIR, `backup-${safeTimestamp}.json`);
-  const latestPath = path.join(process.cwd(), BACKUP_DIR, LATEST_BACKUP_FILE);
+  await mkdir(path.join(runtimeRoot(), BACKUP_DIR), { recursive: true });
+  const manifestPath = path.join(runtimeRoot(), BACKUP_DIR, `backup-${safeTimestamp}.json`);
+  const latestPath = path.join(runtimeRoot(), BACKUP_DIR, LATEST_BACKUP_FILE);
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
   await writeFile(latestPath, JSON.stringify(manifest, null, 2));
 
@@ -190,11 +196,12 @@ async function createBackup({ config, sheets }) {
   for (const [tab, counts] of Object.entries(rowCountsByTab)) {
     console.log(`- ${tab}: used rows ${counts.usedRows}, grid rows ${counts.gridRows}`);
   }
+  return { manifest, manifestPath, latestPath };
 }
 
 async function restoreBackup({ config, sheets, options }) {
   const manifestPath = path.resolve(
-    options.backupManifest || path.join(process.cwd(), BACKUP_DIR, LATEST_BACKUP_FILE),
+    options.backupManifest || path.join(runtimeRoot(), BACKUP_DIR, LATEST_BACKUP_FILE),
   );
 
   if (!existsSync(manifestPath)) {
@@ -245,7 +252,11 @@ async function restoreBackup({ config, sheets, options }) {
   await sheets.valuesBatchUpdate(data);
 
   const restoredAt = new Date().toISOString();
-  const restoreLogPath = path.join(process.cwd(), BACKUP_DIR, `restore-${restoredAt.replace(/[:.]/g, "-")}.json`);
+  const restoreLogPath = path.join(
+    runtimeRoot(),
+    BACKUP_DIR,
+    `restore-${restoredAt.replace(/[:.]/g, "-")}.json`,
+  );
   await writeFile(
     restoreLogPath,
     JSON.stringify(
@@ -265,7 +276,9 @@ async function restoreBackup({ config, sheets, options }) {
 }
 
 async function ensureTabsExist(sheets, metadata, manifest) {
-  const existing = new Set((metadata.sheets ?? []).map((sheet) => sheet.properties?.title).filter(Boolean));
+  const existing = new Set(
+    (metadata.sheets ?? []).map((sheet) => sheet.properties?.title).filter(Boolean),
+  );
   const requests = [];
 
   for (const [title, tab] of Object.entries(manifest.tabs ?? {})) {
@@ -345,7 +358,9 @@ function createGoogleTokenProvider(config) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.access_token) {
-      throw new Error(`Google service account auth failed (${response.status}): ${result.error_description ?? result.error ?? "No access token returned"}`);
+      throw new Error(
+        `Google service account auth failed (${response.status}): ${result.error_description ?? result.error ?? "No access token returned"}`,
+      );
     }
     cached = {
       accessToken: result.access_token,
@@ -399,14 +414,16 @@ async function googleFetch(url, tokenProvider, init = {}) {
       await sleep(Number.isFinite(retryAfter) ? retryAfter * 1000 : 1000 * 2 ** attempt);
       continue;
     }
-    throw new Error(`Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`);
+    throw new Error(
+      `Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`,
+    );
   }
   throw new Error(`Google API failed after retries: ${url.pathname}`);
 }
 
 function loadEnvFiles(files) {
   for (const file of files) {
-    const fullPath = path.resolve(process.cwd(), file);
+    const fullPath = path.resolve(runtimeRoot(), file);
     if (!existsSync(fullPath)) continue;
     const raw = readFileSyncSafe(fullPath);
     for (const line of raw.split(/\r?\n/)) {
@@ -419,6 +436,10 @@ function loadEnvFiles(files) {
   }
 }
 
+function runtimeRoot() {
+  return process.env.OPPORTUNITY_RUNTIME_ROOT?.trim() || process.cwd();
+}
+
 function readFileSyncSafe(file) {
   return existsSync(file) ? Buffer.from(readFileSync(file)).toString("utf8") : "";
 }
@@ -429,13 +450,20 @@ function normalizePrivateKey(value) {
 
 function pemToArrayBuffer(pem) {
   return Buffer.from(
-    pem.replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\s/g, ""),
+    pem
+      .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+      .replace(/-----END PRIVATE KEY-----/g, "")
+      .replace(/\s/g, ""),
     "base64",
   );
 }
 
 function base64Url(input) {
-  return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function quoteSheet(name) {

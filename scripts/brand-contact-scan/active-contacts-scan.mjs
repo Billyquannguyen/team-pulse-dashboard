@@ -232,18 +232,18 @@ function parseArgs(args) {
 
 function loadConfig(options) {
   const required = [
-    "GMAIL_CLIENT_ID",
-    "GMAIL_CLIENT_SECRET",
-    "GMAIL_REFRESH_TOKEN",
+    "MASTER_GMAIL_CLIENT_ID",
+    "MASTER_GMAIL_CLIENT_SECRET",
+    "MASTER_GMAIL_REFRESH_TOKEN",
     "GOOGLE_SERVICE_ACCOUNT_EMAIL",
     "GOOGLE_PRIVATE_KEY",
   ];
   const missing = required.filter((name) => !process.env[name]);
   if (missing.length) throw new Error(`Missing environment variables: ${missing.join(", ")}`);
   return {
-    gmailClientId: process.env.GMAIL_CLIENT_ID,
-    gmailClientSecret: process.env.GMAIL_CLIENT_SECRET,
-    gmailRefreshToken: process.env.GMAIL_REFRESH_TOKEN,
+    gmailClientId: process.env.MASTER_GMAIL_CLIENT_ID,
+    gmailClientSecret: process.env.MASTER_GMAIL_CLIENT_SECRET,
+    gmailRefreshToken: process.env.MASTER_GMAIL_REFRESH_TOKEN,
     serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
     privateKey: String(process.env.GOOGLE_PRIVATE_KEY).replace(/\\n/g, "\n"),
     spreadsheetId: SPREADSHEET_ID,
@@ -994,8 +994,18 @@ function isoDate(value) {
   const humanDate = text.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
   if (humanDate) {
     const month = {
-      jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
-      jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+      jan: "01",
+      feb: "02",
+      mar: "03",
+      apr: "04",
+      may: "05",
+      jun: "06",
+      jul: "07",
+      aug: "08",
+      sep: "09",
+      oct: "10",
+      nov: "11",
+      dec: "12",
     }[humanDate[2].toLowerCase()];
     if (month) return `${humanDate[3]}-${month}-${humanDate[1].padStart(2, "0")}`;
   }

@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 import {
   getGmailReadAccessToken,
@@ -82,8 +82,12 @@ const AUDIT_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 const ACTIVE_TTL_SECONDS = 24 * 60 * 60;
 const CHUNK_SIZE = 5;
 
+const getFollowUpRedisServer = createServerOnlyFn(
+  async () => import("@/lib/bulk-follow-up-redis.server"),
+);
+
 async function followUpRedisCommand<T>(command: Array<string | number>) {
-  const redis = await import("@/lib/bulk-follow-up-redis.server");
+  const redis = await getFollowUpRedisServer();
   return redis.followUpRedisCommand<T>(command);
 }
 
@@ -121,32 +125,11 @@ async function writeJob(job: StoredJob) {
   ]);
 }
 
-function requiredEnv(name: string) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`Missing ${name} in Vercel Environment Variables.`);
-  return value;
-}
+const getGmailOAuthServer = createServerOnlyFn(async () => import("@/lib/gmail-oauth.server"));
 
 async function getComposeAccessToken() {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: requiredEnv("BRAND_FINDER_GMAIL_CLIENT_ID"),
-      client_secret: requiredEnv("BRAND_FINDER_GMAIL_CLIENT_SECRET"),
-      refresh_token: requiredEnv("BRAND_FINDER_GMAIL_REFRESH_TOKEN"),
-      grant_type: "refresh_token",
-    }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const payload = (await response.json().catch(() => null)) as {
-    access_token?: string;
-    error_description?: string;
-  } | null;
-  if (!response.ok || !payload?.access_token) {
-    throw new Error(payload?.error_description ?? "Gmail compose authentication failed.");
-  }
-  return payload.access_token;
+  const { getMasterGmailAccessToken } = await getGmailOAuthServer();
+  return getMasterGmailAccessToken();
 }
 
 function base64Url(value: string) {

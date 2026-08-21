@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const EXPORT_DIR = ".opportunity-ingestion/gpt-exports";
 const SCOPES = {
@@ -356,14 +357,16 @@ const WEAK_AUDIENCE_PATTERNS = [
   /\b(please send|could you send|we need to review|hope you|thank you)\b/i,
 ];
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  runOpportunityGptExport(process.argv.slice(2)).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
 
-async function main() {
+export async function runOpportunityGptExport(args = []) {
   loadEnvFiles([".env", ".env.local", ".env.opportunity-ingestion"]);
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseArgs(args);
   if (options.help) {
     printHelp();
     return;
@@ -413,8 +416,10 @@ function parseArgs(args) {
   for (const arg of args) {
     if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg.startsWith("--limit=")) options.limit = positiveNumber(arg.split("=")[1], "limit");
-    else if (arg.startsWith("--min-confidence=")) options.minConfidence = positiveNumber(arg.split("=")[1], "min-confidence");
-    else if (arg.startsWith("--source-export-dir=")) options.sourceExportDir = arg.slice("--source-export-dir=".length);
+    else if (arg.startsWith("--min-confidence="))
+      options.minConfidence = positiveNumber(arg.split("=")[1], "min-confidence");
+    else if (arg.startsWith("--source-export-dir="))
+      options.sourceExportDir = arg.slice("--source-export-dir=".length);
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -423,7 +428,8 @@ function parseArgs(args) {
 
 function positiveNumber(value, label) {
   const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) throw new Error(`--${label} must be a positive number.`);
+  if (!Number.isFinite(number) || number <= 0)
+    throw new Error(`--${label} must be a positive number.`);
   return number;
 }
 
@@ -477,12 +483,13 @@ async function loadWorkbook(sheets) {
     `${quoteSheet(TAB_NAMES.agencyIntelligence)}!A1:AD10000`,
     `${quoteSheet(TAB_NAMES.creatorSignals)}!A1:O10000`,
   ]);
-  const [opportunities, brandIntelligence, agencyIntelligence, creatorSignals] = result.valueRanges.map(parseTable);
+  const [opportunities, brandIntelligence, agencyIntelligence, creatorSignals] =
+    result.valueRanges.map(parseTable);
   return { opportunities, brandIntelligence, agencyIntelligence, creatorSignals };
 }
 
 async function loadWorkbookFromExportDir(sourceDir) {
-  const dir = path.resolve(process.cwd(), sourceDir);
+  const dir = path.resolve(runtimeRoot(), sourceDir);
   const summary = await readJsonIfExists(path.join(dir, "export-summary.json"));
   const curated = await readCsvTable(path.join(dir, "creator-brand-opportunities.csv"));
   const review = await readCsvTable(path.join(dir, "review-before-use-opportunities.csv"));
@@ -514,7 +521,8 @@ async function readCsvTable(file) {
 }
 
 function mergeTables(primary, secondary) {
-  const headers = primary.headers.length >= secondary.headers.length ? primary.headers : secondary.headers;
+  const headers =
+    primary.headers.length >= secondary.headers.length ? primary.headers : secondary.headers;
   return {
     headers,
     rows: [...primary.rows, ...secondary.rows],
@@ -570,11 +578,27 @@ function parseTable(valueRange) {
 
 function buildExport(workbook, options) {
   const opportunityExport = buildOpportunityExport(workbook.opportunities, options);
-  const brandRows = buildIntelligenceExportRows(workbook.brandIntelligence, "Brand Name", BRAND_EXPORT_HEADERS, 250, "brand");
-  const agencyRows = buildIntelligenceExportRows(workbook.agencyIntelligence, "Organization Name", AGENCY_EXPORT_HEADERS, 250, "agency");
+  const brandRows = buildIntelligenceExportRows(
+    workbook.brandIntelligence,
+    "Brand Name",
+    BRAND_EXPORT_HEADERS,
+    250,
+    "brand",
+  );
+  const agencyRows = buildIntelligenceExportRows(
+    workbook.agencyIntelligence,
+    "Organization Name",
+    AGENCY_EXPORT_HEADERS,
+    250,
+    "agency",
+  );
   const signalRows = buildSignalExportRows(workbook.creatorSignals, 250);
   const opportunities = opportunityExport.curated.slice(0, options.limit);
-  const matchingIntelligenceRows = buildMatchingIntelligenceRows(opportunities, { brandRows, agencyRows, signalRows });
+  const matchingIntelligenceRows = buildMatchingIntelligenceRows(opportunities, {
+    brandRows,
+    agencyRows,
+    signalRows,
+  });
   const matchingAudit = buildMatchingAudit(matchingIntelligenceRows, opportunities);
   const agencyCommercialRows = buildAgencyCommercialRows(opportunities, { agencyRows });
   const brandCommercialRows = buildBrandCommercialRows(opportunities, { signalRows });
@@ -652,10 +676,7 @@ function evaluateOpportunityRow(row, headerMap, options) {
   const subject = getCell(row, headerMap, "Source Email Subject");
   const campaignSummary = getCell(row, headerMap, "Campaign Summary");
   const originalBrandName = getCell(row, headerMap, "Brand Name");
-  const brandName = recoverBrandFromEvidence(
-    originalBrandName,
-    `${subject}\n${campaignSummary}`,
-  );
+  const brandName = recoverBrandFromEvidence(originalBrandName, `${subject}\n${campaignSummary}`);
   const sourceOrganizationName = getCell(row, headerMap, "Source Organization Name");
   const sourceOrganizationType = getCell(row, headerMap, "Source Organization Type");
   const confidenceScore = numberCell(row, headerMap, "Confidence Score");
@@ -666,49 +687,78 @@ function evaluateOpportunityRow(row, headerMap, options) {
   const commercialQuality = getCell(row, headerMap, "Commercial Quality");
   const budgetRating = getCell(row, headerMap, "Budget Rating");
   const budgetAmount = getCell(row, headerMap, "Budget Amount");
-  const expectedDealValue = numberCell(row, headerMap, "Expected Deal Value") || numberCell(row, headerMap, "Approx Deal Value");
+  const expectedDealValue =
+    numberCell(row, headerMap, "Expected Deal Value") ||
+    numberCell(row, headerMap, "Approx Deal Value");
   const affiliateOnly = getCell(row, headerMap, "Affiliate Only?");
   const affiliatePresent = getCell(row, headerMap, "Affiliate Present?");
   const fixedFee = getCell(row, headerMap, "Fixed Fee Present?");
   const songException = getCell(row, headerMap, "Song Promotion Exception?");
   const opportunityType = getCell(row, headerMap, "Opportunity Type");
-  const budgetFloorConcern = getCell(row, headerMap, "Budget Floor Concern") || getCell(row, headerMap, "Minimum Budget Concern");
+  const budgetFloorConcern =
+    getCell(row, headerMap, "Budget Floor Concern") ||
+    getCell(row, headerMap, "Minimum Budget Concern");
   const disqualifierFlags = getCell(row, headerMap, "Disqualifier Flags");
   const affiliateCommission = getCell(row, headerMap, "Affiliate Commission");
 
   const brandReviewReasons = brandNameReviewReasons(brandName, { subject });
-  const sourceReviewReasons = sourceNameReviewReasons(sourceOrganizationName, sourceOrganizationType);
+  const sourceReviewReasons = sourceNameReviewReasons(
+    sourceOrganizationName,
+    sourceOrganizationType,
+  );
   const creatorSignal = creatorSignalProfile(row, headerMap);
   const activeOpportunity = /active/i.test(relevance) || /open|negotiating|won/i.test(status);
   const historicalSignal = /historical/i.test(relevance) || /expired/i.test(status);
-  const hasKnownBudget = Boolean(budgetAmount && normalize(budgetAmount) !== "unknown") || expectedDealValue > 0;
+  const hasKnownBudget =
+    Boolean(budgetAmount && normalize(budgetAmount) !== "unknown") || expectedDealValue > 0;
   const missingBudget = !hasKnownBudget;
-  const lowBudgetThreshold = normalize(songException) === "yes" || normalize(opportunityType) === "song promotion" ? SONG_PROMOTION_LOW_BUDGET_FLOOR : LOW_BUDGET_FLOOR;
-  const lowBudget = normalize(budgetFloorConcern) === "yes" || /low/i.test(budgetRating) || (hasKnownBudget && expectedDealValue > 0 && expectedDealValue < lowBudgetThreshold);
-  const songPromotion = normalize(songException) === "yes" || normalize(opportunityType) === "song promotion";
-  const fixedFeePresent = normalize(fixedFee) === "yes" || (hasKnownBudget && normalize(affiliateOnly) !== "yes");
-  const affiliateOnlyConcern = (normalize(affiliateOnly) === "yes" || (/affiliate/i.test(opportunityType) && affiliateCommission && !fixedFeePresent)) && !songPromotion;
-  const nonActionableMarketing = looksNonActionableMarketing({ subject, campaignSummary, opportunityType, budgetAmount, deliverables: getCell(row, headerMap, "Deliverables") });
+  const lowBudgetThreshold =
+    normalize(songException) === "yes" || normalize(opportunityType) === "song promotion"
+      ? SONG_PROMOTION_LOW_BUDGET_FLOOR
+      : LOW_BUDGET_FLOOR;
+  const lowBudget =
+    normalize(budgetFloorConcern) === "yes" ||
+    /low/i.test(budgetRating) ||
+    (hasKnownBudget && expectedDealValue > 0 && expectedDealValue < lowBudgetThreshold);
+  const songPromotion =
+    normalize(songException) === "yes" || normalize(opportunityType) === "song promotion";
+  const fixedFeePresent =
+    normalize(fixedFee) === "yes" || (hasKnownBudget && normalize(affiliateOnly) !== "yes");
+  const affiliateOnlyConcern =
+    (normalize(affiliateOnly) === "yes" ||
+      (/affiliate/i.test(opportunityType) && affiliateCommission && !fixedFeePresent)) &&
+    !songPromotion;
+  const nonActionableMarketing = looksNonActionableMarketing({
+    subject,
+    campaignSummary,
+    opportunityType,
+    budgetAmount,
+    deliverables: getCell(row, headerMap, "Deliverables"),
+  });
   const usefulSource = isUsefulSource(sourceOrganizationName, sourceOrganizationType);
-  const reviewReasons = [
-    ...brandReviewReasons,
-    ...sourceReviewReasons,
-  ];
+  const reviewReasons = [...brandReviewReasons, ...sourceReviewReasons];
   const downgradeReasons = [];
 
   if (confidenceScore < options.minConfidence) reviewReasons.push("Low confidence score.");
   if (needsReview) reviewReasons.push("Needs human review.");
   if (normalize(stillUseful) === "no") reviewReasons.push("Marked not useful for matching.");
-  if (/internal|irrelevant|no creator opportunity/i.test(disqualifierFlags)) reviewReasons.push("Disqualifier flag suggests this is not a direct opportunity.");
+  if (/internal|irrelevant|no creator opportunity/i.test(disqualifierFlags))
+    reviewReasons.push("Disqualifier flag suggests this is not a direct opportunity.");
   if (affiliateOnlyConcern) reviewReasons.push("Affiliate-only without song promotion exception.");
-  if (nonActionableMarketing) reviewReasons.push("Looks like newsletter, marketing, or non-actionable email content.");
+  if (nonActionableMarketing)
+    reviewReasons.push("Looks like newsletter, marketing, or non-actionable email content.");
 
   if (missingBudget) downgradeReasons.push("Budget needs confirmation.");
-  if (lowBudget && !affiliateOnlyConcern) downgradeReasons.push("Low-budget or budget-floor concern.");
+  if (lowBudget && !affiliateOnlyConcern)
+    downgradeReasons.push("Low-budget or budget-floor concern.");
   if (!fixedFeePresent) downgradeReasons.push("No fixed-fee signal.");
-  if (!activeOpportunity) downgradeReasons.push(historicalSignal ? "Historical signal, not guaranteed active." : "Not clearly active.");
+  if (!activeOpportunity)
+    downgradeReasons.push(
+      historicalSignal ? "Historical signal, not guaranteed active." : "Not clearly active.",
+    );
   if (creatorSignal.score < 3) downgradeReasons.push("Creator fit is partial or broad.");
-  if (!/strong|acceptable/i.test(commercialQuality)) downgradeReasons.push("Commercial quality is not strong enough.");
+  if (!/strong|acceptable/i.test(commercialQuality))
+    downgradeReasons.push("Commercial quality is not strong enough.");
   if (!usefulSource) downgradeReasons.push("Source organization is weak or unclear.");
 
   let score = confidenceScore;
@@ -770,7 +820,11 @@ function evaluateOpportunityRow(row, headerMap, options) {
       bucket: "removed",
       score,
       exportRow: null,
-      audit: { ...baseAudit, action: "Removed", reasons: [...baseAudit.reasons, "Too weak for GPT export."] },
+      audit: {
+        ...baseAudit,
+        action: "Removed",
+        reasons: [...baseAudit.reasons, "Too weak for GPT export."],
+      },
     };
   }
 
@@ -849,7 +903,10 @@ function exportTier({
   const isPrGifting = /pr gifting/i.test(opportunityType);
   const minimumTierOneBudget = songPromotion ? MIN_TIER_1_SONG_BUDGET : MIN_TIER_1_BUDGET;
   const budgetClearsTierOne = expectedDealValue >= minimumTierOneBudget;
-  const strongFit = creatorSignalScore >= 4 && (creatorSignal.usefulFields.includes("country") || creatorSignal.usefulFields.includes("niche"));
+  const strongFit =
+    creatorSignalScore >= 4 &&
+    (creatorSignal.usefulFields.includes("country") ||
+      creatorSignal.usefulFields.includes("niche"));
   const partialFit = creatorSignalScore >= 2.5;
 
   if (
@@ -880,7 +937,13 @@ function exportTier({
     return "Tier 2";
   }
 
-  if (confidenceScore >= 70 && (creatorSignalScore >= 1.5 || acceptableCommercial || historicalSignal || downgradeReasons.length <= 2)) {
+  if (
+    confidenceScore >= 70 &&
+    (creatorSignalScore >= 1.5 ||
+      acceptableCommercial ||
+      historicalSignal ||
+      downgradeReasons.length <= 2)
+  ) {
     return "Tier 3";
   }
 
@@ -889,15 +952,19 @@ function exportTier({
 
 function matchUseFor({ tier, relevance, status }) {
   if (tier === "Review Before Use") return "Use only after a human checks the source email.";
-  if (/historical/i.test(relevance) || /expired/i.test(status)) return "Use as historical brand preference signal.";
+  if (/historical/i.test(relevance) || /expired/i.test(status))
+    return "Use as historical brand preference signal.";
   if (tier === "Tier 1") return "Use for direct creator-to-brand matching.";
   return "Use as supporting match context.";
 }
 
 function defaultNoteFor(tier) {
-  if (tier === "Tier 1") return "High-confidence commercial opportunity with useful creator matching fields.";
-  if (tier === "Tier 2") return "Useful opportunity signal, but check budget or details before pitching.";
-  if (tier === "Tier 3") return "Context signal. Good for pattern matching, not a final recommendation alone.";
+  if (tier === "Tier 1")
+    return "High-confidence commercial opportunity with useful creator matching fields.";
+  if (tier === "Tier 2")
+    return "Useful opportunity signal, but check budget or details before pitching.";
+  if (tier === "Tier 3")
+    return "Context signal. Good for pattern matching, not a final recommendation alone.";
   return "Review source email before using.";
 }
 
@@ -906,11 +973,16 @@ function buildIntelligenceExportRows(table, nameHeader, exportHeaders, limit, en
   return table.rows
     .map((row) => {
       const name = getCell(row, headerMap, nameHeader);
-      const reviewReasons = entityType === "agency" ? sourceNameReviewReasons(name, getCell(row, headerMap, "Organization Type")) : brandNameReviewReasons(name, {});
+      const reviewReasons =
+        entityType === "agency"
+          ? sourceNameReviewReasons(name, getCell(row, headerMap, "Organization Type"))
+          : brandNameReviewReasons(name, {});
       if (!name || reviewReasons.length > 0) return null;
       const total = numberCell(row, headerMap, "Total Opportunities");
       const confidence = numberCell(row, headerMap, "Confidence Score");
-      const commercialQuality = getCell(row, headerMap, "Commercial Quality") || getCell(row, headerMap, "Typical Commercial Quality");
+      const commercialQuality =
+        getCell(row, headerMap, "Commercial Quality") ||
+        getCell(row, headerMap, "Typical Commercial Quality");
       const budgetFloorConcern = getCell(row, headerMap, "Budget Floor Concern");
       const stillUseful = getCell(row, headerMap, "Still Useful For Matching?");
       if (total <= 0 && confidence <= 0) return null;
@@ -919,7 +991,11 @@ function buildIntelligenceExportRows(table, nameHeader, exportHeaders, limit, en
         score:
           total * 8 +
           confidence +
-          (/strong/i.test(commercialQuality) ? 25 : /acceptable/i.test(commercialQuality) ? 10 : 0) -
+          (/strong/i.test(commercialQuality)
+            ? 25
+            : /acceptable/i.test(commercialQuality)
+              ? 10
+              : 0) -
           (normalize(budgetFloorConcern) === "yes" ? 35 : 0),
         row: projectRow(row, headerMap, exportHeaders),
       };
@@ -958,14 +1034,19 @@ function buildSignalExportRows(table, limit) {
 
 function buildMatchingIntelligenceRows(opportunities, { brandRows, agencyRows, signalRows }) {
   const signalByBrand = new Map(signalRows.map((row) => [compactKey(row.Brand), row]));
-  const agencyByName = new Map(agencyRows.map((row) => [compactKey(row["Organization Name"]), row]));
+  const agencyByName = new Map(
+    agencyRows.map((row) => [compactKey(row["Organization Name"]), row]),
+  );
   const brandGroups = new Map();
   const agencyGroups = new Map();
 
   for (const row of opportunities) {
     const brand = row["Brand Name"];
     const agency = row["Source Organization Name"];
-    if (brand && brandNameReviewReasons(brand, { subject: row["Source Email Subject"] }).length === 0) {
+    if (
+      brand &&
+      brandNameReviewReasons(brand, { subject: row["Source Email Subject"] }).length === 0
+    ) {
       addMatchingRecord(brandGroups, brand, row);
     }
     if (
@@ -1015,44 +1096,94 @@ function addMatchingRecord(groups, key, row) {
 function matchingRowForGroup({ entityType, name, records, signal, agencySummary }) {
   const brands = topValues(
     records.flatMap((row) =>
-      splitSignalList(row["Brand Name"]).filter((brand) => brandNameReviewReasons(brand, { subject: row["Source Email Subject"] }).length === 0),
+      splitSignalList(row["Brand Name"]).filter(
+        (brand) =>
+          brandNameReviewReasons(brand, { subject: row["Source Email Subject"] }).length === 0,
+      ),
     ),
     8,
   );
-  const agencies = topValues(records.flatMap((row) => splitSignalList(row["Source Organization Name"])), 5);
-  const niches = topValues([
-    ...records.flatMap((row) => splitSignalList(row["Creator Niche Requirement"])),
-    ...splitSignalList(signal?.["Niche Signals"]),
-  ], 8);
-  const countries = topValues([
-    ...records.flatMap((row) => splitSignalList(row["Creator Country Requirement"])),
-    ...splitSignalList(signal?.["Country Signals"]),
-  ], 8);
-  const platforms = topValues([
-    ...records.flatMap((row) => splitSignalList(row["Creator Platform Requirement"])),
-    ...splitSignalList(signal?.["Platform Signals"]),
-  ], 6);
-  const opportunityTypes = topValues([
-    ...records.flatMap((row) => splitSignalList(row["Opportunity Type"])),
-    ...splitSignalList(signal?.["Campaign Type Signals"]),
-    ...splitSignalList(agencySummary?.["Typical Opportunity Types"]),
-  ], 8);
-  const audienceTypes = topValues(records.flatMap((row) => audiencePitchSignals(row["Audience Requirement"])), 6);
+  const agencies = topValues(
+    records.flatMap((row) => splitSignalList(row["Source Organization Name"])),
+    5,
+  );
+  const niches = topValues(
+    [
+      ...records.flatMap((row) => splitSignalList(row["Creator Niche Requirement"])),
+      ...splitSignalList(signal?.["Niche Signals"]),
+    ],
+    8,
+  );
+  const countries = topValues(
+    [
+      ...records.flatMap((row) => splitSignalList(row["Creator Country Requirement"])),
+      ...splitSignalList(signal?.["Country Signals"]),
+    ],
+    8,
+  );
+  const platforms = topValues(
+    [
+      ...records.flatMap((row) => splitSignalList(row["Creator Platform Requirement"])),
+      ...splitSignalList(signal?.["Platform Signals"]),
+    ],
+    6,
+  );
+  const opportunityTypes = topValues(
+    [
+      ...records.flatMap((row) => splitSignalList(row["Opportunity Type"])),
+      ...splitSignalList(signal?.["Campaign Type Signals"]),
+      ...splitSignalList(agencySummary?.["Typical Opportunity Types"]),
+    ],
+    8,
+  );
+  const audienceTypes = topValues(
+    records.flatMap((row) => audiencePitchSignals(row["Audience Requirement"])),
+    6,
+  );
   const creatorTypes = buildCreatorTypes({ niches, countries, audienceTypes, platforms });
-  const pitchSignals = buildPitchSignals({ entityType, niches, countries, audienceTypes, opportunityTypes, records, signal });
-  const confidenceValues = records.map((row) => Number(row["Confidence Score"]) || 0).filter((value) => value > 0);
-  const avgConfidence = confidenceValues.length ? Math.round(confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length) : "";
+  const pitchSignals = buildPitchSignals({
+    entityType,
+    niches,
+    countries,
+    audienceTypes,
+    opportunityTypes,
+    records,
+    signal,
+  });
+  const confidenceValues = records
+    .map((row) => Number(row["Confidence Score"]) || 0)
+    .filter((value) => value > 0);
+  const avgConfidence = confidenceValues.length
+    ? Math.round(confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length)
+    : "";
   const tierCounts = countSimple(records.map((row) => row["GPT Export Tier"]));
   const budgetQuality = classifyBudgetQuality(records);
-  const affiliateTendency = classifyTendency(records.filter((row) => /affiliate/i.test(row["Opportunity Type"]) || row["Affiliate Commission"]).length, records.length);
-  const fixedFeeTendency = classifyTendency(records.filter((row) => hasFixedFeeSignal(row)).length, records.length);
-  const songPromotionTendency = classifyTendency(records.filter((row) => /song promotion/i.test(row["Opportunity Type"])).length, records.length);
-  const historicalStrength = classifyHistoricalStrength({ records, tierCounts, avgConfidence, signal });
+  const affiliateTendency = classifyTendency(
+    records.filter(
+      (row) => /affiliate/i.test(row["Opportunity Type"]) || row["Affiliate Commission"],
+    ).length,
+    records.length,
+  );
+  const fixedFeeTendency = classifyTendency(
+    records.filter((row) => hasFixedFeeSignal(row)).length,
+    records.length,
+  );
+  const songPromotionTendency = classifyTendency(
+    records.filter((row) => /song promotion/i.test(row["Opportunity Type"])).length,
+    records.length,
+  );
+  const historicalStrength = classifyHistoricalStrength({
+    records,
+    tierCounts,
+    avgConfidence,
+    signal,
+  });
   const relationshipStrength = classifyRelationshipStrength({ entityType, records, agencySummary });
   const bestDate = maxDate(records.map((row) => row["Source Email Date"]));
-  const opportunityCount = entityType === "Agency" && agencySummary?.["Total Opportunities"]
-    ? Math.max(records.length, Number(agencySummary["Total Opportunities"]) || 0)
-    : records.length;
+  const opportunityCount =
+    entityType === "Agency" && agencySummary?.["Total Opportunities"]
+      ? Math.max(records.length, Number(agencySummary["Total Opportunities"]) || 0)
+      : records.length;
 
   return {
     "Entity Type": entityType,
@@ -1069,7 +1200,17 @@ function matchingRowForGroup({ entityType, name, records, signal, agencySummary 
     "Historical Strength": historicalStrength,
     "Pitch Angle Signals": pitchSignals.join("; "),
     "Relationship Strength": relationshipStrength,
-    "Priority Notes": priorityNotesForMatching({ entityType, name, records, budgetQuality, affiliateTendency, fixedFeeTendency, relationshipStrength, historicalStrength, opportunityTypes }),
+    "Priority Notes": priorityNotesForMatching({
+      entityType,
+      name,
+      records,
+      budgetQuality,
+      affiliateTendency,
+      fixedFeeTendency,
+      relationshipStrength,
+      historicalStrength,
+      opportunityTypes,
+    }),
     "Opportunity Count": String(opportunityCount),
     "Tier 1 Count": String(tierCounts["Tier 1"] ?? 0),
     "Tier 2 Count": String(tierCounts["Tier 2"] ?? 0),
@@ -1088,18 +1229,30 @@ function buildCreatorTypes({ niches, countries, audienceTypes, platforms }) {
   ]).slice(0, 12);
 }
 
-function buildPitchSignals({ entityType, niches, countries, audienceTypes, opportunityTypes, records, signal }) {
+function buildPitchSignals({
+  entityType,
+  niches,
+  countries,
+  audienceTypes,
+  opportunityTypes,
+  records,
+  signal,
+}) {
   const signals = [
     ...countries.slice(0, 5).map((country) => `${country} Creator`),
     ...niches.slice(0, 8).map((niche) => `${niche} Creator`),
     ...audienceTypes.slice(0, 5).map((audience) => `${audience} Audience`),
   ];
   if (records.some((row) => hasFixedFeeSignal(row))) signals.push("Fixed Fee Preferred");
-  if (records.some((row) => /song promotion/i.test(row["Opportunity Type"]))) signals.push("Song Promotion Economics");
-  if (records.some((row) => /affiliate/i.test(row["Opportunity Type"]))) signals.push("Affiliate Caveat");
-  if (records.some((row) => /won|negotiating/i.test(row["Opportunity Status"]))) signals.push("Warm Historical Relationship");
+  if (records.some((row) => /song promotion/i.test(row["Opportunity Type"])))
+    signals.push("Song Promotion Economics");
+  if (records.some((row) => /affiliate/i.test(row["Opportunity Type"])))
+    signals.push("Affiliate Caveat");
+  if (records.some((row) => /won|negotiating/i.test(row["Opportunity Status"])))
+    signals.push("Warm Historical Relationship");
   if (entityType === "Agency") signals.push("Ask For Current Briefs");
-  if (signal?.["Historical Success Pattern"]) signals.push(`${signal["Historical Success Pattern"]} Historical Pattern`);
+  if (signal?.["Historical Success Pattern"])
+    signals.push(`${signal["Historical Success Pattern"]} Historical Pattern`);
   if (opportunityTypes.length) signals.push(`${opportunityTypes.slice(0, 3).join(" / ")} Briefs`);
   return unique(signals).slice(0, 14);
 }
@@ -1119,9 +1272,12 @@ function audiencePitchSignals(value) {
 }
 
 function classifyBudgetQuality(records) {
-  const counts = countSimple(records.map((row) => row["Commercial Quality"] || row["Budget Rating"] || "Unknown"));
+  const counts = countSimple(
+    records.map((row) => row["Commercial Quality"] || row["Budget Rating"] || "Unknown"),
+  );
   if ((counts.Strong ?? 0) >= Math.max(2, records.length * 0.4)) return "Strong fixed-fee pattern";
-  if (((counts.Strong ?? 0) + (counts.Acceptable ?? 0)) >= Math.max(1, records.length * 0.45)) return "Acceptable / needs confirmation";
+  if ((counts.Strong ?? 0) + (counts.Acceptable ?? 0) >= Math.max(1, records.length * 0.45))
+    return "Acceptable / needs confirmation";
   if ((counts.Low ?? 0) > records.length * 0.35) return "Low budget concern";
   return "Mixed or unclear";
 }
@@ -1142,9 +1298,12 @@ function hasFixedFeeSignal(row) {
 }
 
 function classifyHistoricalStrength({ records, tierCounts, avgConfidence, signal }) {
-  const strongSignal = /strong/i.test(signal?.["Historical Success Pattern"]) || /strong/i.test(signal?.["Relationship Strength"]);
+  const strongSignal =
+    /strong/i.test(signal?.["Historical Success Pattern"]) ||
+    /strong/i.test(signal?.["Relationship Strength"]);
   if (strongSignal || (tierCounts["Tier 1"] ?? 0) >= 2 || records.length >= 5) return "Strong";
-  if ((tierCounts["Tier 1"] ?? 0) >= 1 || records.length >= 2 || Number(avgConfidence) >= 90) return "Moderate";
+  if ((tierCounts["Tier 1"] ?? 0) >= 1 || records.length >= 2 || Number(avgConfidence) >= 90)
+    return "Moderate";
   return "Emerging";
 }
 
@@ -1156,34 +1315,62 @@ function classifyRelationshipStrength({ entityType, records, agencySummary }) {
     if (total >= 3 || useful === "medium") return "Medium relationship asset";
     return "Emerging relationship";
   }
-  const directCount = records.filter((row) => normalize(row["Source Organization Type"]) === "brand").length;
-  const agencyCount = records.filter((row) => normalize(row["Source Organization Type"]) !== "brand").length;
-  if (directCount >= 2 || records.some((row) => /won|negotiating/i.test(row["Opportunity Status"]))) return "Warm brand relationship";
+  const directCount = records.filter(
+    (row) => normalize(row["Source Organization Type"]) === "brand",
+  ).length;
+  const agencyCount = records.filter(
+    (row) => normalize(row["Source Organization Type"]) !== "brand",
+  ).length;
+  if (directCount >= 2 || records.some((row) => /won|negotiating/i.test(row["Opportunity Status"])))
+    return "Warm brand relationship";
   if (agencyCount >= 2) return "Agency-mediated relationship";
   return "Emerging signal";
 }
 
-function priorityNotesForMatching({ entityType, name, records, budgetQuality, affiliateTendency, fixedFeeTendency, relationshipStrength, historicalStrength, opportunityTypes }) {
+function priorityNotesForMatching({
+  entityType,
+  name,
+  records,
+  budgetQuality,
+  affiliateTendency,
+  fixedFeeTendency,
+  relationshipStrength,
+  historicalStrength,
+  opportunityTypes,
+}) {
   const notes = [];
-  if (entityType === "Agency") notes.push(`${name} should be treated as a relationship asset, not a single campaign.`);
+  if (entityType === "Agency")
+    notes.push(`${name} should be treated as a relationship asset, not a single campaign.`);
   if (relationshipStrength.startsWith("High")) notes.push("Worth pitching for current briefs.");
   if (historicalStrength === "Strong") notes.push("Strong historical signal.");
-  if (fixedFeeTendency === "High" || /strong/i.test(budgetQuality)) notes.push("Prioritize for fixed-fee creators.");
+  if (fixedFeeTendency === "High" || /strong/i.test(budgetQuality))
+    notes.push("Prioritize for fixed-fee creators.");
   if (affiliateTendency === "High") notes.push("Use mainly when creator accepts affiliate.");
-  if (opportunityTypes.some((type) => /song promotion/i.test(type))) notes.push("Apply lower song-promotion budget expectations.");
-  if (records.some((row) => !hasUsefulSignal(row["Creator Country Requirement"], "country"))) notes.push("Geography may need confirmation.");
-  if (records.some((row) => !hasUsefulSignal(row["Budget Amount"]))) notes.push("Budget may need confirmation.");
+  if (opportunityTypes.some((type) => /song promotion/i.test(type)))
+    notes.push("Apply lower song-promotion budget expectations.");
+  if (records.some((row) => !hasUsefulSignal(row["Creator Country Requirement"], "country")))
+    notes.push("Geography may need confirmation.");
+  if (records.some((row) => !hasUsefulSignal(row["Budget Amount"])))
+    notes.push("Budget may need confirmation.");
   return unique(notes).slice(0, 5).join(" ");
 }
 
 function buildMatchingAudit(matchingRows, opportunities) {
   const brandRows = matchingRows.filter((row) => row["Entity Type"] === "Brand");
   const agencyRows = matchingRows.filter((row) => row["Entity Type"] === "Agency");
-  const pitchSignalCounts = countSignals(matchingRows.flatMap((row) => splitSignalList(row["Pitch Angle Signals"])));
-  const creatorProfileCounts = countSignals(matchingRows.flatMap((row) => splitSignalList(row["Typical Creator Types"])));
+  const pitchSignalCounts = countSignals(
+    matchingRows.flatMap((row) => splitSignalList(row["Pitch Angle Signals"])),
+  );
+  const creatorProfileCounts = countSignals(
+    matchingRows.flatMap((row) => splitSignalList(row["Typical Creator Types"])),
+  );
   return {
-    strongestBrands: brandRows.sort((a, b) => matchingPriorityScore(b) - matchingPriorityScore(a)).slice(0, 12),
-    strongestAgencies: agencyRows.sort((a, b) => matchingPriorityScore(b) - matchingPriorityScore(a)).slice(0, 12),
+    strongestBrands: brandRows
+      .sort((a, b) => matchingPriorityScore(b) - matchingPriorityScore(a))
+      .slice(0, 12),
+    strongestAgencies: agencyRows
+      .sort((a, b) => matchingPriorityScore(b) - matchingPriorityScore(a))
+      .slice(0, 12),
     mostUsefulPitchSignals: topCountEntries(pitchSignalCounts, 15),
     mostCommonCreatorProfiles: topCountEntries(creatorProfileCounts, 15),
     dataGaps: summarizeMatchingDataGaps(opportunities, matchingRows),
@@ -1214,22 +1401,46 @@ function matchingPriorityScore(row) {
 
 function buildAgencyCommercialRows(opportunities, { agencyRows }) {
   const { agencyGroups } = buildEntityGroups(opportunities);
-  const agencyByName = new Map(agencyRows.map((row) => [compactKey(row["Organization Name"]), row]));
+  const agencyByName = new Map(
+    agencyRows.map((row) => [compactKey(row["Organization Name"]), row]),
+  );
   return [...agencyGroups.entries()]
     .map(([agency, records]) => {
       const agencySummary = agencyByName.get(compactKey(agency));
       const metrics = commercialMetrics(records);
-      const relationship = relationshipMetrics({ entityType: "Agency", records, summaryRow: agencySummary });
-      const opportunityTypes = topValues([
-        ...records.flatMap((row) => splitSignalList(row["Opportunity Type"])),
-        ...splitSignalList(agencySummary?.["Typical Opportunity Types"]),
-      ], 8);
-      const niches = topValues(records.flatMap((row) => splitSignalList(row["Creator Niche Requirement"])), 8);
-      const countries = topValues(records.flatMap((row) => splitSignalList(row["Creator Country Requirement"])), 6);
-      const platforms = topValues(records.flatMap((row) => splitSignalList(row["Creator Platform Requirement"])), 5);
-      const audienceTypes = topValues(records.flatMap((row) => audiencePitchSignals(row["Audience Requirement"])), 5);
+      const relationship = relationshipMetrics({
+        entityType: "Agency",
+        records,
+        summaryRow: agencySummary,
+      });
+      const opportunityTypes = topValues(
+        [
+          ...records.flatMap((row) => splitSignalList(row["Opportunity Type"])),
+          ...splitSignalList(agencySummary?.["Typical Opportunity Types"]),
+        ],
+        8,
+      );
+      const niches = topValues(
+        records.flatMap((row) => splitSignalList(row["Creator Niche Requirement"])),
+        8,
+      );
+      const countries = topValues(
+        records.flatMap((row) => splitSignalList(row["Creator Country Requirement"])),
+        6,
+      );
+      const platforms = topValues(
+        records.flatMap((row) => splitSignalList(row["Creator Platform Requirement"])),
+        5,
+      );
+      const audienceTypes = topValues(
+        records.flatMap((row) => audiencePitchSignals(row["Audience Requirement"])),
+        5,
+      );
       const creatorTypes = buildCreatorTypes({ niches, countries, audienceTypes, platforms });
-      const opportunityCount = Math.max(records.length, Number(agencySummary?.["Total Opportunities"]) || 0);
+      const opportunityCount = Math.max(
+        records.length,
+        Number(agencySummary?.["Total Opportunities"]) || 0,
+      );
       const worthPitching = agencyWorthPitching({ metrics, relationship, opportunityCount });
       return {
         Agency: agency,
@@ -1248,13 +1459,25 @@ function buildAgencyCommercialRows(opportunities, { agencyRows }) {
         "Relationship Strength Score": String(relationship.score),
         "Relationship Strength": relationship.label,
         "Generally Worth Pitching": worthPitching,
-        "Priority Notes": agencyCommercialNotes({ agency, metrics, relationship, opportunityTypes, worthPitching }),
+        "Priority Notes": agencyCommercialNotes({
+          agency,
+          metrics,
+          relationship,
+          opportunityTypes,
+          worthPitching,
+        }),
         "Best Source Email Date": relationship.bestDate,
       };
     })
     .sort((a, b) => {
-      const scoreA = Number(a["Relationship Strength Score"]) + Number(a["Historical Opportunity Count"]) * 5 + commercialTendencyScore(a);
-      const scoreB = Number(b["Relationship Strength Score"]) + Number(b["Historical Opportunity Count"]) * 5 + commercialTendencyScore(b);
+      const scoreA =
+        Number(a["Relationship Strength Score"]) +
+        Number(a["Historical Opportunity Count"]) * 5 +
+        commercialTendencyScore(a);
+      const scoreB =
+        Number(b["Relationship Strength Score"]) +
+        Number(b["Historical Opportunity Count"]) * 5 +
+        commercialTendencyScore(b);
       return scoreB - scoreA;
     })
     .slice(0, 250);
@@ -1268,22 +1491,42 @@ function buildBrandCommercialRows(opportunities, { signalRows }) {
       const signal = signalByBrand.get(compactKey(brand));
       const metrics = commercialMetrics(records);
       const relationship = relationshipMetrics({ entityType: "Brand", records });
-      const niches = topValues([
-        ...records.flatMap((row) => splitSignalList(row["Creator Niche Requirement"])),
-        ...splitSignalList(signal?.["Niche Signals"]),
-      ], 8);
-      const countries = topValues([
-        ...records.flatMap((row) => splitSignalList(row["Creator Country Requirement"])),
-        ...splitSignalList(signal?.["Country Signals"]),
-      ], 6);
-      const platforms = topValues([
-        ...records.flatMap((row) => splitSignalList(row["Creator Platform Requirement"])),
-        ...splitSignalList(signal?.["Platform Signals"]),
-      ], 5);
+      const niches = topValues(
+        [
+          ...records.flatMap((row) => splitSignalList(row["Creator Niche Requirement"])),
+          ...splitSignalList(signal?.["Niche Signals"]),
+        ],
+        8,
+      );
+      const countries = topValues(
+        [
+          ...records.flatMap((row) => splitSignalList(row["Creator Country Requirement"])),
+          ...splitSignalList(signal?.["Country Signals"]),
+        ],
+        6,
+      );
+      const platforms = topValues(
+        [
+          ...records.flatMap((row) => splitSignalList(row["Creator Platform Requirement"])),
+          ...splitSignalList(signal?.["Platform Signals"]),
+        ],
+        5,
+      );
       const tierCounts = countSimple(records.map((row) => row["GPT Export Tier"]));
-      const confidenceValues = records.map((row) => Number(row["Confidence Score"]) || 0).filter((value) => value > 0);
-      const avgConfidence = confidenceValues.length ? Math.round(confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length) : 0;
-      const historicalStrength = classifyHistoricalStrength({ records, tierCounts, avgConfidence, signal });
+      const confidenceValues = records
+        .map((row) => Number(row["Confidence Score"]) || 0)
+        .filter((value) => value > 0);
+      const avgConfidence = confidenceValues.length
+        ? Math.round(
+            confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length,
+          )
+        : 0;
+      const historicalStrength = classifyHistoricalStrength({
+        records,
+        tierCounts,
+        avgConfidence,
+        signal,
+      });
       return {
         Brand: brand,
         "Typical Creator Niches": niches.join("; "),
@@ -1300,13 +1543,26 @@ function buildBrandCommercialRows(opportunities, { signalRows }) {
         "Relationship Strength Score": String(relationship.score),
         "Relationship Strength": relationship.label,
         "Historical Opportunity Strength": historicalStrength,
-        "Priority Notes": brandCommercialNotes({ brand, metrics, relationship, historicalStrength, niches, countries }),
+        "Priority Notes": brandCommercialNotes({
+          brand,
+          metrics,
+          relationship,
+          historicalStrength,
+          niches,
+          countries,
+        }),
         "Best Source Email Date": relationship.bestDate,
       };
     })
     .sort((a, b) => {
-      const scoreA = Number(a["Relationship Strength Score"]) + Number(a["Historical Opportunity Count"]) * 8 + commercialTendencyScore(a);
-      const scoreB = Number(b["Relationship Strength Score"]) + Number(b["Historical Opportunity Count"]) * 8 + commercialTendencyScore(b);
+      const scoreA =
+        Number(a["Relationship Strength Score"]) +
+        Number(a["Historical Opportunity Count"]) * 8 +
+        commercialTendencyScore(a);
+      const scoreB =
+        Number(b["Relationship Strength Score"]) +
+        Number(b["Historical Opportunity Count"]) * 8 +
+        commercialTendencyScore(b);
       return scoreB - scoreA;
     })
     .slice(0, 250);
@@ -1316,9 +1572,16 @@ function buildPitchAngleRows(matchingIntelligenceRows) {
   return matchingIntelligenceRows
     .map((row) => {
       const signals = splitSignalList(row["Pitch Angle Signals"]);
-      const strongest = signals.filter((signal) => !/caveat|ask for current|fixed fee|economics|historical pattern/i.test(signal)).slice(0, 5);
+      const strongest = signals
+        .filter(
+          (signal) =>
+            !/caveat|ask for current|fixed fee|economics|historical pattern/i.test(signal),
+        )
+        .slice(0, 5);
       const fallbackStrongest = strongest.length ? strongest : signals.slice(0, 4);
-      const supporting = signals.filter((signal) => !fallbackStrongest.includes(signal)).slice(0, 8);
+      const supporting = signals
+        .filter((signal) => !fallbackStrongest.includes(signal))
+        .slice(0, 8);
       const confidence = pitchAngleConfidence(row);
       const entityType = row["Entity Type"];
       return {
@@ -1333,13 +1596,24 @@ function buildPitchAngleRows(matchingIntelligenceRows) {
       };
     })
     .filter((row) => row["Strongest Pitch Angles"])
-    .sort((a, b) => Number(b.Confidence) - Number(a.Confidence) || Number(b["Opportunity Count"]) - Number(a["Opportunity Count"]))
+    .sort(
+      (a, b) =>
+        Number(b.Confidence) - Number(a.Confidence) ||
+        Number(b["Opportunity Count"]) - Number(a["Opportunity Count"]),
+    )
     .slice(0, 350);
 }
 
-function buildOpportunityPriorityRows(opportunities, { brandCommercialRows, agencyCommercialRows, matchingIntelligenceRows }) {
-  const brandCommercialByName = new Map(brandCommercialRows.map((row) => [compactKey(row.Brand), row]));
-  const agencyCommercialByName = new Map(agencyCommercialRows.map((row) => [compactKey(row.Agency), row]));
+function buildOpportunityPriorityRows(
+  opportunities,
+  { brandCommercialRows, agencyCommercialRows, matchingIntelligenceRows },
+) {
+  const brandCommercialByName = new Map(
+    brandCommercialRows.map((row) => [compactKey(row.Brand), row]),
+  );
+  const agencyCommercialByName = new Map(
+    agencyCommercialRows.map((row) => [compactKey(row.Agency), row]),
+  );
   const brandMatchingByName = new Map(
     matchingIntelligenceRows
       .filter((row) => row["Entity Type"] === "Brand")
@@ -1370,7 +1644,13 @@ function buildOpportunityPriorityRows(opportunities, { brandCommercialRows, agen
       const historicalLabel = bestMatching?.["Historical Strength"] || "Emerging";
       const historicalScore = historicalStrengthScore(historicalLabel, relationshipScore);
       const priorityScore = clamp(
-        Math.round(commercialScore * 0.32 + relationshipScore * 0.2 + creatorScore * 0.23 + geographyScore * 0.15 + historicalScore * 0.1),
+        Math.round(
+          commercialScore * 0.32 +
+            relationshipScore * 0.2 +
+            creatorScore * 0.23 +
+            geographyScore * 0.15 +
+            historicalScore * 0.1,
+        ),
         0,
         100,
       );
@@ -1385,7 +1665,15 @@ function buildOpportunityPriorityRows(opportunities, { brandCommercialRows, agen
         "Geography Strength": String(geographyScore),
         "Historical Strength": historicalLabel,
         "Priority Score": String(priorityScore),
-        "Priority Notes": priorityNotesForOpportunity({ row, commercialScore, relationshipScore, creatorScore, geographyScore, historicalLabel, priorityScore }),
+        "Priority Notes": priorityNotesForOpportunity({
+          row,
+          commercialScore,
+          relationshipScore,
+          creatorScore,
+          geographyScore,
+          historicalLabel,
+          priorityScore,
+        }),
       };
     })
     .sort((a, b) => Number(b["Priority Score"]) - Number(a["Priority Score"]))
@@ -1409,21 +1697,73 @@ function buildGptReadinessAuditData({
   const tierOneRate = (tierCounts["Tier 1"] ?? 0) / curatedCount;
   const missingBudgetRate = opportunities.filter(isUnknownBudgetRow).length / curatedCount;
   const lowBudgetRate = opportunities.filter(isLowBudgetRow).length / curatedCount;
-  const highRelationshipCount = [...agencyCommercialRows, ...brandCommercialRows].filter((row) => Number(row["Relationship Strength Score"]) >= 70).length;
+  const highRelationshipCount = [...agencyCommercialRows, ...brandCommercialRows].filter(
+    (row) => Number(row["Relationship Strength Score"]) >= 70,
+  ).length;
   const highPitchCount = pitchAngleRows.filter((row) => Number(row.Confidence) >= 75).length;
-  const highPriorityCount = opportunityPriorityRows.filter((row) => Number(row["Priority Score"]) >= 70).length;
-  const databaseQuality = clamp(Math.round(70 + (opportunities.length >= 150 ? 8 : 0) + (tierOneRate <= 0.55 ? 8 : -8) - missingBudgetRate * 20 - lowBudgetRate * 12), 0, 100);
-  const relationshipIntelligence = clamp(Math.round(55 + Math.min(25, highRelationshipCount * 2) + (agencyCommercialRows.length >= 50 ? 12 : 0) + (brandCommercialRows.length >= 50 ? 8 : 0)), 0, 100);
-  const commercialIntelligence = clamp(Math.round(62 + (agencyCommercialRows.length && brandCommercialRows.length ? 12 : 0) + (1 - missingBudgetRate) * 14 - lowBudgetRate * 12), 0, 100);
-  const pitchIntelligence = clamp(Math.round(58 + Math.min(24, highPitchCount * 1.5) + (pitchAngleRows.length >= 100 ? 10 : 0)), 0, 100);
-  const matchingReadiness = clamp(Math.round(55 + Math.min(20, highPriorityCount * 0.4) + (matchingIntelligenceRows.length >= 200 ? 12 : 0) + (signalRows.length >= 20 ? 8 : 0)), 0, 100);
+  const highPriorityCount = opportunityPriorityRows.filter(
+    (row) => Number(row["Priority Score"]) >= 70,
+  ).length;
+  const databaseQuality = clamp(
+    Math.round(
+      70 +
+        (opportunities.length >= 150 ? 8 : 0) +
+        (tierOneRate <= 0.55 ? 8 : -8) -
+        missingBudgetRate * 20 -
+        lowBudgetRate * 12,
+    ),
+    0,
+    100,
+  );
+  const relationshipIntelligence = clamp(
+    Math.round(
+      55 +
+        Math.min(25, highRelationshipCount * 2) +
+        (agencyCommercialRows.length >= 50 ? 12 : 0) +
+        (brandCommercialRows.length >= 50 ? 8 : 0),
+    ),
+    0,
+    100,
+  );
+  const commercialIntelligence = clamp(
+    Math.round(
+      62 +
+        (agencyCommercialRows.length && brandCommercialRows.length ? 12 : 0) +
+        (1 - missingBudgetRate) * 14 -
+        lowBudgetRate * 12,
+    ),
+    0,
+    100,
+  );
+  const pitchIntelligence = clamp(
+    Math.round(58 + Math.min(24, highPitchCount * 1.5) + (pitchAngleRows.length >= 100 ? 10 : 0)),
+    0,
+    100,
+  );
+  const matchingReadiness = clamp(
+    Math.round(
+      55 +
+        Math.min(20, highPriorityCount * 0.4) +
+        (matchingIntelligenceRows.length >= 200 ? 12 : 0) +
+        (signalRows.length >= 20 ? 8 : 0),
+    ),
+    0,
+    100,
+  );
   const scores = {
     databaseQuality,
     relationshipIntelligence,
     commercialIntelligence,
     pitchIntelligence,
     matchingReadiness,
-    overall: Math.round((databaseQuality + relationshipIntelligence + commercialIntelligence + pitchIntelligence + matchingReadiness) / 5),
+    overall: Math.round(
+      (databaseQuality +
+        relationshipIntelligence +
+        commercialIntelligence +
+        pitchIntelligence +
+        matchingReadiness) /
+        5,
+    ),
   };
   return {
     scores,
@@ -1445,8 +1785,18 @@ function buildGptReadinessAuditData({
       `Pitch angles are now structured for creator matching instead of buried in notes.`,
       `Priority scores now combine commercial quality, relationship warmth, creator fit, geography, and historical strength.`,
     ],
-    weaknesses: readinessWeaknesses({ opportunities, reviewCandidates, signalRows, missingBudgetRate, lowBudgetRate, tierOneRate }),
-    recommendation: scores.overall >= 75 ? "Ready to begin Custom GPT creation next." : "Improve the flagged weaknesses before Custom GPT creation.",
+    weaknesses: readinessWeaknesses({
+      opportunities,
+      reviewCandidates,
+      signalRows,
+      missingBudgetRate,
+      lowBudgetRate,
+      tierOneRate,
+    }),
+    recommendation:
+      scores.overall >= 75
+        ? "Ready to begin Custom GPT creation next."
+        : "Improve the flagged weaknesses before Custom GPT creation.",
   };
 }
 
@@ -1456,7 +1806,10 @@ function buildEntityGroups(opportunities) {
   for (const row of opportunities) {
     const brand = row["Brand Name"];
     const agency = row["Source Organization Name"];
-    if (brand && brandNameReviewReasons(brand, { subject: row["Source Email Subject"] }).length === 0) {
+    if (
+      brand &&
+      brandNameReviewReasons(brand, { subject: row["Source Email Subject"] }).length === 0
+    ) {
       addMatchingRecord(brandGroups, brand, row);
     }
     if (
@@ -1495,7 +1848,13 @@ function commercialMetrics(records) {
     lowBudgetTendency: classifyTendency(lowBudgetCount, total),
     unknownBudgetTendency: classifyTendency(unknownBudgetCount, total),
     budgetQuality: classifyBudgetQuality(records),
-    dealStructure: dealStructureLabel({ fixedFeeCount, affiliateCount, songCount, unknownBudgetCount, total }),
+    dealStructure: dealStructureLabel({
+      fixedFeeCount,
+      affiliateCount,
+      songCount,
+      unknownBudgetCount,
+      total,
+    }),
   };
 }
 
@@ -1515,7 +1874,8 @@ function relationshipMetrics({ entityType, records, summaryRow }) {
   const bestDate = maxDate(records.map((row) => row["Source Email Date"]));
   let score = opportunityCount * 8 + contactIds.length * 7 + threadIds.length * 3;
   if (records.some((row) => /won|negotiating/i.test(row["Opportunity Status"]))) score += 10;
-  if (records.some((row) => normalize(row["Source Organization Type"]) === "brand")) score += entityType === "Brand" ? 8 : 3;
+  if (records.some((row) => normalize(row["Source Organization Type"]) === "brand"))
+    score += entityType === "Brand" ? 8 : 3;
   if (isRecentIsoDate(bestDate, 365)) score += 8;
   const usefulness = normalize(summaryRow?.["Agency Usefulness"]);
   if (usefulness === "high") score += 12;
@@ -1530,7 +1890,13 @@ function relationshipMetrics({ entityType, records, summaryRow }) {
   };
 }
 
-function dealStructureLabel({ fixedFeeCount, affiliateCount, songCount, unknownBudgetCount, total }) {
+function dealStructureLabel({
+  fixedFeeCount,
+  affiliateCount,
+  songCount,
+  unknownBudgetCount,
+  total,
+}) {
   if (fixedFeeCount / total >= 0.6 && affiliateCount / total < 0.25) return "Fixed-fee led";
   if (affiliateCount / total >= 0.5 && fixedFeeCount / total < 0.35) return "Affiliate-led";
   if (songCount / total >= 0.35) return "Song-promotion recurring";
@@ -1545,8 +1911,10 @@ function opportunityFrequencyLabel(count) {
 }
 
 function relationshipLabelFromScore(score, entityType) {
-  if (score >= 75) return entityType === "Agency" ? "High relationship asset" : "Warm brand relationship";
-  if (score >= 45) return entityType === "Agency" ? "Medium relationship asset" : "Developing brand relationship";
+  if (score >= 75)
+    return entityType === "Agency" ? "High relationship asset" : "Warm brand relationship";
+  if (score >= 45)
+    return entityType === "Agency" ? "Medium relationship asset" : "Developing brand relationship";
   return "Emerging relationship";
 }
 
@@ -1554,7 +1922,8 @@ function agencyWorthPitching({ metrics, relationship, opportunityCount }) {
   if (relationship.score >= 70 && metrics.affiliateTendency !== "High") return "Yes";
   if (opportunityCount >= 5 && metrics.lowBudgetTendency !== "High") return "Yes";
   if (metrics.fixedFeeTendency === "High" && metrics.unknownBudgetTendency !== "High") return "Yes";
-  if (metrics.affiliateTendency === "High" || metrics.lowBudgetTendency === "High") return "Conditional";
+  if (metrics.affiliateTendency === "High" || metrics.lowBudgetTendency === "High")
+    return "Conditional";
   return "Maybe";
 }
 
@@ -1563,21 +1932,34 @@ function agencyCommercialNotes({ agency, metrics, relationship, opportunityTypes
   if (worthPitching === "Yes") notes.push("Worth asking for current briefs.");
   if (relationship.score >= 70) notes.push("Warm relationship signal.");
   if (metrics.fixedFeeTendency === "High") notes.push("Fixed-fee tendency is strong.");
-  if (metrics.affiliateTendency === "High") notes.push("Check for affiliate-only briefs before recommending.");
+  if (metrics.affiliateTendency === "High")
+    notes.push("Check for affiliate-only briefs before recommending.");
   if (metrics.lowBudgetTendency === "High") notes.push("Budget floor may be an issue.");
   if (metrics.unknownBudgetTendency === "High") notes.push("Budget often needs confirmation.");
-  if (opportunityTypes.some((type) => /song promotion/i.test(type))) notes.push("Song promotion economics may apply.");
+  if (opportunityTypes.some((type) => /song promotion/i.test(type)))
+    notes.push("Song promotion economics may apply.");
   return unique(notes).slice(0, 5).join(" ");
 }
 
-function brandCommercialNotes({ brand, metrics, relationship, historicalStrength, niches, countries }) {
+function brandCommercialNotes({
+  brand,
+  metrics,
+  relationship,
+  historicalStrength,
+  niches,
+  countries,
+}) {
   const notes = [];
-  if (historicalStrength === "Strong") notes.push(`${brand} has strong historical opportunity signal.`);
+  if (historicalStrength === "Strong")
+    notes.push(`${brand} has strong historical opportunity signal.`);
   if (relationship.score >= 70) notes.push("Warm brand relationship.");
   if (metrics.fixedFeeTendency === "High") notes.push("Prefer for fixed-fee creators.");
   if (metrics.affiliateTendency === "High") notes.push("Affiliate caution.");
   if (metrics.lowBudgetTendency === "High") notes.push("Budget floor may be an issue.");
-  if (niches.length || countries.length) notes.push(`Best pitch evidence: ${[...countries.slice(0, 2), ...niches.slice(0, 2)].join(", ")}.`);
+  if (niches.length || countries.length)
+    notes.push(
+      `Best pitch evidence: ${[...countries.slice(0, 2), ...niches.slice(0, 2)].join(", ")}.`,
+    );
   return unique(notes).slice(0, 5).join(" ");
 }
 
@@ -1613,7 +1995,9 @@ function pitchAngleEvidenceNotes({ entityType, row, confidence }) {
 function bestMatchingContext(brandMatching, agencyMatching) {
   if (!brandMatching) return agencyMatching;
   if (!agencyMatching) return brandMatching;
-  return matchingPriorityScore(agencyMatching) > matchingPriorityScore(brandMatching) ? agencyMatching : brandMatching;
+  return matchingPriorityScore(agencyMatching) > matchingPriorityScore(brandMatching)
+    ? agencyMatching
+    : brandMatching;
 }
 
 function commercialQualityScore(row) {
@@ -1625,7 +2009,8 @@ function commercialQualityScore(row) {
   if (isAffiliateOnlyRow(row)) score -= 22;
   if (isLowBudgetRow(row)) score -= 18;
   if (isUnknownBudgetRow(row)) score -= 10;
-  if (isSongPromotionRow(row) && opportunityBudgetValue(row) >= SONG_PROMOTION_LOW_BUDGET_FLOOR) score += 5;
+  if (isSongPromotionRow(row) && opportunityBudgetValue(row) >= SONG_PROMOTION_LOW_BUDGET_FLOOR)
+    score += 5;
   if (opportunityBudgetValue(row) >= 2500) score += 8;
   return clamp(Math.round(score), 0, 100);
 }
@@ -1659,7 +2044,15 @@ function historicalStrengthScore(label, relationshipScore) {
   return clamp(Math.round(score + relationshipScore * 0.15), 0, 100);
 }
 
-function priorityNotesForOpportunity({ row, commercialScore, relationshipScore, creatorScore, geographyScore, historicalLabel, priorityScore }) {
+function priorityNotesForOpportunity({
+  row,
+  commercialScore,
+  relationshipScore,
+  creatorScore,
+  geographyScore,
+  historicalLabel,
+  priorityScore,
+}) {
   const notes = [];
   if (priorityScore >= 75) notes.push("Strong manager shortlist candidate.");
   else if (priorityScore >= 60) notes.push("Useful match, confirm details before pitching.");
@@ -1668,25 +2061,50 @@ function priorityNotesForOpportunity({ row, commercialScore, relationshipScore, 
   if (relationshipScore >= 70) notes.push("Warm relationship route exists.");
   if (creatorScore < 45) notes.push("Creator fit fields are partial.");
   if (geographyScore < 50) notes.push("Geography needs confirmation.");
-  if (/historical/i.test(row["GPT Match Use"]) || /historical/i.test(historicalLabel)) notes.push("Treat as historical signal, not guaranteed active.");
+  if (/historical/i.test(row["GPT Match Use"]) || /historical/i.test(historicalLabel))
+    notes.push("Treat as historical signal, not guaranteed active.");
   if (isAffiliateOnlyRow(row)) notes.push("Affiliate-only caution.");
   if (isUnknownBudgetRow(row)) notes.push("Budget needs confirmation.");
   if (isSongPromotionRow(row)) notes.push("Song-promotion economics may allow lower rate.");
   return unique(notes).slice(0, 5).join(" ");
 }
 
-function readinessWeaknesses({ opportunities, reviewCandidates, signalRows, missingBudgetRate, lowBudgetRate, tierOneRate }) {
+function readinessWeaknesses({
+  opportunities,
+  reviewCandidates,
+  signalRows,
+  missingBudgetRate,
+  lowBudgetRate,
+  tierOneRate,
+}) {
   const weaknesses = [];
   const count = opportunities.length || 1;
-  const weakAudienceCount = opportunities.filter((row) => !hasUsefulSignal(row["Audience Requirement"], "audience")).length;
-  const missingCountryCount = opportunities.filter((row) => !hasUsefulSignal(row["Creator Country Requirement"], "country")).length;
-  if (missingBudgetRate > 0.1) weaknesses.push(`${Math.round(missingBudgetRate * count)} curated opportunities still need budget confirmation.`);
-  if (lowBudgetRate > 0.1) weaknesses.push(`${Math.round(lowBudgetRate * count)} curated opportunities have low-budget concern.`);
-  if (weakAudienceCount > count * 0.4) weaknesses.push(`${weakAudienceCount}/${count} curated opportunities have weak audience detail.`);
-  if (missingCountryCount > count * 0.2) weaknesses.push(`${missingCountryCount}/${count} curated opportunities are missing geography.`);
-  if (tierOneRate > 0.6) weaknesses.push("Tier 1 is still too broad and should be tightened further.");
-  if (signalRows.length < 50) weaknesses.push("Creator signal coverage is useful but still limited.");
-  if (reviewCandidates.length > opportunities.length * 2) weaknesses.push("Review-before-use pool is large, so keep it out of GPT Knowledge for now.");
+  const weakAudienceCount = opportunities.filter(
+    (row) => !hasUsefulSignal(row["Audience Requirement"], "audience"),
+  ).length;
+  const missingCountryCount = opportunities.filter(
+    (row) => !hasUsefulSignal(row["Creator Country Requirement"], "country"),
+  ).length;
+  if (missingBudgetRate > 0.1)
+    weaknesses.push(
+      `${Math.round(missingBudgetRate * count)} curated opportunities still need budget confirmation.`,
+    );
+  if (lowBudgetRate > 0.1)
+    weaknesses.push(
+      `${Math.round(lowBudgetRate * count)} curated opportunities have low-budget concern.`,
+    );
+  if (weakAudienceCount > count * 0.4)
+    weaknesses.push(
+      `${weakAudienceCount}/${count} curated opportunities have weak audience detail.`,
+    );
+  if (missingCountryCount > count * 0.2)
+    weaknesses.push(`${missingCountryCount}/${count} curated opportunities are missing geography.`);
+  if (tierOneRate > 0.6)
+    weaknesses.push("Tier 1 is still too broad and should be tightened further.");
+  if (signalRows.length < 50)
+    weaknesses.push("Creator signal coverage is useful but still limited.");
+  if (reviewCandidates.length > opportunities.length * 2)
+    weaknesses.push("Review-before-use pool is large, so keep it out of GPT Knowledge for now.");
   return weaknesses.length ? weaknesses : ["No blocking weakness found for first GPT creation."];
 }
 
@@ -1709,14 +2127,19 @@ function isUnknownBudgetRow(row) {
 function isLowBudgetRow(row) {
   const value = opportunityBudgetValue(row);
   const threshold = isSongPromotionRow(row) ? SONG_PROMOTION_LOW_BUDGET_FLOOR : LOW_BUDGET_FLOOR;
-  if (/low/i.test(`${row["Commercial Quality"]} ${row["Budget Rating"]} ${row["Disqualifier Flags"]}`)) return true;
+  if (
+    /low/i.test(`${row["Commercial Quality"]} ${row["Budget Rating"]} ${row["Disqualifier Flags"]}`)
+  )
+    return true;
   return value > 0 && value < threshold;
 }
 
 function opportunityBudgetValue(row) {
   const expected = Number(row["Expected Deal Value"]) || 0;
   if (expected > 0) return expected;
-  const match = String(row["Budget Amount"] ?? "").replace(/,/g, "").match(/\d+(?:\.\d+)?/);
+  const match = String(row["Budget Amount"] ?? "")
+    .replace(/,/g, "")
+    .match(/\d+(?:\.\d+)?/);
   return match ? Number(match[0]) : 0;
 }
 
@@ -1746,18 +2169,30 @@ function brandNameReviewReasons(brandName, { subject } = {}) {
   const reasons = [];
   const normalized = normalize(brandName);
   const compact = compactKey(brandName);
-  if (!brandName || isGenericName(brandName) || KNOWN_POLLUTED_NAMES.has(normalized) || KNOWN_POLLUTED_NAMES.has(compact)) {
+  if (
+    !brandName ||
+    isGenericName(brandName) ||
+    KNOWN_POLLUTED_NAMES.has(normalized) ||
+    KNOWN_POLLUTED_NAMES.has(compact)
+  ) {
     reasons.push("Brand name is generic or known polluted extraction.");
   }
   if (String(brandName).length > 48) reasons.push("Brand name is unusually long.");
-  if (wordCount(brandName) > 4 && !/\b(ai|app|beauty|games|media|agency|studio|labs|shop|global|official)\b/i.test(brandName)) {
+  if (
+    wordCount(brandName) > 4 &&
+    !/\b(ai|app|beauty|games|media|agency|studio|labs|shop|global|official)\b/i.test(brandName)
+  ) {
     reasons.push("Brand name looks like a sentence fragment.");
   }
-  if (containsMultiEntityHint(brandName)) reasons.push("Brand name appears to contain multiple entities.");
+  if (containsMultiEntityHint(brandName))
+    reasons.push("Brand name appears to contain multiple entities.");
   if (SUSPICIOUS_NAME_PATTERNS.some((pattern) => pattern.test(brandName))) {
     reasons.push("Brand name looks extracted from email text.");
   }
-  if (/\b(agency|mcn|media|marketing|talent|creator)\b/i.test(brandName) && !/\b(beauty|games|app|ai|shop|official)\b/i.test(brandName)) {
+  if (
+    /\b(agency|mcn|media|marketing|talent|creator)\b/i.test(brandName) &&
+    !/\b(beauty|games|app|ai|shop|official)\b/i.test(brandName)
+  ) {
     reasons.push("Brand name looks like an agency/source, not a brand.");
   }
   if (KNOWN_AGENCY_BRAND_MIXUPS.some((name) => normalized.startsWith(name))) {
@@ -1770,14 +2205,21 @@ function brandNameReviewReasons(brandName, { subject } = {}) {
   if (
     /^[^A-Za-z0-9]/.test(String(brandName).trim()) ||
     /!$/.test(String(brandName).trim()) ||
-    /\b(collab(?:oration)?|campaign|pitch competition|opportunity|invitation|invite|for you|versions of)\b/i.test(brandName) ||
+    /\b(collab(?:oration)?|campaign|pitch competition|opportunity|invitation|invite|for you|versions of)\b/i.test(
+      brandName,
+    ) ||
     /\b(sending over|invoice|who|up for grabs)\b/i.test(brandName) ||
     /^a\s+(founder|strong|new|potential|paid|creator|brand)\b/i.test(brandName) ||
     /^ai\s+(healthcare|dating|chat|photo|video|productivity)\s+app$/i.test(brandName)
   ) {
     reasons.push("Brand name looks like an email phrase, not a named company.");
   }
-  if (subject && compact.length > 5 && compactKey(subject).includes(compact) && wordCount(brandName) > 3) {
+  if (
+    subject &&
+    compact.length > 5 &&
+    compactKey(subject).includes(compact) &&
+    wordCount(brandName) > 3
+  ) {
     reasons.push("Brand name looks copied from the email subject.");
   }
   if (/^[a-z]{1,2}$/i.test(String(brandName).trim())) reasons.push("Brand name is too short.");
@@ -1787,10 +2229,13 @@ function brandNameReviewReasons(brandName, { subject } = {}) {
 function sourceNameReviewReasons(sourceOrganizationName, sourceOrganizationType) {
   const reasons = [];
   const normalized = normalize(sourceOrganizationName);
-  if (!sourceOrganizationName || isGenericName(sourceOrganizationName)) reasons.push("Source organization is generic or unclear.");
+  if (!sourceOrganizationName || isGenericName(sourceOrganizationName))
+    reasons.push("Source organization is generic or unclear.");
   if (KNOWN_POLLUTED_NAMES.has(normalized)) reasons.push("Source organization looks polluted.");
-  if (SUSPICIOUS_NAME_PATTERNS.some((pattern) => pattern.test(sourceOrganizationName))) reasons.push("Source organization looks extracted from email text.");
-  if (normalize(sourceOrganizationType) === "other" && wordCount(sourceOrganizationName) <= 1) reasons.push("Source organization type is weak.");
+  if (SUSPICIOUS_NAME_PATTERNS.some((pattern) => pattern.test(sourceOrganizationName)))
+    reasons.push("Source organization looks extracted from email text.");
+  if (normalize(sourceOrganizationType) === "other" && wordCount(sourceOrganizationName) <= 1)
+    reasons.push("Source organization type is weak.");
   return unique(reasons);
 }
 
@@ -1826,31 +2271,60 @@ function creatorSignalProfile(row, headerMap) {
 
 function hasUsefulSignal(value, field = "") {
   const normalized = normalize(value);
-  if (!normalized || ["unknown", "not specified", "n/a", "na", "none"].includes(normalized)) return false;
+  if (!normalized || ["unknown", "not specified", "n/a", "na", "none"].includes(normalized))
+    return false;
   if (normalized.length < 2) return false;
   if (/^unknown\b|not specified|no preference/i.test(normalized)) return false;
-  if (field === "audience" && WEAK_AUDIENCE_PATTERNS.some((pattern) => pattern.test(value))) return false;
-  if (field === "country" && /\b(countries|location|demographics|insights)\b/i.test(normalized)) return false;
-  if (field === "niche" && /\b(creator|campaign|brand|content)\b/i.test(normalized) && wordCount(normalized) > 4) return false;
+  if (field === "audience" && WEAK_AUDIENCE_PATTERNS.some((pattern) => pattern.test(value)))
+    return false;
+  if (field === "country" && /\b(countries|location|demographics|insights)\b/i.test(normalized))
+    return false;
+  if (
+    field === "niche" &&
+    /\b(creator|campaign|brand|content)\b/i.test(normalized) &&
+    wordCount(normalized) > 4
+  )
+    return false;
   return true;
 }
 
 function isUsefulSource(sourceOrganizationName, sourceOrganizationType) {
-  if (!sourceOrganizationName || sourceNameReviewReasons(sourceOrganizationName, sourceOrganizationType).length > 0) return false;
+  if (
+    !sourceOrganizationName ||
+    sourceNameReviewReasons(sourceOrganizationName, sourceOrganizationType).length > 0
+  )
+    return false;
   const normalizedType = normalize(sourceOrganizationType);
-  return SOURCE_TYPES_WITH_MATCHING_VALUE.has(normalizedType) || wordCount(sourceOrganizationName) >= 2;
+  return (
+    SOURCE_TYPES_WITH_MATCHING_VALUE.has(normalizedType) || wordCount(sourceOrganizationName) >= 2
+  );
 }
 
-function looksNonActionableMarketing({ subject, campaignSummary, opportunityType, budgetAmount, deliverables }) {
+function looksNonActionableMarketing({
+  subject,
+  campaignSummary,
+  opportunityType,
+  budgetAmount,
+  deliverables,
+}) {
   const text = `${subject} ${campaignSummary}`.toLowerCase();
   const hasCommercialSpecifics = normalize(budgetAmount) && normalize(budgetAmount) !== "unknown";
   const hasDeliverables = normalize(deliverables) && normalize(deliverables) !== "unknown";
-  const directOpportunityType = /paid campaign|whitelisting|ugc|song promotion|app promotion|ambassador/i.test(opportunityType);
+  const directOpportunityType =
+    /paid campaign|whitelisting|ugc|song promotion|app promotion|ambassador/i.test(opportunityType);
   if (!NON_ACTIONABLE_TEXT_PATTERNS.some((pattern) => pattern.test(text))) return false;
   return !hasCommercialSpecifics && !hasDeliverables && !directOpportunityType;
 }
 
-function auditFlags({ affiliateOnlyConcern, lowBudget, missingBudget, suspiciousBrand, needsReview, historicalSignal, nonActionableMarketing }) {
+function auditFlags({
+  affiliateOnlyConcern,
+  lowBudget,
+  missingBudget,
+  suspiciousBrand,
+  needsReview,
+  historicalSignal,
+  nonActionableMarketing,
+}) {
   return [
     affiliateOnlyConcern ? "Affiliate Only" : "",
     lowBudget ? "Low Budget" : "",
@@ -1864,10 +2338,20 @@ function auditFlags({ affiliateOnlyConcern, lowBudget, missingBudget, suspicious
 
 function exportNotesFor(tier, downgradeReasons, creatorSignal) {
   const notes = [];
-  if (tier === "Tier 1") notes.push("Best shortlist candidate. Still rank against creator fit and current availability before recommending.");
-  if (tier === "Tier 2") notes.push("Useful opportunity, but one important field needs checking before a firm recommendation.");
-  if (tier === "Tier 3") notes.push("Supporting pattern only. Do not present as a direct recommendation unless the user asks for broad ideas.");
-  if (creatorSignal.usefulFields.length > 0) notes.push(`Creator fit signals: ${creatorSignal.usefulFields.join(", ")}.`);
+  if (tier === "Tier 1")
+    notes.push(
+      "Best shortlist candidate. Still rank against creator fit and current availability before recommending.",
+    );
+  if (tier === "Tier 2")
+    notes.push(
+      "Useful opportunity, but one important field needs checking before a firm recommendation.",
+    );
+  if (tier === "Tier 3")
+    notes.push(
+      "Supporting pattern only. Do not present as a direct recommendation unless the user asks for broad ideas.",
+    );
+  if (creatorSignal.usefulFields.length > 0)
+    notes.push(`Creator fit signals: ${creatorSignal.usefulFields.join(", ")}.`);
   for (const reason of downgradeReasons.slice(0, 3)) notes.push(reason);
   return notes;
 }
@@ -1891,7 +2375,10 @@ function buildAudit(
   const review = evaluations.filter((item) => item.bucket === "review");
   const removed = evaluations.filter((item) => item.bucket === "removed");
   const curated = evaluations.filter((item) => item.bucket === "curated");
-  const tierCounts = countBy(curated.map((item) => item.exportRow), "GPT Export Tier");
+  const tierCounts = countBy(
+    curated.map((item) => item.exportRow),
+    "GPT Export Tier",
+  );
   const flagged = (flag) => evaluations.filter((item) => item.audit?.flags?.includes(flag));
   const downgraded = curated.filter((item) => item.exportRow["GPT Export Tier"] !== "Tier 1");
   return {
@@ -1944,13 +2431,15 @@ function summarizeAuditExamples(items, limit = 12) {
 }
 
 function projectRow(row, headerMap, headers, overrides = {}) {
-  return Object.fromEntries(headers.map((header) => [header, overrides[header] ?? getCell(row, headerMap, header)]));
+  return Object.fromEntries(
+    headers.map((header) => [header, overrides[header] ?? getCell(row, headerMap, header)]),
+  );
 }
 
 async function writeExportFiles(exportData, context) {
-  await mkdir(EXPORT_DIR, { recursive: true });
+  await mkdir(path.join(runtimeRoot(), EXPORT_DIR), { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const dir = path.join(process.cwd(), EXPORT_DIR, `gpt-export-${timestamp}`);
+  const dir = path.join(runtimeRoot(), EXPORT_DIR, `gpt-export-${timestamp}`);
   await mkdir(dir, { recursive: true });
 
   const files = {
@@ -1976,11 +2465,23 @@ async function writeExportFiles(exportData, context) {
   await writeFile(files.brands, toCsv(exportData.brands, BRAND_EXPORT_HEADERS));
   await writeFile(files.agencies, toCsv(exportData.agencies, AGENCY_EXPORT_HEADERS));
   await writeFile(files.signals, toCsv(exportData.signals, SIGNAL_EXPORT_HEADERS));
-  await writeFile(files.matchingIntelligence, toCsv(exportData.matchingIntelligence, MATCHING_INTELLIGENCE_HEADERS));
-  await writeFile(files.agencyCommercial, toCsv(exportData.agencyCommercial, AGENCY_COMMERCIAL_HEADERS));
-  await writeFile(files.brandCommercial, toCsv(exportData.brandCommercial, BRAND_COMMERCIAL_HEADERS));
+  await writeFile(
+    files.matchingIntelligence,
+    toCsv(exportData.matchingIntelligence, MATCHING_INTELLIGENCE_HEADERS),
+  );
+  await writeFile(
+    files.agencyCommercial,
+    toCsv(exportData.agencyCommercial, AGENCY_COMMERCIAL_HEADERS),
+  );
+  await writeFile(
+    files.brandCommercial,
+    toCsv(exportData.brandCommercial, BRAND_COMMERCIAL_HEADERS),
+  );
   await writeFile(files.pitchAngles, toCsv(exportData.pitchAngles, PITCH_ANGLE_HEADERS));
-  await writeFile(files.opportunityPriority, toCsv(exportData.opportunityPriority, OPPORTUNITY_PRIORITY_HEADERS));
+  await writeFile(
+    files.opportunityPriority,
+    toCsv(exportData.opportunityPriority, OPPORTUNITY_PRIORITY_HEADERS),
+  );
   await writeFile(files.playbook, buildPlaybook(exportData, context));
   await writeFile(files.instructions, buildInstructions(exportData, context));
   await writeFile(files.audit, buildAuditReport(exportData));
@@ -2406,7 +2907,9 @@ function printSummary(exportData, output) {
   console.log(`Suspicious brand names found: ${exportData.audit.suspiciousBrandNames.count}`);
   console.log(`Removed rows: ${exportData.audit.removedCount}`);
   console.log("Tier counts:");
-  for (const [tier, count] of Object.entries(countBy(exportData.opportunities, "GPT Export Tier"))) {
+  for (const [tier, count] of Object.entries(
+    countBy(exportData.opportunities, "GPT Export Tier"),
+  )) {
     console.log(`- ${tier}: ${count}`);
   }
   console.log("");
@@ -2415,7 +2918,12 @@ function printSummary(exportData, output) {
 }
 
 function toCsv(rows, headers) {
-  return [headers.join(","), ...rows.map((row) => headers.map((header) => csvCell(row[header])).join(","))].join("\n") + "\n";
+  return (
+    [
+      headers.join(","),
+      ...rows.map((row) => headers.map((header) => csvCell(row[header])).join(",")),
+    ].join("\n") + "\n"
+  );
 }
 
 function csvCell(value) {
@@ -2471,9 +2979,10 @@ function countSignals(values) {
 }
 
 function topCountEntries(counts, limit) {
-  const entries = counts instanceof Map
-    ? [...counts.values()]
-    : Object.entries(counts).map(([value, count]) => ({ value, count }));
+  const entries =
+    counts instanceof Map
+      ? [...counts.values()]
+      : Object.entries(counts).map(([value, count]) => ({ value, count }));
   return entries
     .filter((entry) => entry.value && entry.value !== "Unknown")
     .sort((a, b) => b.count - a.count || String(a.value).localeCompare(String(b.value)))
@@ -2503,7 +3012,9 @@ function createGoogleTokenProvider(config) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.access_token) {
-      throw new Error(`Google service account auth failed (${response.status}): ${result.error_description ?? result.error ?? "No access token returned"}`);
+      throw new Error(
+        `Google service account auth failed (${response.status}): ${result.error_description ?? result.error ?? "No access token returned"}`,
+      );
     }
     cached = {
       accessToken: result.access_token,
@@ -2533,7 +3044,11 @@ async function signServiceAccountJwt(config) {
     false,
     ["sign"],
   );
-  const signature = await globalThis.crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(unsigned));
+  const signature = await globalThis.crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    new TextEncoder().encode(unsigned),
+  );
   return `${unsigned}.${base64Url(new Uint8Array(signature))}`;
 }
 
@@ -2566,12 +3081,21 @@ async function googleFetch(url, tokenProvider) {
     if (response.ok) return body;
     if ([429, 500, 502, 503, 504].includes(response.status) && attempt < maxAttempts - 1) {
       const retryAfter = Number(response.headers.get("retry-after"));
-      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : response.status === 429 ? 65_000 + attempt * 5_000 : Math.min(30_000, 1000 * 2 ** attempt);
-      console.warn(`Google API asked us to slow down (${response.status}) on ${url.pathname}. Waiting ${Math.round(delayMs / 1000)}s before retry ${attempt + 2}/${maxAttempts}.`);
+      const delayMs =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : response.status === 429
+            ? 65_000 + attempt * 5_000
+            : Math.min(30_000, 1000 * 2 ** attempt);
+      console.warn(
+        `Google API asked us to slow down (${response.status}) on ${url.pathname}. Waiting ${Math.round(delayMs / 1000)}s before retry ${attempt + 2}/${maxAttempts}.`,
+      );
       await sleep(delayMs);
       continue;
     }
-    throw new Error(`Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`);
+    throw new Error(
+      `Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`,
+    );
   }
   throw new Error(`Google API failed after retries: ${url.pathname}`);
 }
@@ -2591,11 +3115,16 @@ function numberCell(row, headerMap, headerName) {
 }
 
 function normalizeHeader(value) {
-  return String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function normalize(value) {
-  return String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 function compactKey(value) {
@@ -2635,7 +3164,7 @@ function isGenericName(value) {
 
 function loadEnvFiles(files) {
   for (const file of files) {
-    const fullPath = path.resolve(process.cwd(), file);
+    const fullPath = path.resolve(runtimeRoot(), file);
     if (!existsSync(fullPath)) continue;
     const raw = readFileSyncSafe(fullPath);
     for (const line of raw.split(/\r?\n/)) {
@@ -2648,6 +3177,10 @@ function loadEnvFiles(files) {
   }
 }
 
+function runtimeRoot() {
+  return process.env.OPPORTUNITY_RUNTIME_ROOT?.trim() || process.cwd();
+}
+
 function readFileSyncSafe(file) {
   return existsSync(file) ? Buffer.from(readFileSync(file)).toString("utf8") : "";
 }
@@ -2658,13 +3191,20 @@ function normalizePrivateKey(value) {
 
 function pemToArrayBuffer(pem) {
   return Buffer.from(
-    pem.replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\s/g, ""),
+    pem
+      .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+      .replace(/-----END PRIVATE KEY-----/g, "")
+      .replace(/\s/g, ""),
     "base64",
   );
 }
 
 function base64Url(input) {
-  return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function quoteSheet(name) {

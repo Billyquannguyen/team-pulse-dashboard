@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 export type GmailFollowUpLabel = { id: string; name: string };
@@ -58,6 +58,11 @@ const TEMPLATE_CACHE_MS = 45_000;
 let templateCache: { expiresAt: number; data: FollowUpTemplate[] } | null = null;
 let suppressionCache: { expiresAt: number; addresses: Set<string> } | null = null;
 
+const getGmailOAuthServer = createServerOnlyFn(async () => import("@/lib/gmail-oauth.server"));
+const getFollowUpRedisServer = createServerOnlyFn(
+  async () => import("@/lib/bulk-follow-up-redis.server"),
+);
+
 const SAFE_TEMPLATE_TAGS = [
   "p",
   "div",
@@ -112,48 +117,9 @@ export async function sanitizeFollowUpTemplateHtml(value: string) {
   return (document.children ?? []).map(render).join("").trim();
 }
 
-function requiredGmailEnv(name: string) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`Missing ${name} in Vercel Environment Variables.`);
-  return value;
-}
-
-async function exchangeGmailRefreshToken(
-  clientId: string,
-  clientSecret: string,
-  refreshToken: string,
-) {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-  });
-  const payload = (await response.json().catch(() => null)) as {
-    access_token?: string;
-    error_description?: string;
-    error?: string;
-  } | null;
-  if (!response.ok || !payload?.access_token) {
-    throw new Error(payload?.error_description ?? payload?.error ?? "Gmail authentication failed.");
-  }
-  return payload.access_token;
-}
-
 export async function getGmailReadAccessToken() {
-  const readonlyRefreshToken = process.env.WEEKLY_GMAIL_READONLY_REFRESH_TOKEN?.trim();
-  if (readonlyRefreshToken) {
-    return exchangeGmailRefreshToken(
-      requiredGmailEnv("GMAIL_CLIENT_ID"),
-      requiredGmailEnv("GMAIL_CLIENT_SECRET"),
-      readonlyRefreshToken,
-    );
-  }
-  throw new Error("Bulk Follow-up requires WEEKLY_GMAIL_READONLY_REFRESH_TOKEN.");
+  const { getMasterGmailAccessToken } = await getGmailOAuthServer();
+  return getMasterGmailAccessToken();
 }
 
 async function gmailJson<T>(accessToken: string, path: string, params?: URLSearchParams) {
@@ -509,7 +475,7 @@ async function listTemplatesServer(force = false) {
 export const fetchGmailFollowUpLabels = createServerFn({ method: "GET" }).handler(async () => {
   const { requireDashboardAuth } = await import("@/lib/auth.server");
   const auth = await requireDashboardAuth();
-  const { followUpRedisCommand } = await import("@/lib/bulk-follow-up-redis.server");
+  const { followUpRedisCommand } = await getFollowUpRedisServer();
   const accessToken = await getGmailReadAccessToken();
   const result = await gmailJson<{
     labels?: Array<{ id?: string; name?: string; type?: string }>;
@@ -538,8 +504,7 @@ export const updateAllowedFollowUpLabels = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { requireAdminAuth } = await import("@/lib/auth.server");
     await requireAdminAuth();
-    const { followUpRedisCommand, withFollowUpLock } =
-      await import("@/lib/bulk-follow-up-redis.server");
+    const { followUpRedisCommand, withFollowUpLock } = await getFollowUpRedisServer();
     const accessToken = await getGmailReadAccessToken();
     const actual = await gmailJson<{ labels?: Array<{ id?: string; type?: string }> }>(
       accessToken,
@@ -567,7 +532,7 @@ export const fetchFollowUpCandidates = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { requireDashboardAuth } = await import("@/lib/auth.server");
     await requireDashboardAuth();
-    const { followUpRedisCommand } = await import("@/lib/bulk-follow-up-redis.server");
+    const { followUpRedisCommand } = await getFollowUpRedisServer();
     const raw = await followUpRedisCommand<string | null>([
       "GET",
       "team-billion:bulk-follow-up:allowed-labels:v1",
@@ -591,7 +556,7 @@ export const saveFollowUpTemplate = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
     await requireWritableDashboardAuth();
-    const { withFollowUpLock } = await import("@/lib/bulk-follow-up-redis.server");
+    const { withFollowUpLock } = await getFollowUpRedisServer();
     return withFollowUpLock("templates", 20, async () => {
       const worksheet = await ensureTemplateWorksheet();
       const current = parseTemplates(worksheet.headers, worksheet.rows);
@@ -641,7 +606,7 @@ export const deleteFollowUpTemplate = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { requireAdminAuth } = await import("@/lib/auth.server");
     await requireAdminAuth();
-    const { withFollowUpLock } = await import("@/lib/bulk-follow-up-redis.server");
+    const { withFollowUpLock } = await getFollowUpRedisServer();
     return withFollowUpLock("templates", 20, async () => {
       const worksheet = await ensureTemplateWorksheet();
       const template = parseTemplates(worksheet.headers, worksheet.rows).find(

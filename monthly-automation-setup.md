@@ -1,295 +1,84 @@
-# Team Billion Monthly Opportunity Refresh Automation
+# Team Billion Monthly Opportunity Refresh
 
-This setup runs the Opportunity Intelligence refresh in GitHub Actions once per month.
+The monthly Opportunity Intelligence refresh now runs from the Team Billion dashboard on Vercel. It no longer sends email and no longer depends on a scheduled GitHub Action.
 
-It does not depend on Codex, ChatGPT, your laptop, or Vercel Cron.
-
-The Custom GPT upload still stays manual because GPT Knowledge files cannot be safely updated automatically from this workflow.
-
-The automation belongs to your GitHub repo, your Google credentials, and your email provider account. Codex is only used to edit or improve the system. If you stop using Codex later, this scheduled workflow keeps running as long as the repo, secrets, Google access, and email provider remain active.
+Google Sheets is unchanged. The refresh continues to update the existing Opportunity Intelligence spreadsheet using the existing service-account variables.
 
 ## What Runs
 
-Every monthly run does this:
+Every run:
 
-1. Installs dependencies with `npm ci`
-2. Validates Gmail and Google Sheets credentials
-3. Runs preflight checks
-4. Creates a rollback backup
-5. Runs Gmail ingestion
-6. Refreshes the intelligence layer with quality cleanup
-7. Generates the GPT export
-8. Creates `team-billion-gpt-knowledge-refresh.zip`
-9. Creates `monthly-gpt-refresh-summary.md`
-10. Uploads the package as a GitHub Actions artifact
-11. Emails the refresh result
-12. Optionally posts a no-files summary to Discord if `DISCORD_WEBHOOK_URL` is configured
+1. checks Gmail and Google Sheets access
+2. runs the extraction safety checks
+3. creates a private rollback backup
+4. scans Gmail in resumable batches
+5. updates the existing Opportunity Intelligence Sheet
+6. runs the data cleanup and GPT export
+7. creates a private downloadable GPT Knowledge package
+8. posts success or failure to Discord
 
-## GitHub Secrets Setup
+The package remains a manual GPT Knowledge upload. It is available only to an authenticated admin in Goals & Analytics.
 
-In GitHub, open the repo, then go to:
+## Dashboard Control
 
-`Settings` → `Secrets and variables` → `Actions` → `New repository secret`
+Sign in as an admin and open `Goals & Analytics`.
 
-Add these secrets:
+The `Monthly opportunity refresh` panel shows:
 
-| Secret                                | Purpose                                                   |
-| ------------------------------------- | --------------------------------------------------------- |
-| `GMAIL_CLIENT_ID`                     | Gmail OAuth client ID used by the scanner                 |
-| `GMAIL_CLIENT_SECRET`                 | Gmail OAuth client secret                                 |
-| `GMAIL_REFRESH_TOKEN`                 | Gmail refresh token for the mailbox                       |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL`        | Google service account email                              |
-| `GOOGLE_PRIVATE_KEY`                  | Google service account private key                        |
-| `OPPORTUNITY_DATABASE_SPREADSHEET_ID` | Opportunity Intelligence database spreadsheet ID          |
-| `EMAIL_PROVIDER_API_KEY`              | Resend API key                                            |
-| `MONTHLY_REFRESH_EMAIL_TO`            | Recipient email address for monthly reports               |
-| `MONTHLY_REFRESH_EMAIL_FROM`          | Verified sender email address in Resend                   |
-| `DISCORD_WEBHOOK_URL`                 | Optional Discord channel webhook for team monthly summary |
+- current status and stage
+- last start or completion time
+- number of Gmail messages scanned
+- a `Run monthly refresh` button
+- a private package download after a successful run
 
-Keep `GOOGLE_PRIVATE_KEY` exactly as a secret. It can be pasted with real newlines or escaped `\n` newlines because the scripts normalize both formats.
+Members and admin member-preview mode do not see this control.
 
-## Email Provider Setup
+## Automatic Schedule
 
-The workflow uses Resend.
-
-1. Create or open a Resend account.
-2. Add and verify the sending domain.
-3. Create an API key.
-4. Put that API key into GitHub as `EMAIL_PROVIDER_API_KEY`.
-5. Set `MONTHLY_REFRESH_EMAIL_FROM` to a verified sender, for example `Team Billion <updates@yourdomain.com>`.
-6. Set `MONTHLY_REFRESH_EMAIL_TO` to your email address.
-
-If the ZIP is too large for email, the workflow still uploads it as a GitHub Actions artifact and the email tells you to download it from the run page.
-
-## Monthly Email Contents
-
-The success email includes:
-
-- Emails scanned
-- New opportunities
-- Updated opportunities
-- New brands
-- New agencies
-- New contacts
-- Review queue count
-- Opportunities moved to review
-- Priority A opportunities added
-- Top 20 new brands discovered
-- Top 20 new agencies discovered
-- Priority distribution
-- Backup confirmation
-- Upload package instructions
-- The GPT Knowledge ZIP attachment when it is small enough
-
-Priority A means a newly added opportunity with a strong priority score or Tier 1 export status.
-
-## Optional Discord Team Notice
-
-Discord is executable through a webhook.
-
-Use this when you want the team to see the monthly opportunity refresh without receiving the GPT upload files.
-
-Setup:
-
-1. In Discord, open the target channel settings.
-2. Go to `Integrations` → `Webhooks`.
-3. Create a webhook for the channel.
-4. Copy the webhook URL.
-5. Add it to GitHub as the repository secret `DISCORD_WEBHOOK_URL`.
-
-The Discord message includes:
-
-- Emails scanned
-- New opportunities
-- Updated opportunities
-- Priority A opportunities added
-- Opportunities moved to review
-- New brands
-- New agencies
-- Priority distribution
-- Short top brand and agency lists
-- GitHub Actions run link
-
-The Discord message does not attach GPT files.
-
-## Monthly Schedule
-
-The workflow lives here:
-
-`.github/workflows/monthly-opportunity-refresh.yml`
-
-It runs on this cron schedule:
+Vercel calls `/api/monthly-opportunity-refresh` on:
 
 `0 8 1 * *`
 
-That means the first day of every month at 08:00 UTC.
+That is the first day of every month at 08:00 UTC. The endpoint fails closed unless Vercel supplies the correct `CRON_SECRET`.
 
-In Berlin time, this is usually 09:00 during winter time and 10:00 during summer time.
+The old GitHub Actions workflow has been removed, so it cannot run a duplicate scan or depend on the retired Gmail OAuth client.
 
-## Test Email And Discord Notifications
+## Required Vercel Variables
 
-Use this after changing Resend, email sender, recipient, or the Discord webhook.
+Gmail:
 
-1. Go to GitHub.
-2. Open `team-pulse-dashboard`.
-3. Click `Actions`.
-4. Click `Monthly Opportunity Intelligence Refresh`.
-5. Click `Run workflow`.
-6. Tick `Send test email + Discord message only`.
-7. Click the green `Run workflow` button.
+- `MASTER_GMAIL_CLIENT_ID`
+- `MASTER_GMAIL_CLIENT_SECRET`
+- `MASTER_GMAIL_REFRESH_TOKEN`
 
-This test does not run Gmail ingestion, does not write to the Google Sheet, and does not regenerate GPT exports.
+Existing Google Sheets access, unchanged:
 
-Expected result:
+- `GOOGLE_SERVICE_ACCOUNT_EMAIL`
+- `GOOGLE_PRIVATE_KEY`
+- `OPPORTUNITY_DATABASE_SPREADSHEET_ID`
 
-- Your email receives `Team Billion Monthly Refresh Notification Test`.
-- Discord receives `Team Billion monthly refresh notification test`.
-- The GitHub Actions run should finish in under one minute.
+Runtime services:
 
-## If You Later Want Weekly Scanning
+- `CRON_SECRET`
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+- `BLOB_STORE_ID` (added automatically when the private Blob store is connected)
+- `DISCORD_WEBHOOK_URL` or the existing `WEEKLY_GMAIL_REPORT_DISCORD_WEBHOOK_URL`
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_DEFAULT_MODEL`
+- `OPENROUTER_FALLBACK_MODEL` (optional)
+- `DASHBOARD_PUBLIC_URL`
 
-Current setup is monthly refresh only.
+The private Blob store uses Vercel's deployment identity automatically. Do not create or copy a Blob read/write token. Backups and generated packages remain private.
 
-If you later decide to scan Gmail weekly but only package GPT files monthly, the clean path is:
+## Discord
 
-1. Add a separate weekly GitHub Actions workflow.
-2. Run credential validation, preflight, backup, Gmail ingestion, and intelligence refresh.
-3. Skip GPT ZIP packaging and GPT upload instructions on weekly runs.
-4. Keep this monthly workflow for the GPT Knowledge package.
+Discord is the only notification channel. There is no monthly refresh email or Resend dependency.
 
-That is a small Codex change, not a rebuild. After the change is committed and pushed, GitHub runs the weekly schedule automatically. You only need to manually rerun the workflow if you want to test it immediately or trigger a scan before the next scheduled time.
+The success message includes the scan counts and tells the admin to download the package from Goals & Analytics. Failure messages include the failed stage and a short error. Files and credentials are never posted to Discord.
 
-## Monthly Operating Cost
+## Storage and Recovery
 
-Expected cost is usually $0/month if the repository stays within included GitHub Actions minutes and Resend free email limits.
+Upstash stores only the small run status, worker checkpoint, and lock. The private Blob store keeps the latest safety backups and generated packages. Old files are pruned automatically.
 
-GitHub Actions runs on `ubuntu-latest`. GitHub includes monthly Actions minutes and artifact storage depending on the account plan. This workflow runs once per month, so it should normally stay inside the included quota.
-
-Resend is used only for one success or failure email per run. The free tier has a daily sending limit, so this monthly notification should normally fit unless the Resend account has other email traffic.
-
-Official pricing pages:
-
-- GitHub Actions billing: https://docs.github.com/en/billing/concepts/product-billing/github-actions
-- Resend pricing: https://www.resend.com/pricing
-
-## Manual Run Instructions
-
-Open GitHub:
-
-`Repo` → `Actions` → `Monthly Opportunity Intelligence Refresh` → `Run workflow`
-
-Choose the main branch, then click `Run workflow`.
-
-Use this when:
-
-- You want to test the automation
-- The monthly run failed and you fixed the issue
-- You want a fresh GPT package before the normal monthly schedule
-
-## How To Download The GPT Package
-
-After a successful run:
-
-1. Open the GitHub Actions run.
-2. Scroll to `Artifacts`.
-3. Download `team-billion-gpt-knowledge-refresh`.
-4. Unzip it locally.
-
-The artifact contains:
-
-- `team-billion-gpt-knowledge-refresh.zip`
-- `monthly-gpt-refresh-summary.md`
-- `monthly-refresh-artifacts.json`
-
-The inner ZIP contains only the approved GPT Knowledge files.
-
-## GPT Knowledge Files Included
-
-Upload only these files to GPT Knowledge:
-
-- `team-billion-matching-intelligence.csv`
-- `opportunity-priority-intelligence.csv`
-- `agency-commercial-intelligence.csv`
-- `brand-commercial-intelligence.csv`
-- `pitch-angle-intelligence.csv`
-- `creator-brand-opportunities.csv`
-- `brand-intelligence.csv`
-- `agency-intelligence.csv`
-- `creator-matching-signals.csv`
-- `team-billion-brand-matching-playbook.md`
-
-Do not upload these internal QA files:
-
-- `review-before-use-opportunities.csv`
-- `gpt-readiness-audit.md`
-- `gpt-test-scenarios.md`
-- `gpt-evaluation-checklist.md`
-
-## How To Update GPT Knowledge
-
-Manual next step after every monthly refresh:
-
-Open GPT Builder, delete the old Knowledge files, upload the new package files, and save.
-
-Do not automate this step. GPT Knowledge uploads are still manual.
-
-## How To Disable The Automation
-
-Option 1:
-
-Go to `Actions` → `Monthly Opportunity Intelligence Refresh`, then disable the workflow from the GitHub Actions UI.
-
-Option 2:
-
-Edit `.github/workflows/monthly-opportunity-refresh.yml` and remove or comment out the `schedule` trigger.
-
-Manual `workflow_dispatch` can stay enabled if you still want manual runs.
-
-## Failure Recovery
-
-If the workflow fails, you should receive an email with:
-
-- Failed step
-- Error message
-- Backup status
-- Suggested recovery action
-- GitHub Actions run link
-
-Recovery flow:
-
-1. Open the failed GitHub Actions run.
-2. Download the `monthly-opportunity-refresh-logs` artifact.
-3. Check the failed step log.
-4. If the failure happened before backup, fix the configuration and rerun.
-5. If the failure happened after backup and the Sheet looks wrong, restore from the latest backup.
-6. Rerun the workflow manually after the issue is fixed.
-
-Restore command:
-
-```bash
-npm run opportunity:restore-backup -- --backup ".opportunity-ingestion/backups/backup-YYYY-MM-DDTHH-MM-SS-000Z.json" --confirm
-```
-
-Only restore after checking the Sheet. Restore replaces current Sheet data with the backup snapshot.
-
-## Local Smoke Test
-
-This does not scan Gmail. It only tests package/report creation from the latest existing export folder:
-
-```bash
-npm run opportunity:monthly-refresh -- prepare --output-dir /private/tmp/team-billion-monthly-test --logs-dir /private/tmp/no-logs
-```
-
-Then inspect:
-
-```bash
-unzip -l /private/tmp/team-billion-monthly-test/team-billion-gpt-knowledge-refresh.zip
-```
-
-## Notes
-
-The workflow intentionally does not use Vercel Cron.
-
-The workflow intentionally does not upload files into GPT Builder.
-
-The workflow intentionally does not change the Opportunity Intelligence database schema.
+If a run fails, the dashboard shows `Needs attention`, Discord receives the error, and the admin can retry from Goals & Analytics. The safety backup is retained for recovery.

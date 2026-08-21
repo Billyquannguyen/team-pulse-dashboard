@@ -50,12 +50,9 @@ SLACK_SIGNING_SECRET=your_slack_signing_secret
 SLACK_LINK_ALERT_MEMBER_NAMES=Holly Jerrim,Fenya Lavrson,Alex Hendy
 SLACK_LINK_ALERT_DISCORD_WEBHOOK_URL=your_discord_channel_webhook_url
 CRON_SECRET=long_random_secret_for_vercel_cron
-BRAND_FINDER_GMAIL_CLIENT_ID=your_brand_finder_google_oauth_client_id
-BRAND_FINDER_GMAIL_CLIENT_SECRET=your_brand_finder_google_oauth_client_secret
-BRAND_FINDER_GMAIL_REFRESH_TOKEN=your_brand_finder_gmail_compose_refresh_token
-GMAIL_CLIENT_ID=your_weekly_report_google_oauth_client_id
-GMAIL_CLIENT_SECRET=your_weekly_report_google_oauth_client_secret
-WEEKLY_GMAIL_READONLY_REFRESH_TOKEN=your_separate_gmail_readonly_refresh_token
+MASTER_GMAIL_CLIENT_ID=your_master_google_oauth_client_id
+MASTER_GMAIL_CLIENT_SECRET=your_master_google_oauth_client_secret
+MASTER_GMAIL_REFRESH_TOKEN=your_master_gmail_refresh_token
 WEEKLY_GMAIL_REPORT_DISCORD_WEBHOOK_URL=your_discord_webhook_url
 WEEKLY_GMAIL_REPORT_DAYS=7
 WEEKLY_GMAIL_BRAND_INBOUND_LABEL=Brand inbound
@@ -83,7 +80,7 @@ The Weekly Gmail Outreach Report reuses those same OpenRouter variables. Gmail a
 
 After adding or changing env vars in Vercel, redeploy the project.
 
-Brand Finder Gmail drafts use their own OAuth variables: `BRAND_FINDER_GMAIL_CLIENT_ID`, `BRAND_FINDER_GMAIL_CLIENT_SECRET`, and `BRAND_FINDER_GMAIL_REFRESH_TOKEN`. Generate that refresh token from the same OAuth client using Gmail compose permission: `https://www.googleapis.com/auth/gmail.compose`. These variables are intentionally separate from the weekly Gmail report so draft creation can be changed without touching the read-only report token.
+All Gmail features use the same OAuth trio: `MASTER_GMAIL_CLIENT_ID`, `MASTER_GMAIL_CLIENT_SECRET`, and `MASTER_GMAIL_REFRESH_TOKEN`. The refresh token must be generated from that exact client with the full combined Gmail permissions required by Bulk Outreach, Bulk Follow-up, Brand Finder, weekly reporting, monthly Opportunity Intelligence, and approval notifications.
 
 For Team Assets, the spreadsheet must have a worksheet tab named `Team Assets` with `title` and `url` columns. Optional columns are `subtitle`, `icon`, `color`, `category`, `enabled`, and `sort_order`.
 
@@ -97,7 +94,7 @@ For contract review, Billy GPT accepts PDF uploads in chat, extracts readable te
 
 For Slack DM follow-ups, the app uses `SLACK_USER_TOKEN` because personal DM history belongs to your Slack user, not the bot. `SLACK_OWNER_USER_ID` should be your own Slack user ID. The hourly Vercel Cron job calls `/api/slack-followups` and is protected by `CRON_SECRET`. Notifications are stored in Upstash Redis using `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, then displayed inside the dashboard bell.
 
-The weekly Vercel Cron job calls `/api/weekly-gmail-outreach-report` at the end of every Friday in Vietnam (`00:00` Saturday in Vietnam, or `17:00 UTC` Friday) and is protected by the same `CRON_SECRET`. Each run rereads the live TeamMembers sheet and covers the completed Saturday-to-Friday period. Report dates are displayed in the `Asia/Ho_Chi_Minh` time zone. It includes only active TeamMembers where `Weekly Report Enabled` is `TRUE` and `Team or Department` is `Creator` or `Outreach`. The Gmail token in `WEEKLY_GMAIL_READONLY_REFRESH_TOKEN` must be a separate token authorized with only `https://www.googleapis.com/auth/gmail.readonly`; the report code only performs Gmail `GET` requests. `WEEKLY_GMAIL_REPORT_DISCORD_WEBHOOK_URL` is used only to post the completed report or a short Gmail authentication error.
+The weekly Vercel Cron job calls `/api/weekly-gmail-outreach-report` at the end of every Friday in Vietnam (`00:00` Saturday in Vietnam, or `17:00 UTC` Friday) and is protected by the same `CRON_SECRET`. Each run rereads the live TeamMembers sheet and covers the completed Saturday-to-Friday period. Report dates are displayed in the `Asia/Ho_Chi_Minh` time zone. It includes only active TeamMembers where `Weekly Report Enabled` is `TRUE` and `Team or Department` is `Creator` or `Outreach`. It reads Gmail through the shared master token. `WEEKLY_GMAIL_REPORT_DISCORD_WEBHOOK_URL` is used only to post the completed report or a short Gmail authentication error.
 
 The three Gmail category label variables default to the values shown above, so they only need changing if the mailbox labels are renamed. `WEEKLY_GMAIL_REPORT_DAYS` defaults to `7`. Creator and brand outreach count one newly started outbound conversation in the report window; replies and later messages in older threads are excluded. The weekly report does not inspect creator follow-up sequences.
 

@@ -881,7 +881,7 @@ export function BulkFollowUpPanel() {
         </section>
       ) : null}
 
-      <div className="sticky bottom-4 z-30 rounded-[24px] border bg-card/95 p-3.5 text-foreground shadow-xl backdrop-blur-xl">
+      <div className="sticky bottom-20 z-30 rounded-[24px] border bg-card/95 p-3.5 text-foreground shadow-xl backdrop-blur-xl md:bottom-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background">

@@ -375,9 +375,9 @@ function loadConfig(options) {
   }
 
   const config = {
-    gmailClientId: env("GMAIL_CLIENT_ID", missing),
-    gmailClientSecret: env("GMAIL_CLIENT_SECRET", missing),
-    gmailRefreshToken: env("GMAIL_REFRESH_TOKEN", missing),
+    gmailClientId: env("MASTER_GMAIL_CLIENT_ID", missing),
+    gmailClientSecret: env("MASTER_GMAIL_CLIENT_SECRET", missing),
+    gmailRefreshToken: env("MASTER_GMAIL_REFRESH_TOKEN", missing),
     serviceAccountEmail: env("GOOGLE_SERVICE_ACCOUNT_EMAIL", missing),
     privateKey: normalizePrivateKey(env("GOOGLE_PRIVATE_KEY", missing)),
     spreadsheetId: env("TEAM_ASSETS_SPREADSHEET_ID", missing),

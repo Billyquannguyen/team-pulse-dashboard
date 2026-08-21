@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const REPORT_DIR = ".opportunity-ingestion/quality-reports";
 const SCOPES = {
@@ -24,14 +25,16 @@ const TAB_NAMES = {
   creatorSignals: "Creator Matching Signals",
 };
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  runOpportunityQualityCleanup(process.argv.slice(2)).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
 
-async function main() {
+export async function runOpportunityQualityCleanup(args = []) {
   loadEnvFiles([".env", ".env.local", ".env.opportunity-ingestion"]);
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseArgs(args);
 
   if (options.help) {
     printHelp();
@@ -43,7 +46,11 @@ async function main() {
   const tokenProvider = createGoogleTokenProvider(config);
   const sheets = createSheetsClient(config.spreadsheetId, tokenProvider);
 
-  console.log(options.dryRun ? "QUALITY CLEANUP DRY RUN: no Sheet writes will happen." : "QUALITY CLEANUP: Sheet writes are enabled.");
+  console.log(
+    options.dryRun
+      ? "QUALITY CLEANUP DRY RUN: no Sheet writes will happen."
+      : "QUALITY CLEANUP: Sheet writes are enabled.",
+  );
   console.log(`Database: ${config.spreadsheetId}`);
 
   const metadata = await sheets.metadata();
@@ -145,7 +152,8 @@ async function loadWorkbook(sheets) {
     `${quoteSheet(TAB_NAMES.agencyIntelligence)}!A1:AD10000`,
     `${quoteSheet(TAB_NAMES.creatorSignals)}!A1:O10000`,
   ]);
-  const [alias, review, log, brandIntelligence, agencyIntelligence, creatorSignals] = result.valueRanges.map(parseTable);
+  const [alias, review, log, brandIntelligence, agencyIntelligence, creatorSignals] =
+    result.valueRanges.map(parseTable);
   return { alias, review, log, brandIntelligence, agencyIntelligence, creatorSignals };
 }
 
@@ -208,15 +216,23 @@ function buildAliasApprovalPlan(table) {
 
 function aliasDecision({ entityType, observedName, canonicalName, confidence, action }) {
   if (normalize(action) !== "merge") return { approve: false, reason: "Not a merge suggestion." };
-  if (!["brand", "agency"].includes(normalize(entityType))) return { approve: false, reason: "Only brand/agency merges are auto-approved." };
-  if (!observedName || !canonicalName || isUnknown(canonicalName)) return { approve: false, reason: "Canonical name is missing or unknown." };
-  if (containsMultiEntityHint(observedName) || containsMultiEntityHint(canonicalName)) return { approve: false, reason: "Possible multi-brand/entity case." };
-  if (!isHighConfidence(confidence)) return { approve: false, reason: "Confidence is not high enough for auto-approval." };
+  if (!["brand", "agency"].includes(normalize(entityType)))
+    return { approve: false, reason: "Only brand/agency merges are auto-approved." };
+  if (!observedName || !canonicalName || isUnknown(canonicalName))
+    return { approve: false, reason: "Canonical name is missing or unknown." };
+  if (containsMultiEntityHint(observedName) || containsMultiEntityHint(canonicalName))
+    return { approve: false, reason: "Possible multi-brand/entity case." };
+  if (!isHighConfidence(confidence))
+    return { approve: false, reason: "Confidence is not high enough for auto-approval." };
 
   const observedKey = compactKey(observedName);
   const canonicalKey = compactKey(canonicalName);
-  if (observedKey === canonicalKey) return { approve: true, reason: "Same name after casing/punctuation normalization." };
-  if (Math.min(observedKey.length, canonicalKey.length) >= 5 && editDistance(observedKey, canonicalKey) <= 1) {
+  if (observedKey === canonicalKey)
+    return { approve: true, reason: "Same name after casing/punctuation normalization." };
+  if (
+    Math.min(observedKey.length, canonicalKey.length) >= 5 &&
+    editDistance(observedKey, canonicalKey) <= 1
+  ) {
     return { approve: true, reason: "One-character spelling variant." };
   }
   return { approve: false, reason: "Names are not similar enough for safe auto-approval." };
@@ -267,8 +283,18 @@ function summarizeReviewQueue(table) {
 
 function summarizeIntelligence(workbook) {
   return {
-    topBrands: topIntelligenceRows(workbook.brandIntelligence, "Brand Name", ["Total Opportunities", "Confidence Score"], 20),
-    topAgencies: topIntelligenceRows(workbook.agencyIntelligence, "Organization Name", ["Total Opportunities", "Confidence Score"], 20),
+    topBrands: topIntelligenceRows(
+      workbook.brandIntelligence,
+      "Brand Name",
+      ["Total Opportunities", "Confidence Score"],
+      20,
+    ),
+    topAgencies: topIntelligenceRows(
+      workbook.agencyIntelligence,
+      "Organization Name",
+      ["Total Opportunities", "Confidence Score"],
+      20,
+    ),
     priorityTiers: countColumn(workbook.creatorSignals, "Recommended Priority Tier"),
   };
 }
@@ -279,8 +305,14 @@ function topIntelligenceRows(table, nameHeader, scoreHeaders, limit) {
     .map((row) => {
       const name = getCell(row, headerMap, nameHeader);
       if (!name) return null;
-      const values = Object.fromEntries(scoreHeaders.map((header) => [header, getCell(row, headerMap, header)]));
-      const score = scoreHeaders.reduce((sum, header, index) => sum + (Number(getCell(row, headerMap, header)) || 0) * (index === 0 ? 10 : 1), 0);
+      const values = Object.fromEntries(
+        scoreHeaders.map((header) => [header, getCell(row, headerMap, header)]),
+      );
+      const score = scoreHeaders.reduce(
+        (sum, header, index) =>
+          sum + (Number(getCell(row, headerMap, header)) || 0) * (index === 0 ? 10 : 1),
+        0,
+      );
       return { name, score, values };
     })
     .filter(Boolean)
@@ -336,10 +368,16 @@ async function appendCleanupLog(sheets, logTable, report) {
     `Aliases approved: ${report.aliasApprovals.length}.`,
     `Aliases left for review: ${report.aliasReviewRequired.length}.`,
     `Review rows: ${report.reviewSummary.totalRows}; unreviewed: ${report.reviewSummary.unreviewed}.`,
-    `Top review issues: ${report.reviewSummary.topIssues.slice(0, 5).map((item) => `${item.issue} ${item.count}`).join(", ")}.`,
+    `Top review issues: ${report.reviewSummary.topIssues
+      .slice(0, 5)
+      .map((item) => `${item.issue} ${item.count}`)
+      .join(", ")}.`,
   ].join(" ");
   fillRow(row, logTable.headers, {
-    "Run ID": `QUALITY-CLEANUP-${new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14)}`,
+    "Run ID": `QUALITY-CLEANUP-${new Date()
+      .toISOString()
+      .replace(/[-:T.Z]/g, "")
+      .slice(0, 14)}`,
     "Run Started At": report.startedAt,
     "Run Finished At": report.finishedAt,
     "Gmail Query Used": "No Gmail scan. Sheet quality cleanup only.",
@@ -359,9 +397,9 @@ async function appendCleanupLog(sheets, logTable, report) {
 }
 
 async function writeLocalReport(report) {
-  await mkdir(REPORT_DIR, { recursive: true });
+  await mkdir(path.join(runtimeRoot(), REPORT_DIR), { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const reportPath = path.join(process.cwd(), REPORT_DIR, `quality-cleanup-${timestamp}.json`);
+  const reportPath = path.join(runtimeRoot(), REPORT_DIR, `quality-cleanup-${timestamp}.json`);
   await writeFile(reportPath, JSON.stringify(report, null, 2));
   return reportPath;
 }
@@ -378,7 +416,9 @@ function printReport(report, reportPath) {
   if (report.aliasApprovals.length > 0) {
     console.log("Approved aliases:");
     for (const alias of report.aliasApprovals.slice(0, 20)) {
-      console.log(`- Row ${alias.rowNumber}: ${alias.observedName} -> ${alias.canonicalName} (${alias.reason})`);
+      console.log(
+        `- Row ${alias.rowNumber}: ${alias.observedName} -> ${alias.canonicalName} (${alias.reason})`,
+      );
     }
   }
   console.log("");
@@ -448,7 +488,9 @@ function createGoogleTokenProvider(config) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.access_token) {
-      throw new Error(`Google service account auth failed (${response.status}): ${result.error_description ?? result.error ?? "No access token returned"}`);
+      throw new Error(
+        `Google service account auth failed (${response.status}): ${result.error_description ?? result.error ?? "No access token returned"}`,
+      );
     }
     cached = {
       accessToken: result.access_token,
@@ -536,12 +578,21 @@ async function googleFetch(url, tokenProvider, init = {}) {
     if (response.ok) return body;
     if ([429, 500, 502, 503, 504].includes(response.status) && attempt < maxAttempts - 1) {
       const retryAfter = Number(response.headers.get("retry-after"));
-      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : response.status === 429 ? 65_000 + attempt * 5_000 : Math.min(30_000, 1000 * 2 ** attempt);
-      console.warn(`Google API asked us to slow down (${response.status}) on ${url.pathname}. Waiting ${Math.round(delayMs / 1000)}s before retry ${attempt + 2}/${maxAttempts}.`);
+      const delayMs =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : response.status === 429
+            ? 65_000 + attempt * 5_000
+            : Math.min(30_000, 1000 * 2 ** attempt);
+      console.warn(
+        `Google API asked us to slow down (${response.status}) on ${url.pathname}. Waiting ${Math.round(delayMs / 1000)}s before retry ${attempt + 2}/${maxAttempts}.`,
+      );
       await sleep(delayMs);
       continue;
     }
-    throw new Error(`Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`);
+    throw new Error(
+      `Google API failed (${response.status}) ${url.pathname}: ${body.error?.message ?? body.error ?? response.statusText}`,
+    );
   }
   throw new Error(`Google API failed after retries: ${url.pathname}`);
 }
@@ -570,11 +621,16 @@ function blankRow(length) {
 }
 
 function normalizeHeader(value) {
-  return String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function normalize(value) {
-  return String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 function compactKey(value) {
@@ -603,7 +659,9 @@ function splitIssueList(value) {
 }
 
 function cleanText(value) {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function topEntries(map, limit) {
@@ -617,7 +675,11 @@ function editDistance(a, b) {
   for (let i = 1; i <= a.length; i += 1) {
     for (let j = 1; j <= b.length; j += 1) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost,
+      );
     }
   }
   return matrix[a.length][b.length];
@@ -625,7 +687,7 @@ function editDistance(a, b) {
 
 function loadEnvFiles(files) {
   for (const file of files) {
-    const fullPath = path.resolve(process.cwd(), file);
+    const fullPath = path.resolve(runtimeRoot(), file);
     if (!existsSync(fullPath)) continue;
     const raw = readFileSyncSafe(fullPath);
     for (const line of raw.split(/\r?\n/)) {
@@ -638,6 +700,10 @@ function loadEnvFiles(files) {
   }
 }
 
+function runtimeRoot() {
+  return process.env.OPPORTUNITY_RUNTIME_ROOT?.trim() || process.cwd();
+}
+
 function readFileSyncSafe(file) {
   return existsSync(file) ? Buffer.from(readFileSync(file)).toString("utf8") : "";
 }
@@ -648,13 +714,20 @@ function normalizePrivateKey(value) {
 
 function pemToArrayBuffer(pem) {
   return Buffer.from(
-    pem.replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\s/g, ""),
+    pem
+      .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+      .replace(/-----END PRIVATE KEY-----/g, "")
+      .replace(/\s/g, ""),
     "base64",
   );
 }
 
 function base64Url(input) {
-  return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function quoteSheet(name) {
