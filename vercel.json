@@ -70,6 +70,10 @@
       "schedule": "0 17 * * 5"
     },
     {
+      "path": "/api/bulk-outreach-label-sync",
+      "schedule": "15 9 * * *"
+    },
+    {
       "path": "/api/monthly-opportunity-refresh",
       "schedule": "0 8 1 * *"
     }

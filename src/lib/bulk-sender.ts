@@ -14,6 +14,7 @@ const draftInputSchema = z.object({
 
 const submitJobSchema = z.object({
   drafts: z.array(draftInputSchema).min(1).max(100),
+  labelIds: z.array(z.string().min(1).max(200)).max(10).optional().default([]),
 });
 
 const jobRequestSchema = z.object({
@@ -45,7 +46,17 @@ export type BulkSenderJob = {
 
 type StoredJob = BulkSenderJob & {
   drafts: DraftInput[];
+  labelIds: string[];
   signatureHtml?: string;
+};
+
+type PendingOutreachLabels = {
+  id: string;
+  memberId: string;
+  gmailDraftId: string;
+  trackingMessageId: string;
+  labelIds: string[];
+  createdAt: number;
 };
 
 const JOB_TTL_SECONDS = 60 * 60 * 24;
@@ -54,12 +65,17 @@ const PROCESSING_LOCK_SECONDS = 90;
 const PROCESSING_CHUNK_SIZE = 5;
 const REDIS_QUEUE_KEY = "team-billion:bulk-sender:queue:v1";
 const REDIS_LOCK_KEY = "team-billion:bulk-sender:lock:v1";
+const PENDING_LABELS_KEY = "team-billion:bulk-sender:pending-labels:v1";
+const LABEL_SYNC_LOCK_KEY = "team-billion:bulk-sender:label-sync-lock:v1";
+const PENDING_LABEL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 const localJobs = new Map<string, StoredJob>();
 const localQueue: string[] = [];
 const localCooldowns = new Map<string, number>();
 const localDuplicates = new Map<string, number>();
+const localPendingLabels = new Map<string, PendingOutreachLabels>();
 let localLock = false;
+let localLabelSyncLock = false;
 
 function jobKey(jobId: string) {
   return `team-billion:bulk-sender:job:${jobId}`;
@@ -102,7 +118,7 @@ async function redisCommand<T>(command: Array<string | number>) {
 }
 
 function publicJob(job: StoredJob): BulkSenderJob {
-  const { drafts: _drafts, signatureHtml: _signatureHtml, ...safeJob } = job;
+  const { drafts: _drafts, labelIds: _labelIds, signatureHtml: _signatureHtml, ...safeJob } = job;
   return safeJob;
 }
 
@@ -208,6 +224,70 @@ async function rememberDuplicate(fingerprint: string) {
   await redisCommand<"OK">(["SET", duplicateKey(fingerprint), "1", "EX", JOB_TTL_SECONDS]);
 }
 
+async function rememberPendingLabels(record: PendingOutreachLabels) {
+  if (!getRedisConfig()) {
+    localPendingLabels.set(record.id, record);
+    return;
+  }
+  await redisCommand<number>([
+    "ZADD",
+    PENDING_LABELS_KEY,
+    record.createdAt,
+    JSON.stringify(record),
+  ]);
+  await redisCommand<number>([
+    "EXPIRE",
+    PENDING_LABELS_KEY,
+    Math.ceil(PENDING_LABEL_TTL_MS / 1000) + 24 * 60 * 60,
+  ]);
+}
+
+async function pendingLabelRecords() {
+  if (!getRedisConfig()) {
+    return Array.from(localPendingLabels.values()).map((record) => ({
+      raw: record.id,
+      record,
+    }));
+  }
+  const rawRecords = await redisCommand<string[]>(["ZRANGE", PENDING_LABELS_KEY, 0, 199]);
+  return rawRecords.flatMap((raw) => {
+    try {
+      return [{ raw, record: JSON.parse(raw) as PendingOutreachLabels }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+async function removePendingLabelRecord(raw: string, id: string) {
+  if (!getRedisConfig()) {
+    localPendingLabels.delete(id);
+    return;
+  }
+  await redisCommand<number>(["ZREM", PENDING_LABELS_KEY, raw]);
+}
+
+async function acquireLabelSyncLock(token: string) {
+  if (!getRedisConfig()) {
+    if (localLabelSyncLock) return false;
+    localLabelSyncLock = true;
+    return true;
+  }
+  return (
+    (await redisCommand<"OK" | null>(["SET", LABEL_SYNC_LOCK_KEY, token, "NX", "EX", 90])) === "OK"
+  );
+}
+
+async function releaseLabelSyncLock(token: string) {
+  if (!getRedisConfig()) {
+    localLabelSyncLock = false;
+    return;
+  }
+  const script =
+    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+  await redisCommand<number>(["EVAL", script, 1, LABEL_SYNC_LOCK_KEY, token]);
+}
+
 const getGmailOAuthServer = createServerOnlyFn(async () => import("@/lib/gmail-oauth.server"));
 
 async function getGmailAccessToken() {
@@ -215,9 +295,15 @@ async function getGmailAccessToken() {
   return getMasterGmailAccessToken();
 }
 
-async function gmailJson<T>(accessToken: string, path: string) {
+async function gmailJson<T>(accessToken: string, path: string, init?: RequestInit) {
   const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    ...init,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...init?.headers,
+    },
+    signal: AbortSignal.timeout(20_000),
   });
   const payload = (await response.json().catch(() => null)) as
     | (T & { error?: { message?: string } })
@@ -226,12 +312,30 @@ async function gmailJson<T>(accessToken: string, path: string) {
     const detail = payload?.error?.message ?? `Gmail returned ${response.status}.`;
     if (response.status === 401 || response.status === 403) {
       throw new Error(
-        `${detail} Reconnect Gmail with gmail.compose and gmail.settings.basic permissions.`,
+        `${detail} Reconnect Gmail with gmail.compose, gmail.modify, and gmail.settings.basic permissions.`,
       );
     }
     throw new Error(detail);
   }
   return payload as T;
+}
+
+async function listUserGmailLabels(accessToken: string) {
+  const payload = await gmailJson<{
+    labels?: Array<{ id?: string; name?: string; type?: string }>;
+  }>(accessToken, "labels");
+  return (payload.labels ?? [])
+    .filter((label) => label.type === "user" && label.id && label.name)
+    .map((label) => ({ id: label.id!, name: label.name! }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function validateSelectedLabelIds(accessToken: string, labelIds: string[]) {
+  if (!labelIds.length) return;
+  const allowed = new Set((await listUserGmailLabels(accessToken)).map((label) => label.id));
+  if (labelIds.some((labelId) => !allowed.has(labelId))) {
+    throw new Error("One selected Gmail label no longer exists. Refresh and try again.");
+  }
 }
 
 async function getDefaultGmailSignature(accessToken: string) {
@@ -305,7 +409,12 @@ function base64Url(value: string) {
     .replace(/=+$/g, "");
 }
 
-function buildMimeMessage(draft: DraftInput, signatureHtml: string) {
+export function bulkOutreachTrackingMessageId(jobId: string, rowId: string) {
+  const safeRow = rowId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 80) || "row";
+  return `<bulk-outreach-${jobId}-${safeRow}@billy-stride-team-rho.vercel.app>`;
+}
+
+function buildMimeMessage(draft: DraftInput, signatureHtml: string, trackingMessageId: string) {
   const boundary = `tb-bulk-${crypto.randomUUID()}`;
   const messageHtml = trimTrailingEmailSpacing(sanitizeEmailHtml(draft.htmlBody));
   const html = `${messageHtml}<div>${signatureHtml}</div>`;
@@ -313,6 +422,7 @@ function buildMimeMessage(draft: DraftInput, signatureHtml: string) {
   const message = [
     `To: ${sanitizeHeader(draft.to)}`,
     `Subject: ${sanitizeHeader(draft.subject)}`,
+    `Message-ID: ${trackingMessageId}`,
     ...(draft.inReplyTo ? [`In-Reply-To: ${sanitizeHeader(draft.inReplyTo)}`] : []),
     ...(draft.references ? [`References: ${sanitizeHeader(draft.references)}`] : []),
     "MIME-Version: 1.0",
@@ -343,7 +453,12 @@ async function fingerprintDraft(draft: DraftInput) {
     .join("");
 }
 
-async function createDraft(accessToken: string, draft: DraftInput, signatureHtml: string) {
+async function createDraft(
+  accessToken: string,
+  draft: DraftInput,
+  signatureHtml: string,
+  job: StoredJob,
+) {
   const fingerprint = await fingerprintDraft(draft);
   if (await hasDuplicate(fingerprint)) {
     return {
@@ -355,6 +470,7 @@ async function createDraft(accessToken: string, draft: DraftInput, signatureHtml
   }
 
   let lastMessage = "Gmail could not create the draft.";
+  const trackingMessageId = bulkOutreachTrackingMessageId(job.id, draft.rowId);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
       method: "POST",
@@ -364,7 +480,7 @@ async function createDraft(accessToken: string, draft: DraftInput, signatureHtml
       },
       body: JSON.stringify({
         message: {
-          raw: buildMimeMessage(draft, signatureHtml),
+          raw: buildMimeMessage(draft, signatureHtml, trackingMessageId),
           ...(draft.threadId ? { threadId: draft.threadId } : {}),
         },
       }),
@@ -374,11 +490,32 @@ async function createDraft(accessToken: string, draft: DraftInput, signatureHtml
       error?: { message?: string };
     } | null;
     if (response.ok && payload?.id) {
-      await rememberDuplicate(fingerprint);
+      const bookkeepingWarnings: string[] = [];
+      try {
+        await rememberDuplicate(fingerprint);
+      } catch {
+        bookkeepingWarnings.push("duplicate protection could not be saved");
+      }
+      if ((job.labelIds ?? []).length) {
+        try {
+          await rememberPendingLabels({
+            id: crypto.randomUUID(),
+            memberId: job.memberId,
+            gmailDraftId: payload.id,
+            trackingMessageId,
+            labelIds: job.labelIds ?? [],
+            createdAt: Date.now(),
+          });
+        } catch {
+          bookkeepingWarnings.push("automatic label tracking could not be scheduled");
+        }
+      }
       return {
         rowId: draft.rowId,
         status: "created" as const,
-        message: "Draft created in Gmail.",
+        message: bookkeepingWarnings.length
+          ? `Draft created in Gmail, but ${bookkeepingWarnings.join(" and ")}.`
+          : "Draft created in Gmail.",
         gmailDraftId: payload.id,
       };
     }
@@ -436,7 +573,7 @@ async function processQueueChunk() {
     const results: DraftResult[] = [];
     for (const draft of pendingDrafts) {
       try {
-        results.push(await createDraft(accessToken, draft, signatureHtml));
+        results.push(await createDraft(accessToken, draft, signatureHtml, job));
       } catch (error) {
         results.push({
           rowId: draft.rowId,
@@ -489,6 +626,11 @@ export const submitBulkSenderJob = createServerFn({ method: "POST" })
     if (!(await claimCooldown(memberId))) {
       throw new Error("Please wait 10 seconds before creating another batch.");
     }
+    if (data.labelIds.length) {
+      const gmailOAuth = await getGmailOAuthServer();
+      await gmailOAuth.validateMasterGmailScopes();
+      await validateSelectedLabelIds(await getGmailAccessToken(), data.labelIds);
+    }
 
     const now = new Date().toISOString();
     const job: StoredJob = {
@@ -503,6 +645,7 @@ export const submitBulkSenderJob = createServerFn({ method: "POST" })
       message: "Queued for the connected Gmail account.",
       results: [],
       drafts: data.drafts,
+      labelIds: data.labelIds,
       createdAt: now,
       updatedAt: now,
     };
@@ -535,3 +678,87 @@ export const getBulkSenderJob = createServerFn({ method: "GET" })
     if (job.memberId !== auth.user?.id && !auth.isAdmin) throw new Error("Unauthorized");
     return { job: publicJob(job) };
   });
+
+export const fetchBulkOutreachLabels = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireDashboardAuth } = await import("@/lib/auth.server");
+  await requireDashboardAuth();
+  return { labels: await listUserGmailLabels(await getGmailAccessToken()) };
+});
+
+export async function processPendingBulkOutreachLabels() {
+  const lockToken = crypto.randomUUID();
+  if (!(await acquireLabelSyncLock(lockToken))) {
+    return { checked: 0, applied: 0, expired: 0, failed: 0, pending: 0 };
+  }
+  try {
+    const records = await pendingLabelRecords();
+    if (!records.length) {
+      return { checked: 0, applied: 0, expired: 0, failed: 0, pending: 0 };
+    }
+    const accessToken = await getGmailAccessToken();
+    const allowedLabelIds = new Set(
+      (await listUserGmailLabels(accessToken)).map((label) => label.id),
+    );
+    let checked = 0;
+    let applied = 0;
+    let expired = 0;
+    let failed = 0;
+    let pending = 0;
+    for (const { raw, record } of records) {
+      if (Date.now() - record.createdAt > PENDING_LABEL_TTL_MS) {
+        await removePendingLabelRecord(raw, record.id);
+        expired += 1;
+        continue;
+      }
+      const labelIds = record.labelIds.filter((labelId) => allowedLabelIds.has(labelId));
+      if (!labelIds.length) {
+        await removePendingLabelRecord(raw, record.id);
+        expired += 1;
+        continue;
+      }
+      checked += 1;
+      try {
+        const params = new URLSearchParams({
+          q: `in:sent rfc822msgid:${record.trackingMessageId}`,
+          maxResults: "1",
+        });
+        const found = await gmailJson<{ messages?: Array<{ id?: string }> }>(
+          accessToken,
+          `messages?${params}`,
+        );
+        const gmailMessageId = found.messages?.[0]?.id;
+        if (!gmailMessageId) {
+          pending += 1;
+          continue;
+        }
+        await gmailJson(accessToken, `messages/${encodeURIComponent(gmailMessageId)}/modify`, {
+          method: "POST",
+          body: JSON.stringify({ addLabelIds: labelIds }),
+        });
+        await removePendingLabelRecord(raw, record.id);
+        applied += 1;
+        console.info("[bulk-outreach-labels] applied", {
+          recordId: record.id,
+          memberId: record.memberId,
+          labelCount: labelIds.length,
+        });
+      } catch (error) {
+        failed += 1;
+        console.error(
+          `[bulk-outreach-labels] ${error instanceof Error ? error.message : "Label sync failed."}`,
+        );
+      }
+    }
+    return { checked, applied, expired, failed, pending };
+  } finally {
+    await releaseLabelSyncLock(lockToken);
+  }
+}
+
+export const syncPendingBulkOutreachLabels = createServerFn({ method: "POST" }).handler(
+  async () => {
+    const { requireWritableDashboardAuth } = await import("@/lib/auth.server");
+    await requireWritableDashboardAuth();
+    return processPendingBulkOutreachLabels();
+  },
+);

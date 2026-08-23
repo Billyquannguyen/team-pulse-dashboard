@@ -57,6 +57,16 @@ const memberCapabilities: CapabilityExpectation[] = [
     guard: "requireWritableDashboardAuth",
   },
   {
+    file: "src/lib/bulk-sender.ts",
+    exportName: "fetchBulkOutreachLabels",
+    guard: "requireDashboardAuth",
+  },
+  {
+    file: "src/lib/bulk-sender.ts",
+    exportName: "syncPendingBulkOutreachLabels",
+    guard: "requireWritableDashboardAuth",
+  },
+  {
     file: "src/lib/bulk-follow-up.ts",
     exportName: "fetchGmailFollowUpLabels",
     guard: "requireDashboardAuth",

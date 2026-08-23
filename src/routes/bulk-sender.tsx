@@ -22,6 +22,7 @@ import {
   Redo2,
   Rows3,
   Send,
+  Tags,
   Trash2,
   Underline,
   Undo2,
@@ -50,7 +51,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { advanceBulkSenderQueue, submitBulkSenderJob, type BulkSenderJob } from "@/lib/bulk-sender";
+import {
+  advanceBulkSenderQueue,
+  fetchBulkOutreachLabels,
+  submitBulkSenderJob,
+  syncPendingBulkOutreachLabels,
+  type BulkSenderJob,
+} from "@/lib/bulk-sender";
 import { cn } from "@/lib/utils";
 import { BulkFollowUpPanel } from "@/components/bulk-sender/BulkFollowUpPanel";
 
@@ -98,6 +105,7 @@ type SavedWorkspace = {
   rows?: SenderRow[];
   subject?: string;
   bodyHtml?: string;
+  selectedLabelIds?: string[];
   activeJobId?: string;
 };
 
@@ -321,6 +329,11 @@ function BulkDraftCreator() {
   const [rows, setRows] = useState<SenderRow[]>(starterRows);
   const [subject, setSubject] = useState(DEFAULT_SUBJECT);
   const [bodyHtml, setBodyHtml] = useState(DEFAULT_BODY);
+  const [availableLabels, setAvailableLabels] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
+  const [labelsLoading, setLabelsLoading] = useState(true);
+  const [labelError, setLabelError] = useState("");
+  const [labelSyncMessage, setLabelSyncMessage] = useState("");
   const [expandedGrid, setExpandedGrid] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [previewRowId, setPreviewRowId] = useState("");
@@ -376,6 +389,9 @@ function BulkDraftCreator() {
         if (saved.rows?.length) setRows(ensureMinimumRows(saved.rows));
         if (typeof saved.subject === "string") setSubject(saved.subject);
         if (typeof saved.bodyHtml === "string") setBodyHtml(saved.bodyHtml);
+        if (Array.isArray(saved.selectedLabelIds)) {
+          setSelectedLabelIds(saved.selectedLabelIds.filter((id) => typeof id === "string"));
+        }
         if (saved.activeJobId) void driveQueue(saved.activeJobId);
       }
     } catch {
@@ -391,12 +407,59 @@ function BulkDraftCreator() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void fetchBulkOutreachLabels()
+      .then(({ labels }) => {
+        if (cancelled) return;
+        setAvailableLabels(labels);
+        const allowed = new Set(labels.map((label) => label.id));
+        setSelectedLabelIds((current) => current.filter((id) => allowed.has(id)));
+        setLabelError("");
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLabelError(error instanceof Error ? error.message : "Gmail labels could not load.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLabelsLoading(false);
+      });
+
+    const syncLabels = () => {
+      void syncPendingBulkOutreachLabels()
+        .then((result) => {
+          if (!cancelled && result.applied > 0) {
+            setLabelSyncMessage(
+              `${result.applied} sent email${result.applied === 1 ? " was" : "s were"} labelled in Gmail.`,
+            );
+          }
+        })
+        .catch(() => undefined);
+    };
+    syncLabels();
+    const interval = window.setInterval(syncLabels, 60_000);
+    window.addEventListener("focus", syncLabels);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", syncLabels);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!loaded) return;
     const activeJobId =
       job && !["completed", "partial", "failed"].includes(job.status) ? job.id : undefined;
-    const workspace: SavedWorkspace = { columns, rows, subject, bodyHtml, activeJobId };
+    const workspace: SavedWorkspace = {
+      columns,
+      rows,
+      subject,
+      bodyHtml,
+      selectedLabelIds,
+      activeJobId,
+    };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
-  }, [bodyHtml, columns, job, loaded, rows, subject]);
+  }, [bodyHtml, columns, job, loaded, rows, selectedLabelIds, subject]);
 
   useEffect(() => {
     const editor = bodyEditorRef.current;
@@ -465,7 +528,7 @@ function BulkDraftCreator() {
         };
       });
       const response = await submitBulkSenderJob({
-        data: { drafts },
+        data: { drafts, labelIds: selectedLabelIds },
       });
       setJob(response.job);
       setIsSubmitting(false);
@@ -693,6 +756,21 @@ function BulkDraftCreator() {
     );
     setJob(null);
     setJobError("");
+  };
+
+  const selectedLabels = useMemo(
+    () => availableLabels.filter((label) => selectedLabelIds.includes(label.id)),
+    [availableLabels, selectedLabelIds],
+  );
+
+  const toggleLabel = (labelId: string) => {
+    setSelectedLabelIds((current) =>
+      current.includes(labelId)
+        ? current.filter((id) => id !== labelId)
+        : current.length >= 10
+          ? current
+          : [...current, labelId],
+    );
   };
 
   const canCreate = Boolean(
@@ -1112,6 +1190,75 @@ function BulkDraftCreator() {
               ))}
             </div>
           </div>
+
+          <fieldset className="rounded-2xl border bg-muted/25 p-4">
+            <legend className="px-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Gmail labels after sending
+            </legend>
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Tags className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold">
+                  Select existing labels for these outreach emails
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Gmail does not allow labels on unsent API drafts. The dashboard remembers your
+                  choice and applies the labels after you manually send each draft.
+                </p>
+                <div className="mt-3 flex max-h-36 flex-wrap gap-2 overflow-y-auto rounded-xl bg-background p-3 ring-1 ring-border">
+                  {labelsLoading ? (
+                    <span className="px-1 py-1 text-xs font-semibold text-muted-foreground">
+                      <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading Gmail
+                      labels…
+                    </span>
+                  ) : availableLabels.length ? (
+                    availableLabels.map((label) => {
+                      const selected = selectedLabelIds.includes(label.id);
+                      return (
+                        <label
+                          key={label.id}
+                          className={cn(
+                            "inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold transition focus-within:ring-2 focus-within:ring-ring",
+                            selected
+                              ? "border-foreground bg-foreground text-background"
+                              : "bg-card hover:border-primary/40 hover:bg-primary/[0.06]",
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleLabel(label.id)}
+                            className="sr-only"
+                          />
+                          <span>{selected ? "✓" : "+"}</span>
+                          <span>{label.name}</span>
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <span className="px-1 py-1 text-xs font-semibold text-muted-foreground">
+                      No user-created Gmail labels are available.
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-muted-foreground">
+                    {selectedLabels.length
+                      ? `${selectedLabels.length} label${selectedLabels.length === 1 ? "" : "s"} selected`
+                      : "Optional · no labels selected"}
+                  </span>
+                  {labelSyncMessage && (
+                    <span className="font-semibold text-success">{labelSyncMessage}</span>
+                  )}
+                  {labelError && (
+                    <span className="font-semibold text-destructive">{labelError}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </fieldset>
         </div>
 
         {previewRow && (
@@ -1221,6 +1368,12 @@ function BulkDraftCreator() {
                 This will create {nextBatch.length} draft{nextBatch.length === 1 ? "" : "s"} in the
                 connected Gmail account. Nothing will be sent automatically.
               </span>
+              {selectedLabels.length > 0 && (
+                <span className="block">
+                  After you manually send them, Gmail will apply:{" "}
+                  {selectedLabels.map((label) => label.name).join(", ")}.
+                </span>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

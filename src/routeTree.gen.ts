@@ -28,6 +28,7 @@ import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-follow
 import { Route as ApiMonthlyOpportunityRefreshWorkerRouteImport } from './routes/api/monthly-opportunity-refresh-worker'
 import { Route as ApiMonthlyOpportunityRefreshPackageRouteImport } from './routes/api/monthly-opportunity-refresh-package'
 import { Route as ApiMonthlyOpportunityRefreshRouteImport } from './routes/api/monthly-opportunity-refresh'
+import { Route as ApiBulkOutreachLabelSyncRouteImport } from './routes/api/bulk-outreach-label-sync'
 import { Route as ApiBulkFollowUpWorkerRouteImport } from './routes/api/bulk-follow-up-worker'
 import { Route as ApiSlackLinkAlertsSlotRouteImport } from './routes/api/slack-link-alerts.$slot'
 import { Route as ApiCalendlyRemindersWebhookRouteImport } from './routes/api/calendly-reminders/webhook'
@@ -133,6 +134,12 @@ const ApiMonthlyOpportunityRefreshRoute =
     path: '/api/monthly-opportunity-refresh',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiBulkOutreachLabelSyncRoute =
+  ApiBulkOutreachLabelSyncRouteImport.update({
+    id: '/api/bulk-outreach-label-sync',
+    path: '/api/bulk-outreach-label-sync',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiBulkFollowUpWorkerRoute = ApiBulkFollowUpWorkerRouteImport.update({
   id: '/api/bulk-follow-up-worker',
   path: '/api/bulk-follow-up-worker',
@@ -175,6 +182,7 @@ export interface FileRoutesByFullPath {
   '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
   '/api/bulk-follow-up-worker': typeof ApiBulkFollowUpWorkerRoute
+  '/api/bulk-outreach-label-sync': typeof ApiBulkOutreachLabelSyncRoute
   '/api/monthly-opportunity-refresh': typeof ApiMonthlyOpportunityRefreshRoute
   '/api/monthly-opportunity-refresh-package': typeof ApiMonthlyOpportunityRefreshPackageRoute
   '/api/monthly-opportunity-refresh-worker': typeof ApiMonthlyOpportunityRefreshWorkerRoute
@@ -201,6 +209,7 @@ export interface FileRoutesByTo {
   '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
   '/api/bulk-follow-up-worker': typeof ApiBulkFollowUpWorkerRoute
+  '/api/bulk-outreach-label-sync': typeof ApiBulkOutreachLabelSyncRoute
   '/api/monthly-opportunity-refresh': typeof ApiMonthlyOpportunityRefreshRoute
   '/api/monthly-opportunity-refresh-package': typeof ApiMonthlyOpportunityRefreshPackageRoute
   '/api/monthly-opportunity-refresh-worker': typeof ApiMonthlyOpportunityRefreshWorkerRoute
@@ -228,6 +237,7 @@ export interface FileRoutesById {
   '/pitching-sheets': typeof PitchingSheetsRoute
   '/team-members': typeof TeamMembersRoute
   '/api/bulk-follow-up-worker': typeof ApiBulkFollowUpWorkerRoute
+  '/api/bulk-outreach-label-sync': typeof ApiBulkOutreachLabelSyncRoute
   '/api/monthly-opportunity-refresh': typeof ApiMonthlyOpportunityRefreshRoute
   '/api/monthly-opportunity-refresh-package': typeof ApiMonthlyOpportunityRefreshPackageRoute
   '/api/monthly-opportunity-refresh-worker': typeof ApiMonthlyOpportunityRefreshWorkerRoute
@@ -256,6 +266,7 @@ export interface FileRouteTypes {
     | '/pitching-sheets'
     | '/team-members'
     | '/api/bulk-follow-up-worker'
+    | '/api/bulk-outreach-label-sync'
     | '/api/monthly-opportunity-refresh'
     | '/api/monthly-opportunity-refresh-package'
     | '/api/monthly-opportunity-refresh-worker'
@@ -282,6 +293,7 @@ export interface FileRouteTypes {
     | '/pitching-sheets'
     | '/team-members'
     | '/api/bulk-follow-up-worker'
+    | '/api/bulk-outreach-label-sync'
     | '/api/monthly-opportunity-refresh'
     | '/api/monthly-opportunity-refresh-package'
     | '/api/monthly-opportunity-refresh-worker'
@@ -308,6 +320,7 @@ export interface FileRouteTypes {
     | '/pitching-sheets'
     | '/team-members'
     | '/api/bulk-follow-up-worker'
+    | '/api/bulk-outreach-label-sync'
     | '/api/monthly-opportunity-refresh'
     | '/api/monthly-opportunity-refresh-package'
     | '/api/monthly-opportunity-refresh-worker'
@@ -335,6 +348,7 @@ export interface RootRouteChildren {
   PitchingSheetsRoute: typeof PitchingSheetsRoute
   TeamMembersRoute: typeof TeamMembersRoute
   ApiBulkFollowUpWorkerRoute: typeof ApiBulkFollowUpWorkerRoute
+  ApiBulkOutreachLabelSyncRoute: typeof ApiBulkOutreachLabelSyncRoute
   ApiMonthlyOpportunityRefreshRoute: typeof ApiMonthlyOpportunityRefreshRoute
   ApiMonthlyOpportunityRefreshPackageRoute: typeof ApiMonthlyOpportunityRefreshPackageRoute
   ApiMonthlyOpportunityRefreshWorkerRoute: typeof ApiMonthlyOpportunityRefreshWorkerRoute
@@ -481,6 +495,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMonthlyOpportunityRefreshRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/bulk-outreach-label-sync': {
+      id: '/api/bulk-outreach-label-sync'
+      path: '/api/bulk-outreach-label-sync'
+      fullPath: '/api/bulk-outreach-label-sync'
+      preLoaderRoute: typeof ApiBulkOutreachLabelSyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/bulk-follow-up-worker': {
       id: '/api/bulk-follow-up-worker'
       path: '/api/bulk-follow-up-worker'
@@ -545,6 +566,7 @@ const rootRouteChildren: RootRouteChildren = {
   PitchingSheetsRoute: PitchingSheetsRoute,
   TeamMembersRoute: TeamMembersRoute,
   ApiBulkFollowUpWorkerRoute: ApiBulkFollowUpWorkerRoute,
+  ApiBulkOutreachLabelSyncRoute: ApiBulkOutreachLabelSyncRoute,
   ApiMonthlyOpportunityRefreshRoute: ApiMonthlyOpportunityRefreshRoute,
   ApiMonthlyOpportunityRefreshPackageRoute:
     ApiMonthlyOpportunityRefreshPackageRoute,
