@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  isMonthlyRefreshInternalRequest,
   startMonthlyOpportunityRefreshRun,
-} from "@/lib/monthly-opportunity-refresh.server";
+} from "@/lib/monthly-opportunity-refresh-start.server";
+import { isMonthlyRefreshInternalRequest } from "@/lib/monthly-opportunity-refresh.server";
 
 function jsonResponse(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {

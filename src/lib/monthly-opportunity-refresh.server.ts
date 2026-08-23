@@ -1,12 +1,10 @@
-import "@tanstack/react-start/server-only";
-
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { del, get, list, put } from "@vercel/blob";
-import type { MonthlyRefreshState } from "@/lib/monthly-opportunity-refresh";
+import type { MonthlyRefreshState } from "@/lib/monthly-opportunity-refresh-types";
 import {
   claimMonthlyRefreshLock,
   monthlyRefreshRedisCommand,
@@ -150,27 +148,19 @@ export function isMonthlyRefreshInternalRequest(request: Request) {
   return Boolean(secret && request.headers.get("authorization") === `Bearer ${secret}`);
 }
 
-export async function getMonthlyOpportunityRefreshStatusServer() {
-  const { requireAdminAuth } = await import("@/lib/auth.server");
-  await requireAdminAuth();
+export async function getLatestMonthlyOpportunityRefreshState() {
   const latestRunId = await monthlyRefreshRedisCommand<string | null>(["GET", LATEST_KEY]);
   return latestRunId ? readState(latestRunId) : null;
 }
 
-export async function startMonthlyOpportunityRefreshServer() {
-  const { requireAdminAuth } = await import("@/lib/auth.server");
-  const auth = await requireAdminAuth();
-  return startMonthlyOpportunityRefreshRun(auth.user?.email || "Dashboard admin");
-}
-
-export async function startMonthlyOpportunityRefreshRun(startedBy: string) {
+export async function prepareMonthlyOpportunityRefreshRun(startedBy: string) {
   validateRuntimeConfiguration();
 
   const existingRunId = await monthlyRefreshRedisCommand<string | null>(["GET", ACTIVE_KEY]);
   if (existingRunId) {
     const existing = await readState(existingRunId);
     if (existing && (existing.status === "queued" || existing.status === "running")) {
-      return { ok: true as const, alreadyRunning: true, state: existing };
+      return { alreadyRunning: true as const, state: existing };
     }
     await clearActiveRun(existingRunId);
   }
@@ -211,17 +201,11 @@ export async function startMonthlyOpportunityRefreshRun(startedBy: string) {
   };
 
   await saveState(state);
-  try {
-    const [{ start }, { monthlyOpportunityRefreshWorkflow }] = await Promise.all([
-      import("workflow/api"),
-      import("@/workflows/monthly-opportunity-refresh"),
-    ]);
-    await start(monthlyOpportunityRefreshWorkflow, [runId]);
-  } catch (error) {
-    await markRunFailed(runId, "Start workflow", error);
-    throw error;
-  }
-  return { ok: true as const, alreadyRunning: false, state };
+  return { alreadyRunning: false as const, state };
+}
+
+export async function failMonthlyOpportunityRefreshStart(runId: string, error: unknown) {
+  await markRunFailed(runId, "Start workflow", error);
 }
 
 export async function runMonthlyOpportunityRefreshStep(runId: string) {
