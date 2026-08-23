@@ -43,7 +43,6 @@ import {
   fetchFollowUpTemplates,
   fetchGmailFollowUpLabels,
   saveFollowUpTemplate,
-  updateAllowedFollowUpLabels,
   type FollowUpCandidate,
   type FollowUpTemplate,
 } from "@/lib/bulk-follow-up";
@@ -230,9 +229,6 @@ export function BulkFollowUpPanel() {
     staleTime: 60_000,
   });
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
-  const [allowedLabelIds, setAllowedLabelIds] = useState<string[]>([]);
-  const [labelSettingsBusy, setLabelSettingsBusy] = useState(false);
-  const [labelSettingsMessage, setLabelSettingsMessage] = useState("");
   const [interactionLevel, setInteractionLevel] = useState(1);
   const [minimumDays, setMinimumDays] = useState<3 | 7 | 14 | 30>(3);
   const [candidates, setCandidates] = useState<FollowUpCandidate[]>([]);
@@ -262,11 +258,6 @@ export function BulkFollowUpPanel() {
       await new Promise((resolve) => window.setTimeout(resolve, 1_500));
     }
   }, []);
-
-  useEffect(() => {
-    if (!labelsQuery.data) return;
-    setAllowedLabelIds(labelsQuery.data.allowedLabelIds);
-  }, [labelsQuery.data]);
 
   useEffect(() => {
     const jobId = window.localStorage.getItem(ACTIVE_JOB_KEY);
@@ -363,22 +354,6 @@ export function BulkFollowUpPanel() {
       await queryClient.invalidateQueries({ queryKey: ["bulk-follow-up-templates"] });
     } finally {
       setTemplateBusy(false);
-    }
-  };
-
-  const saveAllowedLabels = async () => {
-    setLabelSettingsBusy(true);
-    setLabelSettingsMessage("");
-    try {
-      await updateAllowedFollowUpLabels({ data: { labelIds: allowedLabelIds } });
-      setLabelSettingsMessage("Allowed Gmail labels updated for the team.");
-      await queryClient.invalidateQueries({ queryKey: ["gmail-follow-up-labels"] });
-    } catch (error) {
-      setLabelSettingsMessage(
-        error instanceof Error ? error.message : "Labels could not be saved.",
-      );
-    } finally {
-      setLabelSettingsBusy(false);
     }
   };
 
@@ -532,59 +507,6 @@ export function BulkFollowUpPanel() {
             </Button>
           </div>
 
-          {labelsQuery.data?.canManage && (
-            <details className="group mt-5 rounded-2xl border border-dashed bg-muted/25">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-black hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <span>Admin label access</span>
-                <span className="rounded-full bg-background px-2.5 py-1 text-xs text-muted-foreground ring-1 ring-border">
-                  {allowedLabelIds.length} allowed
-                </span>
-              </summary>
-              <div className="border-t px-4 py-4">
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Choose which Gmail labels members are allowed to use in this tool.
-                </p>
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-3">
-                  {labelsQuery.data.labels.map((label) => (
-                    <label
-                      key={`allowed-${label.id}`}
-                      className="flex items-center gap-2 text-xs font-bold"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={allowedLabelIds.includes(label.id)}
-                        onChange={() =>
-                          setAllowedLabelIds((current) =>
-                            current.includes(label.id)
-                              ? current.filter((id) => id !== label.id)
-                              : [...current, label.id],
-                          )
-                        }
-                        className="h-4 w-4 accent-primary"
-                      />
-                      {label.name}
-                    </label>
-                  ))}
-                </div>
-                <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={labelSettingsBusy}
-                    onClick={() => void saveAllowedLabels()}
-                  >
-                    {labelSettingsBusy ? "Saving..." : "Save label access"}
-                  </Button>
-                  {labelSettingsMessage && (
-                    <p className="text-xs font-bold text-muted-foreground">
-                      {labelSettingsMessage}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </details>
-          )}
           {(scanError || labelsQuery.error) && (
             <div
               role="alert"

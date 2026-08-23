@@ -475,7 +475,6 @@ async function listTemplatesServer(force = false) {
 export const fetchGmailFollowUpLabels = createServerFn({ method: "GET" }).handler(async () => {
   const { requireDashboardAuth } = await import("@/lib/auth.server");
   const auth = await requireDashboardAuth();
-  const { followUpRedisCommand } = await getFollowUpRedisServer();
   const accessToken = await getGmailReadAccessToken();
   const result = await gmailJson<{
     labels?: Array<{ id?: string; name?: string; type?: string }>;
@@ -484,62 +483,29 @@ export const fetchGmailFollowUpLabels = createServerFn({ method: "GET" }).handle
     .filter((label) => label.type === "user" && label.id && label.name)
     .map((label) => ({ id: label.id!, name: label.name! }))
     .sort((left, right) => left.name.localeCompare(right.name));
-  const raw = await followUpRedisCommand<string | null>([
-    "GET",
-    "team-billion:bulk-follow-up:allowed-labels:v1",
-  ]);
-  const allowedLabelIds = raw ? (JSON.parse(raw) as string[]) : [];
   return {
-    labels: auth.isAdmin
-      ? allLabels
-      : allLabels.filter((label) => allowedLabelIds.includes(label.id)),
-    allowedLabelIds,
-    configured: Boolean(raw),
+    labels: allLabels,
     canManage: auth.isAdmin,
   };
 });
-
-export const updateAllowedFollowUpLabels = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ labelIds: z.array(z.string().min(1).max(200)).max(50) }))
-  .handler(async ({ data }) => {
-    const { requireAdminAuth } = await import("@/lib/auth.server");
-    await requireAdminAuth();
-    const { followUpRedisCommand, withFollowUpLock } = await getFollowUpRedisServer();
-    const accessToken = await getGmailReadAccessToken();
-    const actual = await gmailJson<{ labels?: Array<{ id?: string; type?: string }> }>(
-      accessToken,
-      "labels",
-    );
-    const userIds = new Set(
-      (actual.labels ?? [])
-        .filter((label) => label.type === "user")
-        .flatMap((label) => (label.id ? [label.id] : [])),
-    );
-    if (data.labelIds.some((id) => !userIds.has(id)))
-      throw new Error("One Gmail label is invalid.");
-    await withFollowUpLock("allowed-labels", 15, () =>
-      followUpRedisCommand<"OK">([
-        "SET",
-        "team-billion:bulk-follow-up:allowed-labels:v1",
-        JSON.stringify(data.labelIds),
-      ]),
-    );
-    return { ok: true as const };
-  });
 
 export const fetchFollowUpCandidates = createServerFn({ method: "POST" })
   .inputValidator(scanInput)
   .handler(async ({ data }) => {
     const { requireDashboardAuth } = await import("@/lib/auth.server");
     await requireDashboardAuth();
-    const { followUpRedisCommand } = await getFollowUpRedisServer();
-    const raw = await followUpRedisCommand<string | null>([
-      "GET",
-      "team-billion:bulk-follow-up:allowed-labels:v1",
-    ]);
-    const allowed = new Set(raw ? (JSON.parse(raw) as string[]) : []);
-    if (!raw || data.labelIds.some((id) => !allowed.has(id))) {
-      throw new Error("An admin must allow every selected Gmail label first.");
+    const accessToken = await getGmailReadAccessToken();
+    const actual = await gmailJson<{ labels?: Array<{ id?: string; type?: string }> }>(
+      accessToken,
+      "labels",
+    );
+    const userLabelIds = new Set(
+      (actual.labels ?? [])
+        .filter((label) => label.type === "user")
+        .flatMap((label) => (label.id ? [label.id] : [])),
+    );
+    if (data.labelIds.some((id) => !userLabelIds.has(id))) {
+      throw new Error("One selected Gmail label no longer exists. Refresh and try again.");
     }
     const result = await scanFollowUpCandidates(data);
     return result;
