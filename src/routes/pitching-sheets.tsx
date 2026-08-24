@@ -45,10 +45,13 @@ import {
   type CreatorProfileType,
 } from "@/lib/creator-profiles";
 import {
+  dedupeCurrentRosterExclusiveCreators,
   diagnoseRosterExclusiveProfileConflicts,
   diagnoseUnmatchedRosterExclusives,
+  findMatchingRosterCreatorProfile,
   matchCurrentRosterExclusiveProfileIds,
 } from "@/lib/creator-roster-matching";
+import type { Creator } from "@/data/creators";
 import { dashboardSheetQuery } from "@/lib/sheets-public";
 import { cn } from "@/lib/utils";
 import { addNativeExcelCheckboxes } from "@/lib/excel-native-checkboxes";
@@ -72,7 +75,27 @@ export const Route = createFileRoute("/pitching-sheets")({
 
 type Platform = "TikTok" | "Instagram" | "YouTube";
 type WorkflowStage = "form" | "exclusives" | "preview";
-type PitchRow = PreparedRow & { profile: CreatorProfile; isRosterExclusive: boolean };
+type PitchCreator = {
+  creatorName: string;
+  location: string;
+  nicheTags: string;
+  mainPlatform: string;
+  ttFollowing: number;
+  ttLink: string;
+  instaFollowing: number;
+  instaLink: string;
+  ytFollowing: number;
+  ytLink: string;
+  gender: string;
+  hasCreatorProfile: boolean;
+};
+type RosterExclusiveOption = {
+  id: string;
+  rosterCreator: Creator;
+  matchedProfile?: CreatorProfile;
+  creator: PitchCreator;
+};
+type PitchRow = PreparedRow & { creator: PitchCreator; isRosterExclusive: boolean };
 
 type ProfileDraft = {
   creatorName: string;
@@ -138,10 +161,59 @@ function followerValue(profile: CreatorProfile, platform: Platform) {
   return profile.ytFollowing;
 }
 
+function pitchFollowerValue(creator: PitchCreator, platform: Platform) {
+  if (platform === "TikTok") return creator.ttFollowing;
+  if (platform === "Instagram") return creator.instaFollowing;
+  return creator.ytFollowing;
+}
+
 function platformAvailable(profile: CreatorProfile, platform: Platform) {
   if (platform === "TikTok") return Boolean(profile.ttLink || profile.ttFollowing);
   if (platform === "Instagram") return Boolean(profile.instaLink || profile.instaFollowing);
   return Boolean(profile.ytLink || profile.ytFollowing);
+}
+
+function profilePitchCreator(profile: CreatorProfile): PitchCreator {
+  return {
+    creatorName: profile.creatorName,
+    location: profile.location,
+    nicheTags: profile.nicheTags,
+    mainPlatform: profile.mainPlatform,
+    ttFollowing: profile.ttFollowing,
+    ttLink: profile.ttLink,
+    instaFollowing: profile.instaFollowing,
+    instaLink: profile.instaLink,
+    ytFollowing: profile.ytFollowing,
+    ytLink: profile.ytLink,
+    gender: profile.gender,
+    hasCreatorProfile: true,
+  };
+}
+
+function rosterExclusiveOptionId(creator: Creator) {
+  return `roster-exclusive:${creator.id}`;
+}
+
+function rosterPitchCreator(creator: Creator, matchedProfile?: CreatorProfile): PitchCreator {
+  if (matchedProfile) return profilePitchCreator(matchedProfile);
+
+  const mainPlatform = platforms.includes(creator.platform as Platform)
+    ? (creator.platform as Platform)
+    : "TikTok";
+  return {
+    creatorName: creator.handle || creator.id,
+    location: creator.base ?? "",
+    nicheTags: creator.niche,
+    mainPlatform,
+    ttFollowing: mainPlatform === "TikTok" ? creator.followers : 0,
+    ttLink: creator.tiktokLink ?? "",
+    instaFollowing: mainPlatform === "Instagram" ? creator.followers : 0,
+    instaLink: creator.instagramLink ?? "",
+    ytFollowing: mainPlatform === "YouTube" ? creator.followers : 0,
+    ytLink: creator.youtubeLink ?? "",
+    gender: "",
+    hasCreatorProfile: false,
+  };
 }
 
 function quoteClipboardCell(value: string | number) {
@@ -286,21 +358,34 @@ function PitchingSheetsPage() {
     () => (rosterReady ? (rosterData?.creators ?? []) : []),
     [rosterData?.creators, rosterReady],
   );
-  const rosterExclusiveProfileIds = useMemo(
-    () => matchCurrentRosterExclusiveProfileIds(profiles, currentRosterCreators),
-    [currentRosterCreators, profiles],
+  const rosterExclusiveCreators = useMemo(
+    () => dedupeCurrentRosterExclusiveCreators(currentRosterCreators),
+    [currentRosterCreators],
   );
-  const rosterExclusiveProfiles = useMemo(
-    () => profiles.filter((profile) => rosterExclusiveProfileIds.has(profile.creatorId)),
-    [profiles, rosterExclusiveProfileIds],
+  const rosterExclusiveProfileIds = useMemo(
+    () => matchCurrentRosterExclusiveProfileIds(profiles, rosterExclusiveCreators),
+    [profiles, rosterExclusiveCreators],
+  );
+  const rosterExclusiveOptions = useMemo<RosterExclusiveOption[]>(
+    () =>
+      rosterExclusiveCreators.map((creator) => {
+        const matchedProfile = findMatchingRosterCreatorProfile(profiles, creator);
+        return {
+          id: rosterExclusiveOptionId(creator),
+          rosterCreator: creator,
+          matchedProfile,
+          creator: rosterPitchCreator(creator, matchedProfile),
+        };
+      }),
+    [profiles, rosterExclusiveCreators],
   );
   const unmatchedRosterExclusives = useMemo(
-    () => diagnoseUnmatchedRosterExclusives(profiles, currentRosterCreators),
-    [currentRosterCreators, profiles],
+    () => diagnoseUnmatchedRosterExclusives(profiles, rosterExclusiveCreators),
+    [profiles, rosterExclusiveCreators],
   );
   const rosterExclusiveProfileConflicts = useMemo(
-    () => diagnoseRosterExclusiveProfileConflicts(profiles, currentRosterCreators),
-    [currentRosterCreators, profiles],
+    () => diagnoseRosterExclusiveProfileConflicts(profiles, rosterExclusiveCreators),
+    [profiles, rosterExclusiveCreators],
   );
 
   const [workflowOpen, setWorkflowOpen] = useState(false);
@@ -409,22 +494,22 @@ function PitchingSheetsPage() {
   const selectedGender = String(formValues.gender || "All genders");
   const outputColumns = useMemo<PreviewColumn<PitchRow>[]>(() => {
     const result: PreviewColumn<PitchRow>[] = [
-      { key: "creatorName", label: "Creator Name", value: (row) => row.profile.creatorName },
+      { key: "creatorName", label: "Creator Name", value: (row) => row.creator.creatorName },
     ];
 
     if (selectedCountries.length > 0) {
-      result.push({ key: "location", label: "Location", value: (row) => row.profile.location });
+      result.push({ key: "location", label: "Location", value: (row) => row.creator.location });
     }
 
     if (selectedNiches.length > 0) {
-      result.push({ key: "niche", label: "Niche", value: (row) => row.profile.nicheTags });
+      result.push({ key: "niche", label: "Niche", value: (row) => row.creator.nicheTags });
     }
 
     if (selectedPlatforms.length > 1) {
       result.push({
         key: "mainPlatform",
         label: "Main Platform",
-        value: (row) => row.profile.mainPlatform,
+        value: (row) => row.creator.mainPlatform,
       });
     }
 
@@ -433,10 +518,10 @@ function PitchingSheetsPage() {
         {
           key: "ttFollowing",
           label: "TT Following",
-          value: (row) => row.profile.ttFollowing,
+          value: (row) => row.creator.ttFollowing,
           align: "right",
         },
-        { key: "ttLink", label: "TT Link", value: (row) => row.profile.ttLink },
+        { key: "ttLink", label: "TT Link", value: (row) => row.creator.ttLink },
       );
     }
     if (selectedPlatforms.includes("Instagram")) {
@@ -444,10 +529,10 @@ function PitchingSheetsPage() {
         {
           key: "instaFollowing",
           label: "Insta Following",
-          value: (row) => row.profile.instaFollowing,
+          value: (row) => row.creator.instaFollowing,
           align: "right",
         },
-        { key: "instaLink", label: "Insta Link", value: (row) => row.profile.instaLink },
+        { key: "instaLink", label: "Insta Link", value: (row) => row.creator.instaLink },
       );
     }
     if (selectedPlatforms.includes("YouTube")) {
@@ -455,15 +540,15 @@ function PitchingSheetsPage() {
         {
           key: "ytFollowing",
           label: "YT Following",
-          value: (row) => row.profile.ytFollowing,
+          value: (row) => row.creator.ytFollowing,
           align: "right",
         },
-        { key: "ytLink", label: "YT Link", value: (row) => row.profile.ytLink },
+        { key: "ytLink", label: "YT Link", value: (row) => row.creator.ytLink },
       );
     }
 
     if (selectedGender !== "All genders") {
-      result.push({ key: "gender", label: "Gender", value: (row) => row.profile.gender });
+      result.push({ key: "gender", label: "Gender", value: (row) => row.creator.gender });
     }
 
     result.push(
@@ -494,15 +579,20 @@ function PitchingSheetsPage() {
   }, [selectedCountries.length, selectedGender, selectedNiches.length, selectedPlatforms]);
 
   const preparedRows = useMemo<PitchRow[]>(() => {
-    const selectedExclusives = rosterExclusiveProfiles.filter((profile) =>
-      selectedExclusiveIds.has(profile.creatorId),
-    );
-    return [...selectedExclusives, ...baseProfiles].map((profile) => ({
+    const selectedExclusives = rosterExclusiveOptions
+      .filter((option) => selectedExclusiveIds.has(option.id))
+      .map((option) => ({
+        id: option.id,
+        creator: option.creator,
+        isRosterExclusive: true,
+      }));
+    const filteredRows = baseProfiles.map((profile) => ({
       id: profile.creatorId,
-      profile,
-      isRosterExclusive: rosterExclusiveProfileIds.has(profile.creatorId),
+      creator: profilePitchCreator(profile),
+      isRosterExclusive: false,
     }));
-  }, [baseProfiles, rosterExclusiveProfileIds, rosterExclusiveProfiles, selectedExclusiveIds]);
+    return [...selectedExclusives, ...filteredRows];
+  }, [baseProfiles, rosterExclusiveOptions, selectedExclusiveIds]);
 
   const lookupResults = useMemo(() => {
     if (!lookupSubmitted || !lookupQuery.trim()) return [];
@@ -581,14 +671,14 @@ function PitchingSheetsPage() {
   const smartSort = (left: PitchRow, right: PitchRow) => {
     if (left.isRosterExclusive !== right.isRosterExclusive) return left.isRosterExclusive ? -1 : 1;
     const leftFollowing = Math.max(
-      ...selectedPlatforms.map((platform) => followerValue(left.profile, platform)),
+      ...selectedPlatforms.map((platform) => pitchFollowerValue(left.creator, platform)),
     );
     const rightFollowing = Math.max(
-      ...selectedPlatforms.map((platform) => followerValue(right.profile, platform)),
+      ...selectedPlatforms.map((platform) => pitchFollowerValue(right.creator, platform)),
     );
     return (
       rightFollowing - leftFollowing ||
-      left.profile.creatorName.localeCompare(right.profile.creatorName)
+      left.creator.creatorName.localeCompare(right.creator.creatorName)
     );
   };
 
@@ -891,8 +981,9 @@ function PitchingSheetsPage() {
           <div className="font-semibold">Creator profile matching needs attention</div>
           <p className="mt-1 text-xs leading-relaxed text-amber-800">
             Pitching Sheets matches current roster exclusives to the private Creator Profiles
-            master by TikTok, Instagram, or YouTube link. If your team edits the company roster,
-            they must also make sure the same social link exists in Creator Profiles.
+            master by TikTok, Instagram, or YouTube link so the final sheet can use enriched data.
+            Roster-only exclusives still appear in the selection step, but these fixes will make
+            their exported rows cleaner.
           </p>
           <div className="mt-3 space-y-2">
             {unmatchedRosterExclusives.map((creator) => (
@@ -910,6 +1001,29 @@ function PitchingSheetsPage() {
                     <li>
                       Open Master, then add or update the Creator Profiles record with that exact
                       same social link.
+                    </li>
+                  </ol>
+                ) : creator.reason === "profile-name-conflict" ? (
+                  <ol className="mt-1 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-amber-800">
+                    <li>
+                      Check the current roster row for <strong>{creator.creatorName}</strong>. One
+                      of its social links is matching a different Creator Profiles record
+                      {creator.matchedProfileNames?.length
+                        ? `: ${creator.matchedProfileNames.join(", ")}.`
+                        : "."}
+                    </li>
+                    <li>
+                      If the link belongs to another creator, remove it from{" "}
+                      <strong>{creator.creatorName}</strong> in the company roster.
+                    </li>
+                    <li>
+                      Then Open Master and make sure <strong>{creator.creatorName}</strong> has
+                      their own Creator Profiles record with their own TikTok, Instagram, or YouTube
+                      link.
+                    </li>
+                    <li>
+                      Fixed means the roster creator name/handle and the matched Creator Profiles
+                      name/handle point to the same person.
                     </li>
                   </ol>
                 ) : (
@@ -1123,25 +1237,26 @@ function PitchingSheetsPage() {
                     </p>
                   </div>
                   <div className="rounded-2xl bg-primary/10 px-4 py-2 text-sm font-semibold text-primary">
-                    {selectedExclusiveIds.size} of {rosterExclusiveProfiles.length} selected
+                    {selectedExclusiveIds.size} of {rosterExclusiveOptions.length} selected
                   </div>
                 </div>
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto bg-background p-5 md:p-7">
-                {rosterExclusiveProfiles.length > 0 ? (
+                {rosterExclusiveOptions.length > 0 ? (
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {rosterExclusiveProfiles.map((profile) => {
-                      const selected = selectedExclusiveIds.has(profile.creatorId);
+                    {rosterExclusiveOptions.map((option) => {
+                      const selected = selectedExclusiveIds.has(option.id);
+                      const creator = option.creator;
                       return (
                         <button
-                          key={profile.creatorId}
+                          key={option.id}
                           type="button"
                           onClick={() =>
                             setSelectedExclusiveIds((current) => {
                               const next = new Set(current);
-                              if (next.has(profile.creatorId)) next.delete(profile.creatorId);
-                              else next.add(profile.creatorId);
+                              if (next.has(option.id)) next.delete(option.id);
+                              else next.add(option.id);
                               return next;
                             })
                           }
@@ -1165,20 +1280,24 @@ function PitchingSheetsPage() {
                           </span>
                           <span className="min-w-0">
                             <span className="block truncate font-semibold">
-                              {profile.creatorName}
+                              {creator.creatorName}
                             </span>
                             <span className="mt-1 block text-xs text-muted-foreground">
-                              {profile.location || "No location"} ·{" "}
-                              {profile.nicheTags || "No niche"}
+                              {creator.location || "No location"} · {creator.nicheTags || "No niche"}
                             </span>
                             <span className="mt-2 block text-xs font-semibold text-primary">
-                              {profile.mainPlatform} ·{" "}
+                              {creator.mainPlatform} ·{" "}
                               {Math.max(
-                                profile.ttFollowing,
-                                profile.instaFollowing,
-                                profile.ytFollowing,
+                                creator.ttFollowing,
+                                creator.instaFollowing,
+                                creator.ytFollowing,
                               ).toLocaleString()}
                             </span>
+                            {!creator.hasCreatorProfile ? (
+                              <span className="mt-2 inline-flex rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800">
+                                Needs Creator Profile
+                              </span>
+                            ) : null}
                           </span>
                         </button>
                       );
@@ -1187,9 +1306,9 @@ function PitchingSheetsPage() {
                 ) : (
                   <div className="rounded-3xl bg-card px-6 py-14 text-center ring-1 ring-border">
                     <Users className="mx-auto h-7 w-7 text-muted-foreground" />
-                    <div className="mt-3 font-semibold">No roster exclusives could be matched</div>
+                    <div className="mt-3 font-semibold">No current roster exclusives found</div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Add matching social links to Creator Profiles before generating the sheet.
+                      Add exclusive creators to the team creator sheet, then come back here.
                     </p>
                   </div>
                 )}
@@ -1209,14 +1328,14 @@ function PitchingSheetsPage() {
                   >
                     <ArrowLeft className="h-4 w-4" /> Back
                   </Button>
-                  {rosterExclusiveProfiles.length > 0 ? (
+                  {rosterExclusiveOptions.length > 0 ? (
                     <Button
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
                       onClick={() =>
                         setSelectedExclusiveIds(
-                          new Set(rosterExclusiveProfiles.map((profile) => profile.creatorId)),
+                          new Set(rosterExclusiveOptions.map((option) => option.id)),
                         )
                       }
                     >

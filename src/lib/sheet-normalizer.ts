@@ -150,7 +150,8 @@ function parseCreatorStatus(value: string): CreatorStatus {
 function parseRelationship(value: string): CreatorRelationship {
   const normalized = value.toLowerCase();
   if (normalized.includes("non") || normalized.includes("partner")) return "Non-exclusive";
-  return "Exclusive";
+  if (normalized.includes("exclusive")) return "Exclusive";
+  return "Non-exclusive";
 }
 
 function parsePlatform(value: string): Platform {
