@@ -465,9 +465,9 @@ export function BulkFollowUpPanel() {
             </div>
           </fieldset>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-2 lg:grid-cols-[minmax(230px,0.9fr)_minmax(300px,1.1fr)_auto] lg:items-end">
+          <div className="mt-5 grid gap-x-4 gap-y-3 md:grid-cols-2 lg:grid-cols-[minmax(230px,0.9fr)_minmax(340px,1.1fr)_auto] lg:items-start">
             <label>
-              <span className="mb-2 block text-xs font-black uppercase tracking-[0.12em] text-muted-foreground">
+              <span className="mb-2 flex min-h-7 items-center text-xs font-black uppercase tracking-[0.12em] text-muted-foreground">
                 Level of interaction
               </span>
               <select
@@ -483,7 +483,7 @@ export function BulkFollowUpPanel() {
               </select>
             </label>
             <div>
-              <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="mb-2 flex min-h-7 items-center justify-between gap-3">
                 <span
                   id="last-sent-window-label"
                   className="text-xs font-black uppercase tracking-[0.12em] text-muted-foreground"
@@ -494,8 +494,25 @@ export function BulkFollowUpPanel() {
                   {minimumDays}–{maximumDays} days ago
                 </span>
               </div>
-              <div className="flex h-12 items-center rounded-2xl border bg-background px-4">
+              <div className="relative flex h-12 items-center rounded-2xl border bg-background px-4 shadow-sm">
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-4 top-1/2 z-20 flex -translate-y-1/2 justify-between"
+                >
+                  {FOLLOW_UP_DAY_MILESTONES.map((days, index) => (
+                    <span
+                      key={days}
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full ring-1",
+                        index >= sentDayRange[0] && index <= sentDayRange[1]
+                          ? "bg-background ring-primary/30"
+                          : "bg-muted-foreground/40 ring-background",
+                      )}
+                    />
+                  ))}
+                </div>
                 <DualRangeSlider
+                  className="z-10"
                   aria-labelledby="last-sent-window-label"
                   value={sentDayRange}
                   onValueChange={(values) => {
@@ -507,16 +524,9 @@ export function BulkFollowUpPanel() {
                   minStepsBetweenThumbs={1}
                 />
               </div>
-              <div className="mt-1.5 grid grid-cols-5 px-1 text-[10px] font-bold text-muted-foreground">
-                {FOLLOW_UP_DAY_MILESTONES.map((days, index) => (
-                  <span
-                    key={days}
-                    className={cn(
-                      index === 0 && "text-left",
-                      index > 0 && index < FOLLOW_UP_DAY_MILESTONES.length - 1 && "text-center",
-                      index === FOLLOW_UP_DAY_MILESTONES.length - 1 && "text-right",
-                    )}
-                  >
+              <div className="mx-4 mt-1.5 flex justify-between text-[10px] font-bold text-muted-foreground">
+                {FOLLOW_UP_DAY_MILESTONES.map((days) => (
+                  <span key={days} className="flex w-0 justify-center whitespace-nowrap">
                     {days}d
                   </span>
                 ))}
@@ -526,7 +536,7 @@ export function BulkFollowUpPanel() {
               type="button"
               disabled={scanning || selectedLabelIds.length === 0}
               onClick={() => void scan()}
-              className="h-12 rounded-2xl px-6 shadow-sm md:col-span-2 lg:col-span-1"
+              className="h-12 rounded-2xl px-6 shadow-sm md:col-span-2 lg:col-span-1 lg:mt-9"
             >
               {scanning ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
