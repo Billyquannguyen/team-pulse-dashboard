@@ -36,6 +36,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { DualRangeSlider } from "@/components/ui/dual-range-slider";
 import { Progress } from "@/components/ui/progress";
 import {
   deleteFollowUpTemplate,
@@ -58,6 +59,7 @@ import { cn } from "@/lib/utils";
 const PAGE_SIZE = 10;
 const MAX_BATCH = 100;
 const ACTIVE_JOB_KEY = "team-billion-bulk-follow-up-active-job-v1";
+const FOLLOW_UP_DAY_MILESTONES = [3, 7, 14, 30, 90] as const;
 
 function htmlToText(html: string) {
   const container = document.createElement("div");
@@ -230,7 +232,7 @@ export function BulkFollowUpPanel() {
   });
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [interactionLevel, setInteractionLevel] = useState(1);
-  const [minimumDays, setMinimumDays] = useState<3 | 7 | 14 | 30>(3);
+  const [sentDayRange, setSentDayRange] = useState<[number, number]>([0, 4]);
   const [candidates, setCandidates] = useState<FollowUpCandidate[]>([]);
   const [hasMoreCandidates, setHasMoreCandidates] = useState(false);
   const [selectedThreads, setSelectedThreads] = useState<Set<string>>(new Set());
@@ -278,6 +280,8 @@ export function BulkFollowUpPanel() {
   const totalPages = Math.max(1, Math.ceil(oldestBatch.length / PAGE_SIZE));
   const visibleCandidates = oldestBatch.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const progress = job?.total ? (job.processed / job.total) * 100 : 0;
+  const minimumDays = FOLLOW_UP_DAY_MILESTONES[sentDayRange[0]] ?? 3;
+  const maximumDays = FOLLOW_UP_DAY_MILESTONES[sentDayRange[1]] ?? 90;
 
   const selectedLabels = useMemo(() => new Set(selectedLabelIds), [selectedLabelIds]);
   const toggleLabel = (id: string) =>
@@ -302,6 +306,7 @@ export function BulkFollowUpPanel() {
           labelIds: selectedLabelIds,
           interactionLevel,
           minimumDaysSinceLastSent: minimumDays,
+          maximumDaysSinceLastSent: maximumDays,
         },
       });
       setCandidates(result.candidates);
@@ -369,6 +374,7 @@ export function BulkFollowUpPanel() {
             labelIds: selectedLabelIds,
             interactionLevel,
             minimumDaysSinceLastSent: minimumDays,
+            maximumDaysSinceLastSent: maximumDays,
           },
           htmlBody: bodyHtml,
           textBody,
@@ -459,7 +465,7 @@ export function BulkFollowUpPanel() {
             </div>
           </fieldset>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-2 lg:grid-cols-[minmax(230px,1fr)_minmax(210px,0.8fr)_auto] lg:items-end">
+          <div className="mt-5 grid gap-3 md:grid-cols-2 lg:grid-cols-[minmax(230px,0.9fr)_minmax(300px,1.1fr)_auto] lg:items-end">
             <label>
               <span className="mb-2 block text-xs font-black uppercase tracking-[0.12em] text-muted-foreground">
                 Level of interaction
@@ -476,22 +482,46 @@ export function BulkFollowUpPanel() {
                 ))}
               </select>
             </label>
-            <label>
-              <span className="mb-2 block text-xs font-black uppercase tracking-[0.12em] text-muted-foreground">
-                Last sent email
-              </span>
-              <select
-                value={minimumDays}
-                onChange={(event) => setMinimumDays(Number(event.target.value) as 3 | 7 | 14 | 30)}
-                className="h-12 w-full rounded-2xl border bg-background px-4 text-sm font-bold outline-none transition focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
-              >
-                {[3, 7, 14, 30].map((days) => (
-                  <option key={days} value={days}>
-                    At least {days} days ago
-                  </option>
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span
+                  id="last-sent-window-label"
+                  className="text-xs font-black uppercase tracking-[0.12em] text-muted-foreground"
+                >
+                  Last sent window
+                </span>
+                <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-black text-primary">
+                  {minimumDays}–{maximumDays} days ago
+                </span>
+              </div>
+              <div className="flex h-12 items-center rounded-2xl border bg-background px-4">
+                <DualRangeSlider
+                  aria-labelledby="last-sent-window-label"
+                  value={sentDayRange}
+                  onValueChange={(values) => {
+                    if (values.length === 2) setSentDayRange([values[0], values[1]]);
+                  }}
+                  min={0}
+                  max={FOLLOW_UP_DAY_MILESTONES.length - 1}
+                  step={1}
+                  minStepsBetweenThumbs={1}
+                />
+              </div>
+              <div className="mt-1.5 grid grid-cols-5 px-1 text-[10px] font-bold text-muted-foreground">
+                {FOLLOW_UP_DAY_MILESTONES.map((days, index) => (
+                  <span
+                    key={days}
+                    className={cn(
+                      index === 0 && "text-left",
+                      index > 0 && index < FOLLOW_UP_DAY_MILESTONES.length - 1 && "text-center",
+                      index === FOLLOW_UP_DAY_MILESTONES.length - 1 && "text-right",
+                    )}
+                  >
+                    {days}d
+                  </span>
                 ))}
-              </select>
-            </label>
+              </div>
+            </div>
             <Button
               type="button"
               disabled={scanning || selectedLabelIds.length === 0}
@@ -528,7 +558,7 @@ export function BulkFollowUpPanel() {
             title="Review matching threads"
             description={
               candidates.length
-                ? `Oldest outreach appears first. Showing up to ${oldestBatch.length} eligible threads${hasMoreCandidates ? ", with more matches available." : "."}`
+                ? `Oldest outreach appears first within the ${minimumDays}–${maximumDays}-day window. Showing up to ${oldestBatch.length} eligible threads${hasMoreCandidates ? ", with more matches available." : "."}`
                 : "Run the filters above, then confirm exactly who should receive a follow-up draft."
             }
           >

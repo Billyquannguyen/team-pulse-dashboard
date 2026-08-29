@@ -25,13 +25,27 @@ export type FollowUpTemplate = {
   rowNumber?: number;
 };
 
-const scanInput = z.object({
-  labelIds: z.array(z.string().min(1).max(200)).min(1).max(10),
-  interactionLevel: z.number().int().min(1).max(5),
-  minimumDaysSinceLastSent: z.union([z.literal(3), z.literal(7), z.literal(14), z.literal(30)]),
-});
+const followUpDayMilestoneSchema = z.union([
+  z.literal(3),
+  z.literal(7),
+  z.literal(14),
+  z.literal(30),
+  z.literal(90),
+]);
 
-export type FollowUpScanInput = z.infer<typeof scanInput>;
+export const followUpScanInputSchema = z
+  .object({
+    labelIds: z.array(z.string().min(1).max(200)).min(1).max(10),
+    interactionLevel: z.number().int().min(1).max(5),
+    minimumDaysSinceLastSent: followUpDayMilestoneSchema,
+    maximumDaysSinceLastSent: followUpDayMilestoneSchema,
+  })
+  .refine((input) => input.minimumDaysSinceLastSent <= input.maximumDaysSinceLastSent, {
+    message: "The beginning of the follow-up window must be before its end.",
+    path: ["maximumDaysSinceLastSent"],
+  });
+
+export type FollowUpScanInput = z.infer<typeof followUpScanInputSchema>;
 
 const templateInput = z.object({
   id: z.string().trim().min(1).max(120).optional(),
@@ -216,6 +230,7 @@ export function candidateFromThread(
   requiredInteractionLevel: number,
   cutoff: number,
   suppressedAddresses = new Set<string>(),
+  oldestCutoff = 0,
 ): FollowUpCandidate | null {
   const messages = (thread.messages ?? [])
     .filter((message) => !(message.labelIds ?? []).includes("DRAFT"))
@@ -228,7 +243,7 @@ export function candidateFromThread(
   const lastMessage = messages.at(-1);
   if (!lastMessage) return null;
   const lastSentAt = messageTimestamp(lastMessage);
-  if (!lastSentAt || lastSentAt > cutoff) return null;
+  if (!lastSentAt || lastSentAt > cutoff || lastSentAt < oldestCutoff) return null;
 
   const toHeader = getHeader(lastMessage, "To") || getHeader(messages[0], "To");
   const threadSendingAddresses = new Set([
@@ -314,20 +329,33 @@ async function scanFollowUpCandidates(input: FollowUpScanInput) {
   const primaryAddress = await getPrimaryGmailAddress(accessToken);
   const sendingAddresses = new Set(primaryAddress ? [primaryAddress] : []);
   const suppressedAddresses = await getSuppressedRecipientAddresses(accessToken);
-  const cutoff = Date.now() - input.minimumDaysSinceLastSent * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const cutoff = now - input.minimumDaysSinceLastSent * dayMs;
+  const oldestCutoff = now - input.maximumDaysSinceLastSent * dayMs;
   const candidates: FollowUpCandidate[] = [];
-  const seen = new Set<string>();
-  const cutoffDate = new Date(cutoff);
-  let hasMore = false;
-  for (let year = 2004; year <= cutoffDate.getUTCFullYear(); year += 1) {
-    const after = new Date(Date.UTC(year, 0, 1));
-    const before = new Date(Math.min(Date.UTC(year + 1, 0, 1), cutoffDate.getTime()));
-    if (before <= after) continue;
+  const acceptedThreadIds = new Set<string>();
+  const scanChunkMs = 7 * dayMs;
+
+  // Gmail lists matching threads newest-first. Walk from the oldest edge of the
+  // chosen window so the 100-result cap always keeps the oldest eligible outreach.
+  for (
+    let chunkStart = oldestCutoff;
+    chunkStart < cutoff && candidates.length <= 100;
+    chunkStart += scanChunkMs
+  ) {
+    const chunkEnd = Math.min(chunkStart + scanChunkMs, cutoff);
     const groups = await Promise.all(
-      input.labelIds.map((labelId) => listThreadIdsForWindow(accessToken, labelId, after, before)),
+      input.labelIds.map((labelId) =>
+        listThreadIdsForWindow(
+          accessToken,
+          labelId,
+          new Date(chunkStart - dayMs),
+          new Date(chunkEnd + dayMs),
+        ),
+      ),
     );
-    const ids = Array.from(new Set(groups.flat())).filter((id) => !seen.has(id));
-    ids.forEach((id) => seen.add(id));
+    const ids = Array.from(new Set(groups.flat()));
     for (let index = 0; index < ids.length; index += 5) {
       const threads = await Promise.all(
         ids.slice(index, index + 5).map((threadId) => getThread(accessToken, threadId)),
@@ -337,17 +365,18 @@ async function scanFollowUpCandidates(input: FollowUpScanInput) {
           thread,
           sendingAddresses,
           input.interactionLevel,
-          cutoff,
+          chunkEnd,
           suppressedAddresses,
+          chunkStart,
         );
-        if (candidate) candidates.push(candidate);
+        if (candidate && !acceptedThreadIds.has(candidate.threadId)) {
+          acceptedThreadIds.add(candidate.threadId);
+          candidates.push(candidate);
+        }
       }
     }
-    if (candidates.length > 100) {
-      hasMore = true;
-      break;
-    }
   }
+  const hasMore = candidates.length > 100;
   const sorted = candidates.sort(
     (left, right) => new Date(left.lastSentAt).getTime() - new Date(right.lastSentAt).getTime(),
   );
@@ -361,13 +390,16 @@ export async function revalidateFollowUpCandidate(
   const accessToken = await getGmailReadAccessToken();
   const primaryAddress = await getPrimaryGmailAddress(accessToken);
   const suppressed = await getSuppressedRecipientAddresses(accessToken);
-  const cutoff = Date.now() - input.minimumDaysSinceLastSent * 86_400_000;
+  const now = Date.now();
+  const cutoff = now - input.minimumDaysSinceLastSent * 86_400_000;
+  const oldestCutoff = now - input.maximumDaysSinceLastSent * 86_400_000;
   const current = candidateFromThread(
     await getThread(accessToken, expected.threadId),
     new Set(primaryAddress ? [primaryAddress] : []),
     input.interactionLevel,
     cutoff,
     suppressed,
+    oldestCutoff,
   );
   if (!current || current.recipientEmail !== expected.recipientEmail) return null;
   if (!current.labelIds.some((labelId) => input.labelIds.includes(labelId))) return null;
@@ -490,7 +522,7 @@ export const fetchGmailFollowUpLabels = createServerFn({ method: "GET" }).handle
 });
 
 export const fetchFollowUpCandidates = createServerFn({ method: "POST" })
-  .inputValidator(scanInput)
+  .inputValidator(followUpScanInputSchema)
   .handler(async ({ data }) => {
     const { requireDashboardAuth } = await import("@/lib/auth.server");
     await requireDashboardAuth();

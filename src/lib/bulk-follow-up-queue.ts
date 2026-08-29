@@ -2,6 +2,7 @@ import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 import {
   getGmailReadAccessToken,
+  followUpScanInputSchema,
   revalidateFollowUpCandidate,
   sanitizeFollowUpTemplateHtml,
   type FollowUpCandidate,
@@ -20,15 +21,9 @@ const candidateSchema = z.object({
   labelIds: z.array(z.string().max(200)).max(100),
 });
 
-const filterSchema = z.object({
-  labelIds: z.array(z.string().min(1).max(200)).min(1).max(10),
-  interactionLevel: z.number().int().min(1).max(5),
-  minimumDaysSinceLastSent: z.union([z.literal(3), z.literal(7), z.literal(14), z.literal(30)]),
-});
-
 const submitSchema = z.object({
   candidates: z.array(candidateSchema).min(1).max(100),
-  filter: filterSchema,
+  filter: followUpScanInputSchema,
   htmlBody: z.string().trim().min(1).max(60_000),
   textBody: z.string().trim().min(1).max(20_000),
 });

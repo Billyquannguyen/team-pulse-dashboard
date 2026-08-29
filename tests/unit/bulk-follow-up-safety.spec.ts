@@ -79,3 +79,63 @@ test("a separately suppressed bounced address is excluded", () => {
 
   expect(candidate).toBeNull();
 });
+
+test("threads older than the selected follow-up window are excluded", () => {
+  const now = Date.now();
+  const candidate = candidateFromThread(
+    {
+      id: "thread-too-old",
+      messages: [
+        {
+          internalDate: String(now - 91 * 86_400_000),
+          labelIds: ["SENT", "Label_outreach"],
+          payload: {
+            headers: [
+              { name: "From", value: "sender@example.com" },
+              { name: "To", value: "creator@example.com" },
+              { name: "Subject", value: "Partnership" },
+              { name: "Message-ID", value: "<old@example.com>" },
+            ],
+          },
+        },
+      ],
+    },
+    new Set(["sender@example.com"]),
+    1,
+    now - 3 * 86_400_000,
+    new Set(),
+    now - 90 * 86_400_000,
+  );
+
+  expect(candidate).toBeNull();
+});
+
+test("threads inside a custom follow-up window remain eligible", () => {
+  const now = Date.now();
+  const candidate = candidateFromThread(
+    {
+      id: "thread-in-window",
+      messages: [
+        {
+          internalDate: String(now - 30 * 86_400_000),
+          labelIds: ["SENT", "Label_outreach"],
+          payload: {
+            headers: [
+              { name: "From", value: "sender@example.com" },
+              { name: "To", value: "Creator <creator@example.com>" },
+              { name: "Subject", value: "Partnership" },
+              { name: "Message-ID", value: "<inside@example.com>" },
+            ],
+          },
+        },
+      ],
+    },
+    new Set(["sender@example.com"]),
+    1,
+    now - 14 * 86_400_000,
+    new Set(),
+    now - 90 * 86_400_000,
+  );
+
+  expect(candidate?.threadId).toBe("thread-in-window");
+});
