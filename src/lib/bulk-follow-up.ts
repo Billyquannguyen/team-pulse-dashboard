@@ -69,8 +69,12 @@ type GmailThread = { id?: string; messages?: GmailMessage[] };
 const TEMPLATE_TAB_NAME = "BulkFollowUpTemplates";
 const TEMPLATE_HEADERS = ["ID", "Name", "HTML Body", "Text Body", "Created At", "Updated At"];
 const TEMPLATE_CACHE_MS = 45_000;
+const SUPPRESSION_CACHE_MS = 6 * 60 * 60 * 1000;
+const SUPPRESSION_LOOKBACK_DAYS = 120;
+const MAX_THREAD_DETAILS_PER_SCAN = 400;
+const MAX_UNFILTERED_CANDIDATES = 150;
 let templateCache: { expiresAt: number; data: FollowUpTemplate[] } | null = null;
-let suppressionCache: { expiresAt: number; addresses: Set<string> } | null = null;
+const suppressionCache = new Map<string, { expiresAt: number; suppressed: boolean }>();
 
 const getGmailOAuthServer = createServerOnlyFn(async () => import("@/lib/gmail-oauth.server"));
 const getFollowUpRedisServer = createServerOnlyFn(
@@ -148,7 +152,19 @@ async function gmailJson<T>(accessToken: string, path: string, params?: URLSearc
     | null;
   if (!response.ok || !payload) {
     const detail = payload?.error?.message ?? `Gmail returned ${response.status}.`;
-    if (response.status === 401 || response.status === 403) {
+    const normalizedDetail = detail.toLowerCase();
+    const isQuotaError =
+      response.status === 429 ||
+      normalizedDetail.includes("quota") ||
+      normalizedDetail.includes("rate limit");
+    if (isQuotaError) {
+      throw new Error("Gmail's temporary read limit was reached. Wait one minute and try again.");
+    }
+    const isPermissionError =
+      response.status === 401 ||
+      (response.status === 403 &&
+        (normalizedDetail.includes("permission") || normalizedDetail.includes("scope")));
+    if (isPermissionError) {
       throw new Error(`${detail} Reconnect Gmail with read, compose, and settings permissions.`);
     }
     throw new Error(detail);
@@ -189,26 +205,22 @@ async function listThreadIdsForWindow(
   after: Date,
   before: Date,
 ) {
-  const ids: string[] = [];
-  let pageToken = "";
-  do {
-    const params = new URLSearchParams({
-      labelIds: labelId,
-      q: `in:sent after:${after.toISOString().slice(0, 10).replaceAll("-", "/")} before:${before
-        .toISOString()
-        .slice(0, 10)
-        .replaceAll("-", "/")}`,
-      maxResults: "500",
-    });
-    if (pageToken) params.set("pageToken", pageToken);
-    const result = await gmailJson<{
-      threads?: Array<{ id?: string }>;
-      nextPageToken?: string;
-    }>(accessToken, "threads", params);
-    for (const thread of result.threads ?? []) if (thread.id) ids.push(thread.id);
-    pageToken = result.nextPageToken ?? "";
-  } while (pageToken);
-  return ids;
+  const params = new URLSearchParams({
+    labelIds: labelId,
+    q: `in:sent after:${after.toISOString().slice(0, 10).replaceAll("-", "/")} before:${before
+      .toISOString()
+      .slice(0, 10)
+      .replaceAll("-", "/")}`,
+    maxResults: "500",
+  });
+  const result = await gmailJson<{ threads?: Array<{ id?: string }> }>(
+    accessToken,
+    "threads",
+    params,
+  );
+  // Gmail returns newest first. Reverse the one-page window so the oldest
+  // outreach is checked first without opening hundreds of newer threads.
+  return (result.threads ?? []).flatMap((thread) => (thread.id ? [thread.id] : [])).reverse();
 }
 
 async function getThread(accessToken: string, threadId: string) {
@@ -277,71 +289,67 @@ export function candidateFromThread(
   };
 }
 
-async function getSuppressedRecipientAddresses(accessToken: string) {
-  if (suppressionCache && suppressionCache.expiresAt > Date.now()) {
-    return suppressionCache.addresses;
-  }
-  const addresses = new Set<string>();
-  let pageToken = "";
-  let scanned = 0;
-  do {
-    const params = new URLSearchParams({
-      q: 'newer_than:5y (from:mailer-daemon OR from:postmaster OR subject:undeliverable OR subject:"delivery status notification")',
-      maxResults: "500",
-    });
-    if (pageToken) params.set("pageToken", pageToken);
-    const result = await gmailJson<{ messages?: Array<{ id?: string }>; nextPageToken?: string }>(
-      accessToken,
-      "messages",
-      params,
-    );
-    const ids = (result.messages ?? []).flatMap((message) => (message.id ? [message.id] : []));
-    for (let index = 0; index < ids.length; index += 10) {
-      const messages = await Promise.all(
-        ids.slice(index, index + 10).map((id) => {
-          const metadata = new URLSearchParams({ format: "metadata" });
-          for (const header of ["X-Failed-Recipients", "Final-Recipient", "Original-Recipient"]) {
-            metadata.append("metadataHeaders", header);
-          }
-          return gmailJson<GmailMessage>(
-            accessToken,
-            `messages/${encodeURIComponent(id)}`,
-            metadata,
-          );
-        }),
-      );
-      for (const message of messages) {
-        for (const headerName of ["X-Failed-Recipients", "Final-Recipient", "Original-Recipient"]) {
-          for (const address of extractAddresses(getHeader(message, headerName)))
-            addresses.add(address);
+async function isSuppressedRecipient(accessToken: string, recipientEmail: string) {
+  const normalizedEmail = recipientEmail.trim().toLowerCase();
+  const cached = suppressionCache.get(normalizedEmail);
+  if (cached && cached.expiresAt > Date.now()) return cached.suppressed;
+
+  const params = new URLSearchParams({
+    q: `newer_than:${SUPPRESSION_LOOKBACK_DAYS}d (from:mailer-daemon OR from:postmaster OR subject:undeliverable OR subject:"delivery status notification") "${normalizedEmail}"`,
+    maxResults: "10",
+  });
+  const result = await gmailJson<{ messages?: Array<{ id?: string }> }>(
+    accessToken,
+    "messages",
+    params,
+  );
+  const ids = (result.messages ?? []).flatMap((message) => (message.id ? [message.id] : []));
+  let suppressed = false;
+  for (let index = 0; index < ids.length && !suppressed; index += 5) {
+    const messages = await Promise.all(
+      ids.slice(index, index + 5).map((id) => {
+        const metadata = new URLSearchParams({ format: "metadata" });
+        for (const header of ["X-Failed-Recipients", "Final-Recipient", "Original-Recipient"]) {
+          metadata.append("metadataHeaders", header);
         }
-      }
-    }
-    scanned += ids.length;
-    pageToken = result.nextPageToken ?? "";
-  } while (pageToken && scanned < 2_000);
-  suppressionCache = { addresses, expiresAt: Date.now() + 60 * 60 * 1000 };
-  return addresses;
+        return gmailJson<GmailMessage>(accessToken, `messages/${encodeURIComponent(id)}`, metadata);
+      }),
+    );
+    suppressed = messages.some((message) =>
+      ["X-Failed-Recipients", "Final-Recipient", "Original-Recipient"].some((headerName) =>
+        extractAddresses(getHeader(message, headerName)).includes(normalizedEmail),
+      ),
+    );
+  }
+  suppressionCache.set(normalizedEmail, {
+    suppressed,
+    expiresAt: Date.now() + SUPPRESSION_CACHE_MS,
+  });
+  return suppressed;
 }
 
 async function scanFollowUpCandidates(input: FollowUpScanInput) {
   const accessToken = await getGmailReadAccessToken();
   const primaryAddress = await getPrimaryGmailAddress(accessToken);
   const sendingAddresses = new Set(primaryAddress ? [primaryAddress] : []);
-  const suppressedAddresses = await getSuppressedRecipientAddresses(accessToken);
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
   const cutoff = now - input.minimumDaysSinceLastSent * dayMs;
   const oldestCutoff = now - input.maximumDaysSinceLastSent * dayMs;
   const candidates: FollowUpCandidate[] = [];
   const acceptedThreadIds = new Set<string>();
+  const inspectedThreadIds = new Set<string>();
+  let inspectedThreadCount = 0;
+  let inspectionBudgetReached = false;
   const scanChunkMs = 7 * dayMs;
 
   // Gmail lists matching threads newest-first. Walk from the oldest edge of the
   // chosen window so the 100-result cap always keeps the oldest eligible outreach.
   for (
     let chunkStart = oldestCutoff;
-    chunkStart < cutoff && candidates.length <= 100;
+    chunkStart < cutoff &&
+    candidates.length < MAX_UNFILTERED_CANDIDATES &&
+    !inspectionBudgetReached;
     chunkStart += scanChunkMs
   ) {
     const chunkEnd = Math.min(chunkStart + scanChunkMs, cutoff);
@@ -355,18 +363,26 @@ async function scanFollowUpCandidates(input: FollowUpScanInput) {
         ),
       ),
     );
-    const ids = Array.from(new Set(groups.flat()));
+    const ids = Array.from(new Set(groups.flat())).filter((id) => !inspectedThreadIds.has(id));
     for (let index = 0; index < ids.length; index += 5) {
+      const remainingBudget = MAX_THREAD_DETAILS_PER_SCAN - inspectedThreadCount;
+      if (remainingBudget <= 0 || candidates.length >= MAX_UNFILTERED_CANDIDATES) {
+        inspectionBudgetReached = true;
+        break;
+      }
+      const batchIds = ids.slice(index, index + Math.min(5, remainingBudget));
+      batchIds.forEach((threadId) => inspectedThreadIds.add(threadId));
       const threads = await Promise.all(
-        ids.slice(index, index + 5).map((threadId) => getThread(accessToken, threadId)),
+        batchIds.map((threadId) => getThread(accessToken, threadId)),
       );
+      inspectedThreadCount += threads.length;
       for (const thread of threads) {
         const candidate = candidateFromThread(
           thread,
           sendingAddresses,
           input.interactionLevel,
           chunkEnd,
-          suppressedAddresses,
+          new Set(),
           chunkStart,
         );
         if (candidate && !acceptedThreadIds.has(candidate.threadId)) {
@@ -376,11 +392,25 @@ async function scanFollowUpCandidates(input: FollowUpScanInput) {
       }
     }
   }
-  const hasMore = candidates.length > 100;
   const sorted = candidates.sort(
     (left, right) => new Date(left.lastSentAt).getTime() - new Date(right.lastSentAt).getTime(),
   );
-  return { candidates: sorted.slice(0, 100), hasMore };
+  const eligible: FollowUpCandidate[] = [];
+  for (let index = 0; index < sorted.length && eligible.length <= 100; index += 10) {
+    const batch = sorted.slice(index, index + 10);
+    const suppressed = await Promise.all(
+      batch.map((candidate) => isSuppressedRecipient(accessToken, candidate.recipientEmail)),
+    );
+    for (let candidateIndex = 0; candidateIndex < batch.length; candidateIndex += 1) {
+      const candidate = batch[candidateIndex];
+      if (candidate && !suppressed[candidateIndex]) eligible.push(candidate);
+    }
+  }
+  const hasMore =
+    eligible.length > 100 ||
+    inspectionBudgetReached ||
+    candidates.length >= MAX_UNFILTERED_CANDIDATES;
+  return { candidates: eligible.slice(0, 100), hasMore };
 }
 
 export async function revalidateFollowUpCandidate(
@@ -389,7 +419,9 @@ export async function revalidateFollowUpCandidate(
 ) {
   const accessToken = await getGmailReadAccessToken();
   const primaryAddress = await getPrimaryGmailAddress(accessToken);
-  const suppressed = await getSuppressedRecipientAddresses(accessToken);
+  const suppressed = (await isSuppressedRecipient(accessToken, expected.recipientEmail))
+    ? new Set([expected.recipientEmail.toLowerCase()])
+    : new Set<string>();
   const now = Date.now();
   const cutoff = now - input.minimumDaysSinceLastSent * 86_400_000;
   const oldestCutoff = now - input.maximumDaysSinceLastSent * 86_400_000;
