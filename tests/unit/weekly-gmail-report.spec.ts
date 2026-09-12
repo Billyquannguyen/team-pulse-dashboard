@@ -5,6 +5,7 @@ import type { Creator } from "../../src/data/creators";
 import {
   findMentionedExclusiveCreators,
   getReportWindow,
+  isGmailRateLimitResponse,
 } from "../../src/lib/weekly-gmail-outreach-report.server";
 
 function creator(overrides: Partial<Creator>): Creator {
@@ -40,6 +41,17 @@ test("weekly report uses completed Vietnam calendar days", () => {
 
   expect(new Date(window.startMs).toISOString()).toBe("2026-08-14T17:00:00.000Z");
   expect(new Date(window.endMs).toISOString()).toBe("2026-08-21T17:00:00.000Z");
+});
+
+test("Gmail quota 403 responses are not misclassified as authentication failures", () => {
+  expect(
+    isGmailRateLimitResponse(
+      403,
+      "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user'",
+    ),
+  ).toBe(true);
+  expect(isGmailRateLimitResponse(403, "Insufficient Permission")).toBe(false);
+  expect(isGmailRateLimitResponse(429, "Too many requests")).toBe(true);
 });
 
 test("exclusive creator detection uses the dashboard creator name", () => {

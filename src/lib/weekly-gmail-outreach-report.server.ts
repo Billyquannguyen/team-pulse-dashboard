@@ -114,9 +114,18 @@ export class GmailAuthError extends Error {
   }
 }
 
+export class GmailRateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GmailRateLimitError";
+  }
+}
+
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_REPORT_DAYS = 7;
-const THREAD_FETCH_CONCURRENCY = 12;
+const THREAD_FETCH_CONCURRENCY = 5;
+const THREAD_FETCH_BATCH_DELAY_MS = 500;
+const GMAIL_RATE_LIMIT_RETRY_DELAYS_MS = [10_000, 30_000];
 const MAX_UNTAGGED_INBOUND_CANDIDATES = 50;
 const MAX_STALE_BRAND_INBOUND_CANDIDATES = 200;
 const MAX_AI_EMAIL_TEXT_LENGTH = 1_200;
@@ -269,32 +278,61 @@ async function getGmailReadonlyAccessToken() {
   }
 }
 
+function sleep(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export function isGmailRateLimitResponse(status: number, message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    status === 429 ||
+    normalized.includes("quota") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("ratelimitexceeded") ||
+    normalized.includes("userratelimitexceeded")
+  );
+}
+
 async function gmailGet<T>(accessToken: string, path: string, params?: URLSearchParams) {
   const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`);
   if (params) {
     params.forEach((value, key) => url.searchParams.append(key, value));
   }
 
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-  const payload = (await response.json().catch(() => null)) as
-    | (T & { error?: { message?: string } })
-    | null;
+  for (let attempt = 0; attempt <= GMAIL_RATE_LIMIT_RETRY_DELAYS_MS.length; attempt += 1) {
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | (T & { error?: { message?: string } })
+      | null;
 
-  if (!response.ok) {
+    if (response.ok) return (payload ?? {}) as T;
+
     const message = payload?.error?.message || `Gmail returned ${response.status}.`;
+    if (isGmailRateLimitResponse(response.status, message)) {
+      const retryDelay = GMAIL_RATE_LIMIT_RETRY_DELAYS_MS[attempt];
+      if (retryDelay !== undefined) {
+        console.warn(
+          `[weekly-gmail-report] Gmail quota reached; retrying in ${retryDelay / 1_000}s (${path}).`,
+        );
+        await sleep(retryDelay);
+        continue;
+      }
+      throw new GmailRateLimitError(message);
+    }
     if (response.status === 401 || response.status === 403) {
       throw new GmailAuthError(message);
     }
     throw new Error(message);
   }
 
-  return (payload ?? {}) as T;
+  throw new GmailRateLimitError("Gmail's temporary read limit was reached.");
 }
 
 async function listGmailLabels(accessToken: string) {
@@ -383,6 +421,9 @@ async function loadGmailThreads(
       }),
     );
     threads.push(...loaded);
+    if (index + THREAD_FETCH_CONCURRENCY < threadIds.length) {
+      await sleep(THREAD_FETCH_BATCH_DELAY_MS);
+    }
   }
 
   return threads;
@@ -396,6 +437,9 @@ async function loadFullGmailThreads(accessToken: string, threadIds: string[]) {
     threads.push(
       ...(await Promise.all(batch.map((threadId) => getFullGmailThread(accessToken, threadId)))),
     );
+    if (index + THREAD_FETCH_CONCURRENCY < threadIds.length) {
+      await sleep(THREAD_FETCH_BATCH_DELAY_MS);
+    }
   }
 
   return threads;
@@ -979,7 +1023,7 @@ async function collectMemberMetrics(
 
     return metrics;
   } catch (error) {
-    if (error instanceof GmailAuthError) throw error;
+    if (error instanceof GmailAuthError || error instanceof GmailRateLimitError) throw error;
     issues.push(
       `${member.displayName}: không đọc được Gmail metric (${error instanceof Error ? error.message : String(error)}).`,
     );
@@ -1198,6 +1242,17 @@ async function postGmailAuthErrorToDiscord() {
   );
 }
 
+async function postGmailRateLimitErrorToDiscord() {
+  await postDiscordMessage(
+    [
+      "**Báo cáo Gmail Outreach hằng tuần: Gmail tạm giới hạn lượt đọc**",
+      "Gmail đang giới hạn số yêu cầu trong thời gian ngắn. Đây không phải lỗi kết nối hoặc quyền truy cập.",
+      "Báo cáo đã thử lại tự động nhưng vẫn bị giới hạn. Chờ một phút rồi chạy lại; không cần reconnect Gmail.",
+    ].join("\n"),
+    [],
+  );
+}
+
 export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult> {
   const members = await getWeeklyOutreachReportMembers();
   const days = getReportDays();
@@ -1384,7 +1439,21 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
       ],
     };
   } catch (error) {
+    if (error instanceof GmailRateLimitError) {
+      console.error(`[weekly-gmail-report] Gmail quota failed after retries: ${error.message}`);
+      await postGmailRateLimitErrorToDiscord();
+      return {
+        ok: false,
+        posted: true,
+        memberCount: members.length,
+        totals: emptyTotals(),
+        openRouterUsed: false,
+        openRouterModel: null,
+        issues: ["Gmail quota failed after retries. Error was posted to Discord."],
+      };
+    }
     if (error instanceof GmailAuthError) {
+      console.error(`[weekly-gmail-report] Gmail authentication failed: ${error.message}`);
       await postGmailAuthErrorToDiscord();
       return {
         ok: false,
