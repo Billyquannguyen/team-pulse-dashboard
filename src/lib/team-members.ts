@@ -706,6 +706,38 @@ export async function createTeamMemberRecordForServer(input: z.infer<typeof team
   return data;
 }
 
+export async function setTeamMemberStatusForServer(teamMemberId: string, status: TeamMemberStatus) {
+  const normalizedId = normalizeSheetKey(teamMemberId);
+  if (!normalizedId) throw new Error("A linked member profile ID is required.");
+
+  const googleSheets = await getGoogleSheetsServer();
+  const config = googleSheets.getGoogleSheetsConfig();
+  const worksheet = await loadTeamMembersWorksheet(config, {
+    createIfMissing: true,
+    ensureHeaders: true,
+  });
+  const member = normalizeTeamMemberRows(worksheet.headers, worksheet.rows).find(
+    (item) => normalizeSheetKey(item.id) === normalizedId,
+  );
+  if (!member?.rowNumber) {
+    throw new Error(`Could not find the linked member profile ${teamMemberId}.`);
+  }
+  if (member.status === status) return { changed: false as const, member };
+
+  const existingRow = worksheet.rows[member.rowNumber - 2];
+  if (!existingRow) throw new Error(`Could not read the linked member profile ${teamMemberId}.`);
+  const lookup = buildColumnLookup(worksheet.headers);
+  await googleSheets.updateSheetRow(
+    config,
+    getTeamMembersSpreadsheetId(),
+    worksheet.sheet,
+    member.rowNumber,
+    buildTeamMemberWriteRow({ ...member, status }, existingRow, lookup),
+  );
+  await invalidateRelatedCaches();
+  return { changed: true as const, member: { ...member, status } };
+}
+
 export async function getActiveTeamMemberConfigsForServer() {
   const data = await getTeamMembersDataForServer();
   return data.activeMembers;

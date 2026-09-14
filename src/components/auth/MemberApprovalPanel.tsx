@@ -110,12 +110,18 @@ export function MemberApprovalPanel({ currentUserId }: { currentUserId: string }
               },
             });
       if (!result.ok) throw new Error(result.message);
+      return result;
     },
-    onSuccess: async (_result, variables) => {
+    onSuccess: async (result, variables) => {
       setSuccessMessage(
-        variables.status === "approved"
-          ? `${variables.member.displayName || variables.member.email} saved.`
-          : `${variables.member.displayName || variables.member.email} is now ${statusLabel(variables.status).toLowerCase()}.`,
+        result.warning ||
+          (variables.status === "approved"
+            ? variables.member.teamMemberId
+              ? `${variables.member.displayName || variables.member.email} saved and the connected profile is active.`
+              : `${variables.member.displayName || variables.member.email} saved.`
+            : variables.member.teamMemberId
+              ? `${variables.member.displayName || variables.member.email} is now ${statusLabel(variables.status).toLowerCase()}, and the connected profile is offboarded.`
+              : `${variables.member.displayName || variables.member.email} is now ${statusLabel(variables.status).toLowerCase()}.`),
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: accessQuery.queryKey }),

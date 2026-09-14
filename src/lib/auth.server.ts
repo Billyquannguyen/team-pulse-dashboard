@@ -368,7 +368,7 @@ export async function updateDashboardMemberAccessServer(input: {
   const supabase = createDashboardSupabaseServerClient();
   const { data: existingMember, error: existingMemberError } = await supabase
     .from("dashboard_members")
-    .select("team_member_id")
+    .select("status,team_member_id")
     .eq("user_id", input.userId)
     .maybeSingle();
   if (existingMemberError) return { ok: false as const, message: existingMemberError.message };
@@ -426,7 +426,27 @@ export async function updateDashboardMemberAccessServer(input: {
     }
     return { ok: false as const, message: error.message };
   }
-  return { ok: true as const };
+
+  const statusChanged = existingMember?.status !== input.status;
+  const profileId =
+    input.status === "disabled" ? existingMember?.team_member_id : requestedTeamMemberId;
+  const profileStatus = input.status === "disabled" ? "offboarded" : "active";
+  if (statusChanged && profileId && (input.status === "disabled" || input.status === "approved")) {
+    try {
+      const { setTeamMemberStatusForServer } = await import("@/lib/team-members");
+      await setTeamMemberStatusForServer(profileId, profileStatus);
+    } catch (profileError) {
+      const detail = profileError instanceof Error ? profileError.message : String(profileError);
+      console.error(
+        `[dashboard-access] Account ${input.status}, but linked profile ${profileId} could not be ${profileStatus}: ${detail}`,
+      );
+      return {
+        ok: true as const,
+        warning: `Account access was updated, but the linked profile could not be ${profileStatus}. ${detail}`,
+      };
+    }
+  }
+  return { ok: true as const, warning: null };
 }
 
 export async function approveDashboardMemberWithNewCardServer(input: {
