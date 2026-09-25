@@ -57,6 +57,7 @@ type PendingOutreachLabels = {
   trackingMessageId: string;
   labelIds: string[];
   createdAt: number;
+  nextCheckAt?: number;
 };
 
 const JOB_TTL_SECONDS = 60 * 60 * 24;
@@ -68,6 +69,8 @@ const REDIS_LOCK_KEY = "team-billion:bulk-sender:lock:v1";
 const PENDING_LABELS_KEY = "team-billion:bulk-sender:pending-labels:v1";
 const LABEL_SYNC_LOCK_KEY = "team-billion:bulk-sender:label-sync-lock:v1";
 const PENDING_LABEL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const PENDING_LABEL_CHECK_DELAY_MS = 15 * 60 * 1000;
+const MAX_PENDING_LABEL_CHECKS_PER_RUN = 20;
 
 const localJobs = new Map<string, StoredJob>();
 const localQueue: string[] = [];
@@ -244,12 +247,20 @@ async function rememberPendingLabels(record: PendingOutreachLabels) {
 
 async function pendingLabelRecords() {
   if (!getRedisConfig()) {
-    return Array.from(localPendingLabels.values()).map((record) => ({
-      raw: record.id,
-      record,
-    }));
+    return Array.from(localPendingLabels.values())
+      .filter((record) => (record.nextCheckAt ?? record.createdAt) <= Date.now())
+      .slice(0, MAX_PENDING_LABEL_CHECKS_PER_RUN)
+      .map((record) => ({ raw: record.id, record }));
   }
-  const rawRecords = await redisCommand<string[]>(["ZRANGE", PENDING_LABELS_KEY, 0, 199]);
+  const rawRecords = await redisCommand<string[]>([
+    "ZRANGEBYSCORE",
+    PENDING_LABELS_KEY,
+    "-inf",
+    Date.now(),
+    "LIMIT",
+    0,
+    MAX_PENDING_LABEL_CHECKS_PER_RUN,
+  ]);
   return rawRecords.flatMap((raw) => {
     try {
       return [{ raw, record: JSON.parse(raw) as PendingOutreachLabels }];
@@ -257,6 +268,15 @@ async function pendingLabelRecords() {
       return [];
     }
   });
+}
+
+async function deferPendingLabelRecord(raw: string, record: PendingOutreachLabels) {
+  const nextCheckAt = Date.now() + PENDING_LABEL_CHECK_DELAY_MS;
+  if (!getRedisConfig()) {
+    localPendingLabels.set(record.id, { ...record, nextCheckAt });
+    return;
+  }
+  await redisCommand<number>(["ZADD", PENDING_LABELS_KEY, nextCheckAt, raw]);
 }
 
 async function removePendingLabelRecord(raw: string, id: string) {
@@ -310,6 +330,14 @@ async function gmailJson<T>(accessToken: string, path: string, init?: RequestIni
     | null;
   if (!response.ok) {
     const detail = payload?.error?.message ?? `Gmail returned ${response.status}.`;
+    const normalizedDetail = detail.toLowerCase();
+    const isQuotaError =
+      response.status === 429 ||
+      normalizedDetail.includes("quota") ||
+      normalizedDetail.includes("rate limit");
+    if (isQuotaError) {
+      throw new Error("Gmail's temporary request limit was reached. The sync will retry later.");
+    }
     if (response.status === 401 || response.status === 403) {
       throw new Error(
         `${detail} Reconnect Gmail with gmail.compose, gmail.modify, and gmail.settings.basic permissions.`,
@@ -696,9 +724,6 @@ export async function processPendingBulkOutreachLabels() {
       return { checked: 0, applied: 0, expired: 0, failed: 0, pending: 0 };
     }
     const accessToken = await getGmailAccessToken();
-    const allowedLabelIds = new Set(
-      (await listUserGmailLabels(accessToken)).map((label) => label.id),
-    );
     let checked = 0;
     let applied = 0;
     let expired = 0;
@@ -710,7 +735,7 @@ export async function processPendingBulkOutreachLabels() {
         expired += 1;
         continue;
       }
-      const labelIds = record.labelIds.filter((labelId) => allowedLabelIds.has(labelId));
+      const labelIds = record.labelIds;
       if (!labelIds.length) {
         await removePendingLabelRecord(raw, record.id);
         expired += 1;
@@ -728,6 +753,7 @@ export async function processPendingBulkOutreachLabels() {
         );
         const gmailMessageId = found.messages?.[0]?.id;
         if (!gmailMessageId) {
+          await deferPendingLabelRecord(raw, record);
           pending += 1;
           continue;
         }
@@ -744,9 +770,10 @@ export async function processPendingBulkOutreachLabels() {
         });
       } catch (error) {
         failed += 1;
-        console.error(
-          `[bulk-outreach-labels] ${error instanceof Error ? error.message : "Label sync failed."}`,
-        );
+        await deferPendingLabelRecord(raw, record);
+        const message = error instanceof Error ? error.message : "Label sync failed.";
+        console.error(`[bulk-outreach-labels] ${message}`);
+        if (message.includes("temporary request limit")) break;
       }
     }
     return { checked, applied, expired, failed, pending };

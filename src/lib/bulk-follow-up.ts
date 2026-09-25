@@ -73,6 +73,8 @@ const SUPPRESSION_CACHE_MS = 6 * 60 * 60 * 1000;
 const SUPPRESSION_LOOKBACK_DAYS = 120;
 const MAX_THREAD_DETAILS_PER_SCAN = 400;
 const MAX_UNFILTERED_CANDIDATES = 150;
+const GMAIL_READ_RETRY_DELAYS_MS = [5_000, 15_000];
+const GMAIL_READ_BATCH_DELAY_MS = 250;
 let templateCache: { expiresAt: number; data: FollowUpTemplate[] } | null = null;
 const suppressionCache = new Map<string, { expiresAt: number; suppressed: boolean }>();
 
@@ -143,14 +145,16 @@ export async function getGmailReadAccessToken() {
 async function gmailJson<T>(accessToken: string, path: string, params?: URLSearchParams) {
   const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`);
   if (params) url.search = params.toString();
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    signal: AbortSignal.timeout(20_000),
-  });
-  const payload = (await response.json().catch(() => null)) as
-    | (T & { error?: { message?: string } })
-    | null;
-  if (!response.ok || !payload) {
+  for (let attempt = 0; attempt <= GMAIL_READ_RETRY_DELAYS_MS.length; attempt += 1) {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(20_000),
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | (T & { error?: { message?: string } })
+      | null;
+    if (response.ok && payload) return payload;
+
     const detail = payload?.error?.message ?? `Gmail returned ${response.status}.`;
     const normalizedDetail = detail.toLowerCase();
     const isQuotaError =
@@ -158,6 +162,14 @@ async function gmailJson<T>(accessToken: string, path: string, params?: URLSearc
       normalizedDetail.includes("quota") ||
       normalizedDetail.includes("rate limit");
     if (isQuotaError) {
+      const retryDelay = GMAIL_READ_RETRY_DELAYS_MS[attempt];
+      if (retryDelay !== undefined) {
+        console.warn(
+          `[bulk-follow-up] Gmail quota reached; retrying in ${retryDelay / 1_000}s (${path}).`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        continue;
+      }
       throw new Error("Gmail's temporary read limit was reached. Wait one minute and try again.");
     }
     const isPermissionError =
@@ -169,7 +181,8 @@ async function gmailJson<T>(accessToken: string, path: string, params?: URLSearc
     }
     throw new Error(detail);
   }
-  return payload;
+
+  throw new Error("Gmail's temporary read limit was reached. Wait one minute and try again.");
 }
 
 function getHeader(message: GmailMessage, name: string) {
@@ -375,6 +388,9 @@ async function scanFollowUpCandidates(input: FollowUpScanInput) {
       const threads = await Promise.all(
         batchIds.map((threadId) => getThread(accessToken, threadId)),
       );
+      if (index + batchIds.length < ids.length) {
+        await new Promise((resolve) => setTimeout(resolve, GMAIL_READ_BATCH_DELAY_MS));
+      }
       inspectedThreadCount += threads.length;
       for (const thread of threads) {
         const candidate = candidateFromThread(
@@ -401,6 +417,9 @@ async function scanFollowUpCandidates(input: FollowUpScanInput) {
     const suppressed = await Promise.all(
       batch.map((candidate) => isSuppressedRecipient(accessToken, candidate.recipientEmail)),
     );
+    if (index + batch.length < sorted.length) {
+      await new Promise((resolve) => setTimeout(resolve, GMAIL_READ_BATCH_DELAY_MS));
+    }
     for (let candidateIndex = 0; candidateIndex < batch.length; candidateIndex += 1) {
       const candidate = batch[candidateIndex];
       if (candidate && !suppressed[candidateIndex]) eligible.push(candidate);

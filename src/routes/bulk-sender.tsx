@@ -425,7 +425,10 @@ function BulkDraftCreator() {
         if (!cancelled) setLabelsLoading(false);
       });
 
+    let syncing = false;
     const syncLabels = () => {
+      if (syncing || document.visibilityState !== "visible") return;
+      syncing = true;
       void syncPendingBulkOutreachLabels()
         .then((result) => {
           if (!cancelled && result.applied > 0) {
@@ -434,15 +437,16 @@ function BulkDraftCreator() {
             );
           }
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          syncing = false;
+        });
     };
     syncLabels();
-    const interval = window.setInterval(syncLabels, 60_000);
-    window.addEventListener("focus", syncLabels);
+    const interval = window.setInterval(syncLabels, 10 * 60_000);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
-      window.removeEventListener("focus", syncLabels);
     };
   }, []);
 

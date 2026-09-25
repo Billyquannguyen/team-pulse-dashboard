@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { candidateFromThread, sanitizeFollowUpTemplateHtml } from "../../src/lib/bulk-follow-up";
 
 test("follow-up templates remove scripts, images, handlers, and unsafe links", async () => {
@@ -138,4 +139,12 @@ test("threads inside a custom follow-up window remain eligible", () => {
   );
 
   expect(candidate?.threadId).toBe("thread-in-window");
+});
+
+test("follow-up Gmail reads back off on quota pressure", () => {
+  const source = readFileSync(new URL("../../src/lib/bulk-follow-up.ts", import.meta.url), "utf8");
+
+  expect(source).toContain("GMAIL_READ_RETRY_DELAYS_MS = [5_000, 15_000]");
+  expect(source).toContain("GMAIL_READ_BATCH_DELAY_MS = 250");
+  expect(source).toContain("Gmail quota reached; retrying");
 });

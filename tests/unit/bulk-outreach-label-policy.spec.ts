@@ -37,3 +37,16 @@ test("Bulk Outreach only offers existing user-created Gmail labels", () => {
   expect(labelReader).not.toContain("labels.create");
   expect(labelReader).not.toContain("labels.delete");
 });
+
+test("pending label reconciliation is bounded and defers unresolved drafts", () => {
+  const bulkSender = source("src/lib/bulk-sender.ts");
+  const route = source("src/routes/bulk-sender.tsx");
+
+  expect(bulkSender).toContain("MAX_PENDING_LABEL_CHECKS_PER_RUN = 20");
+  expect(bulkSender).toContain("PENDING_LABEL_CHECK_DELAY_MS = 15 * 60 * 1000");
+  expect(bulkSender).toContain('"ZRANGEBYSCORE"');
+  expect(bulkSender).toContain("await deferPendingLabelRecord(raw, record)");
+  expect(route).toContain("window.setInterval(syncLabels, 10 * 60_000)");
+  expect(route).toContain('document.visibilityState !== "visible"');
+  expect(route).not.toContain('window.addEventListener("focus", syncLabels)');
+});

@@ -231,19 +231,23 @@ function parseArgs(args) {
 }
 
 function loadConfig(options) {
-  const required = [
-    "MASTER_GMAIL_CLIENT_ID",
-    "MASTER_GMAIL_CLIENT_SECRET",
-    "MASTER_GMAIL_REFRESH_TOKEN",
-    "GOOGLE_SERVICE_ACCOUNT_EMAIL",
-    "GOOGLE_PRIVATE_KEY",
-  ];
-  const missing = required.filter((name) => !process.env[name]);
+  const gmailClientId = process.env.MASTER_GMAIL_CLIENT_ID || process.env.GMAIL_CLIENT_ID;
+  const gmailClientSecret =
+    process.env.MASTER_GMAIL_CLIENT_SECRET || process.env.GMAIL_CLIENT_SECRET;
+  const gmailRefreshToken =
+    process.env.MASTER_GMAIL_REFRESH_TOKEN || process.env.GMAIL_REFRESH_TOKEN;
+  const missing = [
+    !gmailClientId && "Gmail client ID",
+    !gmailClientSecret && "Gmail client secret",
+    !gmailRefreshToken && "Gmail refresh token",
+    !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+    !process.env.GOOGLE_PRIVATE_KEY && "GOOGLE_PRIVATE_KEY",
+  ].filter(Boolean);
   if (missing.length) throw new Error(`Missing environment variables: ${missing.join(", ")}`);
   return {
-    gmailClientId: process.env.MASTER_GMAIL_CLIENT_ID,
-    gmailClientSecret: process.env.MASTER_GMAIL_CLIENT_SECRET,
-    gmailRefreshToken: process.env.MASTER_GMAIL_REFRESH_TOKEN,
+    gmailClientId,
+    gmailClientSecret,
+    gmailRefreshToken,
     serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
     privateKey: String(process.env.GOOGLE_PRIVATE_KEY).replace(/\\n/g, "\n"),
     spreadsheetId: SPREADSHEET_ID,
@@ -256,10 +260,10 @@ function loadConfig(options) {
 
 async function loadExistingSheet(sheets) {
   const [active, agencies, contacts, briefs] = await Promise.all([
-    sheets.valuesGet("'Active Contacts'!A1:H969"),
-    sheets.valuesGet("'Agencies'!A1:D500"),
-    sheets.valuesGet("'Contacts'!A1:E1000"),
-    sheets.valuesGet("'Briefs'!A1:M500"),
+    sheets.valuesGet("'Active Contacts'!A:I"),
+    sheets.valuesGet("'Agencies'!A:D"),
+    sheets.valuesGet("'Contacts'!A:E"),
+    sheets.valuesGet("'Briefs'!A:M"),
   ]);
   const activeTable = table(active.values ?? []);
   const agencyTable = table(agencies.values ?? []);
