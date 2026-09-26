@@ -10,7 +10,11 @@ import {
 
 const SPREADSHEET_ID = "1U-y2oiob1uenmvNiRGMILhmWWORMTye2mBxi2mgVxvs";
 const LEGACY_BACKUP_ID = "1a8Sl4p_ixoS56TuEsG0PBsHgIx0HH79BcZlHFPjFGXY";
-const INPUT = ".brand-contact-scan/active-contact-scan-reviewed.json";
+const inputFlagIndex = process.argv.indexOf("--input");
+const INPUT =
+  inputFlagIndex >= 0 && process.argv[inputFlagIndex + 1]
+    ? process.argv[inputFlagIndex + 1]
+    : ".brand-contact-scan/active-contact-scan-reviewed.json";
 const TITLES = ["Active Contacts", "Agencies", "Contacts", "Briefs"];
 const ACTIVE_HEADERS = [
   "Brand / Agency / Contact",

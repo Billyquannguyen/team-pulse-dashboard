@@ -4,6 +4,7 @@ import {
   scopeDashboardDataForMember,
   type DashboardSheetData,
 } from "../../src/lib/sheets-public";
+import { getCurrentDealMonthKey } from "../../src/lib/sheet-normalizer";
 
 function dashboardFixture() {
   const data = {
@@ -148,4 +149,17 @@ test("leaderboard output contains summaries for all members without raw deal det
   expect(leaderboard.find((member) => member.id === "KTrang")?.longTerm.profit).toBe(500);
   expect(JSON.stringify(leaderboard)).not.toContain("Private K brand");
   expect(JSON.stringify(leaderboard)).not.toContain("Private H brand");
+});
+
+test("monthly leaderboard commission follows the Month label regardless of deal status", () => {
+  const data = dashboardFixture();
+  data.deals[0].month = getCurrentDealMonthKey();
+  data.deals[0].status = "Paid";
+  data.deals[1].month = getCurrentDealMonthKey();
+  data.deals[1].status = "Overdue";
+
+  const leaderboard = buildLeaderboardData(data);
+
+  expect(leaderboard.find((member) => member.id === "KTrang")?.monthly.commission).toBe(100);
+  expect(leaderboard.find((member) => member.id === "HYen")?.monthly.commission).toBe(200);
 });

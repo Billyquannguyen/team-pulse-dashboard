@@ -431,7 +431,10 @@ export async function updateDashboardMemberAccessServer(input: {
   const profileId =
     input.status === "disabled" ? existingMember?.team_member_id : requestedTeamMemberId;
   const profileStatus = input.status === "disabled" ? "offboarded" : "active";
-  if (statusChanged && profileId && (input.status === "disabled" || input.status === "approved")) {
+  const shouldSyncProfileStatus =
+    Boolean(profileId) &&
+    (input.status === "disabled" || (statusChanged && input.status === "approved"));
+  if (shouldSyncProfileStatus && profileId) {
     try {
       const { setTeamMemberStatusForServer } = await import("@/lib/team-members");
       await setTeamMemberStatusForServer(profileId, profileStatus);

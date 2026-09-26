@@ -110,7 +110,7 @@ function Dashboard() {
           tone="lime"
         />
         <KpiCard
-          label="Current month closed"
+          label="Current-month contracts"
           value={`£${totals.paidThisMonth.toLocaleString()}`}
           icon={CalendarDays}
           tone="orange"

@@ -75,6 +75,15 @@ export function isClosedCommissionDeal(
   return isValidDealRow(deal, CLOSED_COMMISSION_STATUSES);
 }
 
+// Monthly contract performance follows the Month label in the worksheet.
+// Status and payment state describe what happened after the contract was won,
+// so they must not remove a labelled deal from that month's result.
+export function isMonthLabelCommissionDeal(
+  deal: Pick<Deal, "brand" | "creator" | "managerTotalGbp">,
+) {
+  return hasDealIdentity(deal) && hasPositiveManagerTotal(deal);
+}
+
 export function isPostedCommissionDeal(
   deal: Pick<Deal, "brand" | "creator" | "managerTotalGbp" | "status">,
 ) {

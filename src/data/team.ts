@@ -17,7 +17,7 @@ export type Teammate = {
   commission: number;
   // Sum of Manager Total rows where Manager Total Paid is checked.
   paidCommission: number;
-  // Parsed from the member summary label/value cells in the deal worksheet.
+  // Sum of contract commission for deals carrying the current Month label.
   monthCommission: number;
   // Parsed from the member summary label/value cells in the deal worksheet.
   pendingOwed: number;

@@ -11,6 +11,7 @@ import {
 } from "./runner.mjs";
 
 const SPREADSHEET_ID = "1U-y2oiob1uenmvNiRGMILhmWWORMTye2mBxi2mgVxvs";
+const PRE_SCAN_BACKUP_ID = "1a8Sl4p_ixoS56TuEsG0PBsHgIx0HH79BcZlHFPjFGXY";
 const OUTPUT = ".brand-contact-scan/qualified-contact-audit.json";
 
 loadEnvFiles([".env", ".env.local", ".env.brand-contact-scan", ".env.opportunity-ingestion"]);
@@ -23,22 +24,36 @@ if (!config.serviceAccountEmail || !config.privateKey) {
   throw new Error("Missing Google Sheets service account settings.");
 }
 
-const input = await readStdin();
-const supplied = JSON.parse(input);
+const supplied = await readStdin();
 const qualifiedEmails = new Set(
   supplied.map((item) => String(item.email ?? item).trim().toLowerCase()).filter(Boolean),
 );
 const sheets = createSheetsClient(config, createSheetsTokenProvider(config));
-const [activeResult, agencyResult, contactResult, briefResult] = await Promise.all([
+const backupSheets = createSheetsClient(
+  { ...config, spreadsheetId: PRE_SCAN_BACKUP_ID },
+  createSheetsTokenProvider({ ...config, spreadsheetId: PRE_SCAN_BACKUP_ID }),
+);
+const [activeResult, agencyResult, contactResult, briefResult, backupContactResult] = await Promise.all([
   sheets.valuesGet("'Active Contacts'!A:I"),
   sheets.valuesGet("'Agencies'!A:D"),
   sheets.valuesGet("'Contacts'!A:E"),
   sheets.valuesGet("'Briefs'!A:M"),
+  backupSheets.valuesGet("'Contacts'!A:E"),
 ]);
 const active = table(activeResult.values ?? []);
 const agenciesTable = table(agencyResult.values ?? []);
 const contactsTable = table(contactResult.values ?? []);
 const briefsTable = table(briefResult.values ?? []);
+const backupContactsTable = table(backupContactResult.values ?? []);
+const protectedLegacyContacts = new Set(
+  backupContactsTable.rows
+    .map((row) => ({
+      brand: value(backupContactsTable, row, "Brand"),
+      contact: value(backupContactsTable, row, "Contact Email / WhatsApp"),
+    }))
+    .filter((contact) => contact.brand && contact.contact)
+    .map(contactKey),
+);
 
 const brandMeta = new Map();
 for (const row of active.rows) {
@@ -83,7 +98,12 @@ const allContacts = contactsTable.rows
   .filter((contact) => contact.brand && contact.contact);
 
 let preservedNonEmailContacts = 0;
+let preservedLegacyContacts = 0;
 const contacts = allContacts.filter((contact) => {
+  if (protectedLegacyContacts.has(contactKey(contact))) {
+    preservedLegacyContacts += 1;
+    return true;
+  }
   const emails = extractEmails(contact.contact);
   if (emails.length === 0) {
     preservedNonEmailContacts += 1;
@@ -168,6 +188,7 @@ const result = {
       contacts: removedContacts.length,
     },
     preservedNonEmailContacts,
+    preservedLegacyContacts,
     removedBrandNames: removedBrands.map((brand) => brand.name).sort(),
     removedContactSample: removedContacts.slice(0, 100),
   },
@@ -272,11 +293,14 @@ function dateScore(valueToScore) {
 
 async function readStdin() {
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  const values = [];
   for await (const line of lines) {
-    if (line.trim()) {
+    if (line.trim() === "__END__") {
       lines.close();
-      return line;
+      return values;
     }
+    if (line.trim()) values.push(line.trim());
   }
-  throw new Error("Expected qualified sender JSON on stdin.");
+  if (values.length) return values;
+  throw new Error("Expected qualified sender emails on stdin.");
 }

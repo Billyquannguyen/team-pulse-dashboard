@@ -187,7 +187,7 @@ function AIReportLoadingState({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <AnalysisFact
-          label="Current month closed"
+          label="Current-month contracts"
           value={formatMoney(report.metrics.monthlyCurrent)}
         />
         <AnalysisFact label="Closed deals" value={report.metrics.dealCount} />
@@ -262,7 +262,7 @@ export function PersonalReportPanel({
       ) ?? (!isAdmin ? members[0] : undefined),
     [isAdmin, members, teamMemberId],
   );
-  const [memberName, setMemberName] = useState(isAdmin ? "" : ownMember?.name ?? "");
+  const [memberName, setMemberName] = useState(isAdmin ? "" : (ownMember?.name ?? ""));
   const [draftMemberName, setDraftMemberName] = useState(members[0]?.name ?? "");
   const [isPickerOpen, setIsPickerOpen] = useState(true);
   const member = memberName ? (members.find((item) => item.name === memberName) ?? null) : null;

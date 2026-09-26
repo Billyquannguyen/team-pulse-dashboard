@@ -144,7 +144,17 @@ test("threads inside a custom follow-up window remain eligible", () => {
 test("follow-up Gmail reads back off on quota pressure", () => {
   const source = readFileSync(new URL("../../src/lib/bulk-follow-up.ts", import.meta.url), "utf8");
 
-  expect(source).toContain("GMAIL_READ_RETRY_DELAYS_MS = [5_000, 15_000]");
-  expect(source).toContain("GMAIL_READ_BATCH_DELAY_MS = 250");
+  expect(source).toContain("GMAIL_READ_RETRY_DELAYS_MS = [20_000, 45_000]");
+  expect(source).toContain("GMAIL_THREAD_BATCH_SIZE = 2");
+  expect(source).toContain("GMAIL_READ_BATCH_DELAY_MS = 1_250");
   expect(source).toContain("Gmail quota reached; retrying");
+});
+
+test("follow-up searches share a lock and reuse recent labels and results", () => {
+  const source = readFileSync(new URL("../../src/lib/bulk-follow-up.ts", import.meta.url), "utf8");
+
+  expect(source).toContain('withFollowUpLock(\n    "gmail-scan"');
+  expect(source).toContain("GMAIL_LABEL_CACHE_SECONDS = 10 * 60");
+  expect(source).toContain("FOLLOW_UP_SCAN_CACHE_SECONDS = 2 * 60");
+  expect(source).toContain("scanFollowUpCandidatesWithQuotaGuard(data)");
 });

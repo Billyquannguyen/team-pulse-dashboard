@@ -32,6 +32,7 @@ export async function withFollowUpLock<T>(
   name: string,
   ttlSeconds: number,
   operation: () => Promise<T>,
+  busyMessage = "This shared record is being changed by another member.",
 ) {
   const key = `team-billion:bulk-follow-up:lock:${name}`;
   const token = crypto.randomUUID();
@@ -43,7 +44,7 @@ export async function withFollowUpLock<T>(
     "EX",
     ttlSeconds,
   ]);
-  if (claimed !== "OK") throw new Error("This shared record is being changed by another member.");
+  if (claimed !== "OK") throw new Error(busyMessage);
 
   try {
     return await operation();

@@ -71,10 +71,16 @@ const TEMPLATE_HEADERS = ["ID", "Name", "HTML Body", "Text Body", "Created At", 
 const TEMPLATE_CACHE_MS = 45_000;
 const SUPPRESSION_CACHE_MS = 6 * 60 * 60 * 1000;
 const SUPPRESSION_LOOKBACK_DAYS = 120;
-const MAX_THREAD_DETAILS_PER_SCAN = 400;
+const MAX_THREAD_DETAILS_PER_SCAN = 160;
 const MAX_UNFILTERED_CANDIDATES = 150;
-const GMAIL_READ_RETRY_DELAYS_MS = [5_000, 15_000];
-const GMAIL_READ_BATCH_DELAY_MS = 250;
+const GMAIL_READ_RETRY_DELAYS_MS = [20_000, 45_000];
+const GMAIL_THREAD_BATCH_SIZE = 2;
+const GMAIL_SUPPRESSION_BATCH_SIZE = 4;
+const GMAIL_READ_BATCH_DELAY_MS = 1_250;
+const GMAIL_LABEL_CACHE_KEY = "team-billion:bulk-follow-up:gmail-labels:v1";
+const GMAIL_LABEL_CACHE_SECONDS = 10 * 60;
+const FOLLOW_UP_SCAN_CACHE_SECONDS = 2 * 60;
+const FOLLOW_UP_SCAN_LOCK_SECONDS = 4 * 60;
 let templateCache: { expiresAt: number; data: FollowUpTemplate[] } | null = null;
 const suppressionCache = new Map<string, { expiresAt: number; suppressed: boolean }>();
 
@@ -249,6 +255,81 @@ async function getPrimaryGmailAddress(accessToken: string) {
   return result.emailAddress?.toLowerCase() ?? "";
 }
 
+async function getCachedGmailFollowUpLabels(accessToken: string) {
+  const { followUpRedisCommand } = await getFollowUpRedisServer();
+  const cached = await followUpRedisCommand<string | null>(["GET", GMAIL_LABEL_CACHE_KEY]);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as GmailFollowUpLabel[];
+    } catch {
+      await followUpRedisCommand(["DEL", GMAIL_LABEL_CACHE_KEY]).catch(() => undefined);
+    }
+  }
+
+  const result = await gmailJson<{
+    labels?: Array<{ id?: string; name?: string; type?: string }>;
+  }>(accessToken, "labels");
+  const labels = (result.labels ?? [])
+    .filter((label) => label.type === "user" && label.id && label.name)
+    .map((label) => ({ id: label.id!, name: label.name! }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  await followUpRedisCommand([
+    "SET",
+    GMAIL_LABEL_CACHE_KEY,
+    JSON.stringify(labels),
+    "EX",
+    GMAIL_LABEL_CACHE_SECONDS,
+  ]);
+  return labels;
+}
+
+function followUpScanCacheKey(input: FollowUpScanInput) {
+  return [
+    "team-billion:bulk-follow-up:scan:v1",
+    [...input.labelIds].sort().join(","),
+    input.interactionLevel,
+    input.minimumDaysSinceLastSent,
+    input.maximumDaysSinceLastSent,
+  ].join(":");
+}
+
+async function readCachedFollowUpScan(input: FollowUpScanInput) {
+  const { followUpRedisCommand } = await getFollowUpRedisServer();
+  const raw = await followUpRedisCommand<string | null>(["GET", followUpScanCacheKey(input)]);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as { candidates: FollowUpCandidate[]; hasMore: boolean };
+  } catch {
+    await followUpRedisCommand(["DEL", followUpScanCacheKey(input)]).catch(() => undefined);
+    return null;
+  }
+}
+
+async function scanFollowUpCandidatesWithQuotaGuard(input: FollowUpScanInput) {
+  const cached = await readCachedFollowUpScan(input);
+  if (cached) return cached;
+
+  const { followUpRedisCommand, withFollowUpLock } = await getFollowUpRedisServer();
+  return withFollowUpLock(
+    "gmail-scan",
+    FOLLOW_UP_SCAN_LOCK_SECONDS,
+    async () => {
+      const refreshedCache = await readCachedFollowUpScan(input);
+      if (refreshedCache) return refreshedCache;
+      const result = await scanFollowUpCandidates(input);
+      await followUpRedisCommand([
+        "SET",
+        followUpScanCacheKey(input),
+        JSON.stringify(result),
+        "EX",
+        FOLLOW_UP_SCAN_CACHE_SECONDS,
+      ]);
+      return result;
+    },
+    "Another Gmail follow-up search is already running. Wait for it to finish, then try again.",
+  );
+}
+
 export function candidateFromThread(
   thread: GmailThread,
   sendingAddresses: Set<string>,
@@ -377,13 +458,16 @@ async function scanFollowUpCandidates(input: FollowUpScanInput) {
       ),
     );
     const ids = Array.from(new Set(groups.flat())).filter((id) => !inspectedThreadIds.has(id));
-    for (let index = 0; index < ids.length; index += 5) {
+    for (let index = 0; index < ids.length; index += GMAIL_THREAD_BATCH_SIZE) {
       const remainingBudget = MAX_THREAD_DETAILS_PER_SCAN - inspectedThreadCount;
       if (remainingBudget <= 0 || candidates.length >= MAX_UNFILTERED_CANDIDATES) {
         inspectionBudgetReached = true;
         break;
       }
-      const batchIds = ids.slice(index, index + Math.min(5, remainingBudget));
+      const batchIds = ids.slice(
+        index,
+        index + Math.min(GMAIL_THREAD_BATCH_SIZE, remainingBudget),
+      );
       batchIds.forEach((threadId) => inspectedThreadIds.add(threadId));
       const threads = await Promise.all(
         batchIds.map((threadId) => getThread(accessToken, threadId)),
@@ -412,8 +496,12 @@ async function scanFollowUpCandidates(input: FollowUpScanInput) {
     (left, right) => new Date(left.lastSentAt).getTime() - new Date(right.lastSentAt).getTime(),
   );
   const eligible: FollowUpCandidate[] = [];
-  for (let index = 0; index < sorted.length && eligible.length <= 100; index += 10) {
-    const batch = sorted.slice(index, index + 10);
+  for (
+    let index = 0;
+    index < sorted.length && eligible.length <= 100;
+    index += GMAIL_SUPPRESSION_BATCH_SIZE
+  ) {
+    const batch = sorted.slice(index, index + GMAIL_SUPPRESSION_BATCH_SIZE);
     const suppressed = await Promise.all(
       batch.map((candidate) => isSuppressedRecipient(accessToken, candidate.recipientEmail)),
     );
@@ -559,13 +647,7 @@ export const fetchGmailFollowUpLabels = createServerFn({ method: "GET" }).handle
   const { requireDashboardAuth } = await import("@/lib/auth.server");
   const auth = await requireDashboardAuth();
   const accessToken = await getGmailReadAccessToken();
-  const result = await gmailJson<{
-    labels?: Array<{ id?: string; name?: string; type?: string }>;
-  }>(accessToken, "labels");
-  const allLabels = (result.labels ?? [])
-    .filter((label) => label.type === "user" && label.id && label.name)
-    .map((label) => ({ id: label.id!, name: label.name! }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+  const allLabels = await getCachedGmailFollowUpLabels(accessToken);
   return {
     labels: allLabels,
     canManage: auth.isAdmin,
@@ -578,19 +660,13 @@ export const fetchFollowUpCandidates = createServerFn({ method: "POST" })
     const { requireDashboardAuth } = await import("@/lib/auth.server");
     await requireDashboardAuth();
     const accessToken = await getGmailReadAccessToken();
-    const actual = await gmailJson<{ labels?: Array<{ id?: string; type?: string }> }>(
-      accessToken,
-      "labels",
-    );
     const userLabelIds = new Set(
-      (actual.labels ?? [])
-        .filter((label) => label.type === "user")
-        .flatMap((label) => (label.id ? [label.id] : [])),
+      (await getCachedGmailFollowUpLabels(accessToken)).map((label) => label.id),
     );
     if (data.labelIds.some((id) => !userLabelIds.has(id))) {
       throw new Error("One selected Gmail label no longer exists. Refresh and try again.");
     }
-    const result = await scanFollowUpCandidates(data);
+    const result = await scanFollowUpCandidatesWithQuotaGuard(data);
     return result;
   });
 

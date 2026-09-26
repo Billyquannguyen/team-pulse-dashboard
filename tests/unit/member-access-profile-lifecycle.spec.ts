@@ -7,7 +7,25 @@ test("disabling account access offboards the connected member profile", () => {
   expect(authSource).toContain(
     'const profileStatus = input.status === "disabled" ? "offboarded" : "active"',
   );
+  expect(authSource).toContain(
+    'input.status === "disabled" || (statusChanged && input.status === "approved")',
+  );
   expect(authSource).toContain("await setTeamMemberStatusForServer(profileId, profileStatus)");
+  expect(authSource).not.toContain(
+    'statusChanged && profileId && (input.status === "disabled" || input.status === "approved")',
+  );
+});
+
+test("saving an already-disabled account retries stale profile offboarding", () => {
+  const authSource = readFileSync(new URL("../../src/lib/auth.server.ts", import.meta.url), "utf8");
+
+  const syncCondition = authSource.slice(
+    authSource.indexOf("const shouldSyncProfileStatus"),
+    authSource.indexOf("if (shouldSyncProfileStatus"),
+  );
+
+  expect(syncCondition).toContain('input.status === "disabled"');
+  expect(syncCondition).not.toContain('statusChanged && input.status === "disabled"');
 });
 
 test("member status sync updates the existing row and invalidates active-member caches", () => {

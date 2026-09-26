@@ -30,12 +30,7 @@ import {
 import { AppHeader } from "@/components/layout/AppHeader";
 import { TopExclusiveCreators } from "@/components/goals/TopExclusiveCreators";
 import { creators as fallbackCreators } from "@/data/creators";
-import {
-  deals as fallbackDeals,
-  isActiveDashboardDeal,
-  isClosedCommissionDeal,
-  type Deal,
-} from "@/data/deals";
+import { deals as fallbackDeals, isMonthLabelCommissionDeal, type Deal } from "@/data/deals";
 import {
   team as fallbackTeam,
   totalCommission,
@@ -260,7 +255,7 @@ function formatJoinedMonth(value?: string) {
 
 function buildMonthlyClosedCommissionSeries(member: Teammate, deals: Deal[]) {
   const memberDeals = deals.filter(
-    (deal) => deal.manager === member.name && isClosedCommissionDeal(deal),
+    (deal) => deal.manager === member.name && isMonthLabelCommissionDeal(deal),
   );
   const dealMonths = memberDeals
     .map((deal) => dateFromMonthKey(deal.month))
@@ -628,7 +623,7 @@ function MonthlyClosedCommissionTooltip({
     <div className="rounded-2xl border border-border bg-card px-3 py-2 text-xs shadow-xl">
       <div className="font-semibold">{label}</div>
       <div className="mt-1 text-muted-foreground">
-        Closed commission{" "}
+        Contract commission{" "}
         <span className="font-semibold text-foreground">
           {formatMoney(Number(payload[0]?.value ?? 0))}
         </span>
@@ -690,7 +685,7 @@ function MonthlyClosedCommissionDialog({
             <div>
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-5 w-5" />
-                <h4 className="text-xl font-bold">Monthly Closed Commission</h4>
+                <h4 className="text-xl font-bold">Commission by Contract Month</h4>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">Progression since joining</p>
             </div>
@@ -698,7 +693,7 @@ function MonthlyClosedCommissionDialog({
               type="button"
               onClick={onClose}
               className="tb-action rounded-full p-2 hover:bg-accent"
-              aria-label="Close monthly closed commission chart"
+              aria-label="Close commission by contract month chart"
             >
               <X className="h-4 w-4" />
             </button>
@@ -765,7 +760,7 @@ function MonthlyClosedCommissionDialog({
                   <Area
                     type="monotone"
                     dataKey="value"
-                    name="Closed commission"
+                    name="Contract commission"
                     stroke="var(--fun-lime)"
                     strokeWidth={4}
                     fill={`url(#${chartId})`}
@@ -788,14 +783,14 @@ function MonthlyClosedCommissionDialog({
 
             {!hasClosedCommission && (
               <div className="mt-4 rounded-2xl bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-                No closed commission has been recorded for this member since joining yet.
+                No contract commission has been recorded for this member since joining yet.
               </div>
             )}
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-2xl bg-muted/50 p-4">
                 <div className="text-xs font-semibold text-muted-foreground">
-                  Total Closed Commission
+                  Total Contract Commission
                 </div>
                 <div className="mt-2 text-lg font-bold">{formatMoney(totalClosedCommission)}</div>
               </div>
@@ -827,7 +822,7 @@ function MonthlyClosedCommissionDialog({
             </div>
 
             <p className="mt-5 text-center text-xs text-muted-foreground">
-              Uses the existing closed commission calculation. No analytics formulas were changed.
+              Uses the Month label on each valid deal, regardless of lifecycle or payment status.
             </p>
           </div>
         </div>
@@ -1286,7 +1281,7 @@ function AdminGoalControls({
                               <div className="text-sm font-bold">{member.name}</div>
                               <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                                 <span>
-                                  Current month closed {formatMoney(member.monthCommission)}
+                                  Current-month contracts {formatMoney(member.monthCommission)}
                                 </span>
                                 <span>
                                   Paid commission {formatMoney(getPaidCommission(member))}
@@ -1553,7 +1548,7 @@ function PersonalGoalsAnalytics({
     (creator) => creator.relationship === "Exclusive",
   );
   const memberDeals = deals.filter(
-    (deal) => memberIdentityMatches(deal.manager, member) && isActiveDashboardDeal(deal),
+    (deal) => memberIdentityMatches(deal.manager, member) && isMonthLabelCommissionDeal(deal),
   );
   const currentMonthKey = getCurrentDealMonthKey();
   const currentMonthDeals = memberDeals.filter(
@@ -1576,7 +1571,7 @@ function PersonalGoalsAnalytics({
 
       <GoalProgressPanel
         title="My monthly goal"
-        label="Current-month closed"
+        label="Current-month contracts"
         current={member.monthCommission}
         target={monthlyTarget}
         tone="lime"
@@ -1785,7 +1780,7 @@ function GoalsPage() {
         title={auth.isAdmin ? "Goals & Analytics" : "My Goals & Analytics"}
         subtitle={
           auth.isAdmin
-            ? "Current-month closed commission for productivity, paid commission for progression."
+            ? "Contract-month commission for productivity, paid commission for progression."
             : "Your commission, progression, creator portfolio, and outreach performance."
         }
       />
@@ -1794,7 +1789,7 @@ function GoalsPage() {
 
       <GoalProgressPanel
         title={auth.isAdmin ? "Team monthly goal" : "My monthly goal"}
-        label="Current-month closed"
+        label="Current-month contracts"
         current={totals.paidThisMonth}
         target={primaryMonthlyTarget}
         tone="lime"
@@ -1808,7 +1803,8 @@ function GoalsPage() {
             <div>
               <h3 className="text-base font-semibold">Individual monthly goals</h3>
               <p className="text-xs text-muted-foreground">
-                Each member's current-month closed commission compared with their monthly goal.
+                Each member's contract commission labelled for the current month compared with their
+                monthly goal.
               </p>
             </div>
             <div className="hidden rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground sm:inline-flex">
@@ -1820,7 +1816,7 @@ function GoalsPage() {
               <GoalProgressPanel
                 key={member.id}
                 title={member.name}
-                label="Current-month closed"
+                label="Current-month contracts"
                 current={member.monthCommission}
                 target={getMonthlyTarget(member)}
                 tone={(["yellow", "pink", "purple", "blue"] as Tone[])[index % 4]}

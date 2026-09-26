@@ -100,6 +100,19 @@ test("weekly tagging reads the dashboard creator source, not Creator Profiles", 
   expect(signedCreatorSource).not.toContain("TEAM_ASSETS_SPREADSHEET_ID");
 });
 
+test("weekly report refreshes TeamMembers and only selects active reporting members", () => {
+  const memberSource = readFileSync(
+    new URL("../../src/lib/team-members.ts", import.meta.url),
+    "utf8",
+  );
+
+  expect(memberSource).toContain("const { data } = await refreshTeamMembersCache(config)");
+  expect(memberSource).toContain("return data.activeMembers.filter(");
+  expect(memberSource).toContain(
+    "member.weeklyReportEnabled && isWeeklyOutreachDepartment(member.teamDepartment)",
+  );
+});
+
 test("weekly overview assigns overdue replies to Brand inbound and missing tags to tagging", () => {
   const source = readFileSync(
     new URL("../../src/lib/weekly-gmail-outreach-report.server.ts", import.meta.url),

@@ -27,7 +27,7 @@ export function ActivitySummaryCard({ data }: { data?: DashboardSheetData }) {
       tone: "var(--fun-lime)",
     },
     {
-      label: "Current month closed",
+      label: "Current-month contracts",
       value: `£${totals.paidThisMonth.toLocaleString()}`,
       icon: CalendarDays,
       tone: "var(--fun-yellow)",

@@ -5,7 +5,12 @@ import { Trophy } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { TopExclusiveCreators } from "@/components/goals/TopExclusiveCreators";
 import { TeamAvatar } from "@/components/ui/team-avatar";
-import { deals as fallbackDeals, isActiveDashboardDeal, type Deal } from "@/data/deals";
+import {
+  deals as fallbackDeals,
+  isActiveDashboardDeal,
+  isMonthLabelCommissionDeal,
+  type Deal,
+} from "@/data/deals";
 import { team as fallbackTeam } from "@/data/team";
 import {
   leaderboardQuery,
@@ -51,7 +56,7 @@ const categories: LeaderboardCategory[] = [
     shortLabel: "Commission",
     description: (period) =>
       period === "monthly"
-        ? "Closed commission for the current month."
+        ? "Commission from deals labelled for the current month."
         : "Closed commission across all recorded deals.",
     format: "money",
   },
@@ -276,7 +281,7 @@ function LeaderboardPage() {
   const rawDeals = leaderboardData?.deals ?? (canUseLocalFallback ? fallbackDeals : []);
   const periodDeals = rawDeals.filter(
     (deal) =>
-      isActiveDashboardDeal(deal) &&
+      (period === "monthly" ? isMonthLabelCommissionDeal(deal) : isActiveDashboardDeal(deal)) &&
       (period === "longTerm" || normalizeDealMonthKey(deal.month) === getCurrentDealMonthKey()),
   );
   const scopedDeals = periodDeals;
@@ -311,7 +316,7 @@ function LeaderboardPage() {
           <h2 className="text-base font-black">Top 3 members by commission</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             {period === "monthly"
-              ? "Closed commission for the current month."
+              ? "Commission from deals labelled for the current month."
               : "Closed commission across all recorded deals."}
           </p>
         </div>

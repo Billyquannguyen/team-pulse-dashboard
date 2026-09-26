@@ -10,6 +10,7 @@ import {
   getDealRowExclusionReason,
   isActiveDashboardDeal,
   isClosedCommissionDeal,
+  isMonthLabelCommissionDeal,
   isPaidCommissionDeal,
   isPostedCommissionDeal,
   type Deal,
@@ -656,10 +657,13 @@ function buildMemberSummary(tabName: string, rows: string[][], deals: Deal[], fa
   const memberDeals = deals.filter(
     (deal) => deal.manager === tabName && isClosedCommissionDeal(deal),
   );
+  const monthLabelDeals = deals.filter(
+    (deal) => deal.manager === tabName && isMonthLabelCommissionDeal(deal),
+  );
   const paidDeals = deals.filter((deal) => deal.manager === tabName && isPaidCommissionDeal(deal));
   const allTimeCommission = memberDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
   const paidCommission = paidDeals.reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
-  const currentMonthCommission = memberDeals
+  const currentMonthCommission = monthLabelDeals
     .filter((deal) => normalizeDealMonthKey(deal.month) === currentMonthKey)
     .reduce((sum, deal) => sum + deal.managerTotalGbp, 0);
   const totalPricing = memberDeals.reduce((sum, deal) => sum + deal.totalPricingGbp, 0);
@@ -1250,11 +1254,11 @@ export function buildLeaderboardData(data: DashboardSheetData): LeaderboardMembe
     const closedDeals = data.deals.filter(
       (deal) => memberIdentityMatches(deal.manager, member) && isClosedCommissionDeal(deal),
     );
-    const currentMonthKey = getCurrentDealMonthKey();
-    const monthlyActiveDeals = activeDeals.filter(
-      (deal) => normalizeDealMonthKey(deal.month ?? "") === currentMonthKey,
+    const monthLabelDeals = data.deals.filter(
+      (deal) => memberIdentityMatches(deal.manager, member) && isMonthLabelCommissionDeal(deal),
     );
-    const monthlyClosedDeals = closedDeals.filter(
+    const currentMonthKey = getCurrentDealMonthKey();
+    const monthlyContractDeals = monthLabelDeals.filter(
       (deal) => normalizeDealMonthKey(deal.month ?? "") === currentMonthKey,
     );
 
@@ -1284,7 +1288,7 @@ export function buildLeaderboardData(data: DashboardSheetData): LeaderboardMembe
       name: member.name,
       initials: member.initials,
       avatarUrl: member.avatarUrl,
-      monthly: metrics(monthlyActiveDeals, monthlyClosedDeals, 0),
+      monthly: metrics(monthlyContractDeals, monthlyContractDeals, 0),
       longTerm: metrics(activeDeals, closedDeals, member.exclusiveCreators),
     };
   });
