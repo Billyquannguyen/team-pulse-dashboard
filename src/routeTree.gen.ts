@@ -9,85 +9,35 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as TeamMembersRouteImport } from './routes/team-members'
-import { Route as PitchingSheetsRouteImport } from './routes/pitching-sheets'
-import { Route as LeaderboardRouteImport } from './routes/leaderboard'
-import { Route as GoalsRouteImport } from './routes/goals'
-import { Route as DiagnosticsRouteImport } from './routes/diagnostics'
-import { Route as DealsRouteImport } from './routes/deals'
-import { Route as CreatorsRouteImport } from './routes/creators'
-import { Route as ContactDatabaseRouteImport } from './routes/contact-database'
-import { Route as BulkSenderRouteImport } from './routes/bulk-sender'
-import { Route as BrandFinderRouteImport } from './routes/brand-finder'
-import { Route as AssetsRouteImport } from './routes/assets'
-import { Route as ActiveBrandsRouteImport } from './routes/active-brands'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiWeeklyGmailOutreachReportRouteImport } from './routes/api/weekly-gmail-outreach-report'
-import { Route as ApiSlackLinkAlertsRouteImport } from './routes/api/slack-link-alerts'
-import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
-import { Route as ApiMonthlyOpportunityRefreshWorkerRouteImport } from './routes/api/monthly-opportunity-refresh-worker'
-import { Route as ApiMonthlyOpportunityRefreshPackageRouteImport } from './routes/api/monthly-opportunity-refresh-package'
-import { Route as ApiMonthlyOpportunityRefreshRouteImport } from './routes/api/monthly-opportunity-refresh'
-import { Route as ApiBulkOutreachLabelSyncRouteImport } from './routes/api/bulk-outreach-label-sync'
+import { Route as ActiveBrandsRouteImport } from './routes/active-brands'
+import { Route as AssetsRouteImport } from './routes/assets'
+import { Route as BrandFinderRouteImport } from './routes/brand-finder'
+import { Route as BulkSenderRouteImport } from './routes/bulk-sender'
+import { Route as ContactDatabaseRouteImport } from './routes/contact-database'
+import { Route as CreatorsRouteImport } from './routes/creators'
+import { Route as DealsRouteImport } from './routes/deals'
+import { Route as DiagnosticsRouteImport } from './routes/diagnostics'
+import { Route as GoalsRouteImport } from './routes/goals'
+import { Route as LeaderboardRouteImport } from './routes/leaderboard'
+import { Route as PitchingSheetsRouteImport } from './routes/pitching-sheets'
+import { Route as TeamMembersRouteImport } from './routes/team-members'
 import { Route as ApiBulkFollowUpWorkerRouteImport } from './routes/api/bulk-follow-up-worker'
-import { Route as ApiSlackLinkAlertsSlotRouteImport } from './routes/api/slack-link-alerts.$slot'
-import { Route as ApiCalendlyRemindersWebhookRouteImport } from './routes/api/calendly-reminders/webhook'
-import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
+import { Route as ApiBulkOutreachLabelSyncRouteImport } from './routes/api/bulk-outreach-label-sync'
+import { Route as ApiMonthlyOpportunityRefreshRouteImport } from './routes/api/monthly-opportunity-refresh'
+import { Route as ApiMonthlyOpportunityRefreshPackageRouteImport } from './routes/api/monthly-opportunity-refresh-package'
+import { Route as ApiMonthlyOpportunityRefreshWorkerRouteImport } from './routes/api/monthly-opportunity-refresh-worker'
+import { Route as ApiSlackFollowupsRouteImport } from './routes/api/slack-followups'
+import { Route as ApiSlackLinkAlertsRouteImport } from './routes/api/slack-link-alerts'
+import { Route as ApiWeeklyGmailOutreachReportRouteImport } from './routes/api/weekly-gmail-outreach-report'
 import { Route as ApiAiPersonalReportRouteImport } from './routes/api/ai/personal-report'
+import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
+import { Route as ApiCalendlyRemindersWebhookRouteImport } from './routes/api/calendly-reminders/webhook'
+import { Route as ApiSlackLinkAlertsSlotRouteImport } from './routes/api/slack-link-alerts.$slot'
 
-const TeamMembersRoute = TeamMembersRouteImport.update({
-  id: '/team-members',
-  path: '/team-members',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PitchingSheetsRoute = PitchingSheetsRouteImport.update({
-  id: '/pitching-sheets',
-  path: '/pitching-sheets',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LeaderboardRoute = LeaderboardRouteImport.update({
-  id: '/leaderboard',
-  path: '/leaderboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GoalsRoute = GoalsRouteImport.update({
-  id: '/goals',
-  path: '/goals',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DiagnosticsRoute = DiagnosticsRouteImport.update({
-  id: '/diagnostics',
-  path: '/diagnostics',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DealsRoute = DealsRouteImport.update({
-  id: '/deals',
-  path: '/deals',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CreatorsRoute = CreatorsRouteImport.update({
-  id: '/creators',
-  path: '/creators',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ContactDatabaseRoute = ContactDatabaseRouteImport.update({
-  id: '/contact-database',
-  path: '/contact-database',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BulkSenderRoute = BulkSenderRouteImport.update({
-  id: '/bulk-sender',
-  path: '/bulk-sender',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BrandFinderRoute = BrandFinderRouteImport.update({
-  id: '/brand-finder',
-  path: '/brand-finder',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssetsRoute = AssetsRouteImport.update({
-  id: '/assets',
-  path: '/assets',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ActiveBrandsRoute = ActiveBrandsRouteImport.update({
@@ -95,37 +45,70 @@ const ActiveBrandsRoute = ActiveBrandsRouteImport.update({
   path: '/active-brands',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AssetsRoute = AssetsRouteImport.update({
+  id: '/assets',
+  path: '/assets',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiWeeklyGmailOutreachReportRoute =
-  ApiWeeklyGmailOutreachReportRouteImport.update({
-    id: '/api/weekly-gmail-outreach-report',
-    path: '/api/weekly-gmail-outreach-report',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiSlackLinkAlertsRoute = ApiSlackLinkAlertsRouteImport.update({
-  id: '/api/slack-link-alerts',
-  path: '/api/slack-link-alerts',
+const BrandFinderRoute = BrandFinderRouteImport.update({
+  id: '/brand-finder',
+  path: '/brand-finder',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiSlackFollowupsRoute = ApiSlackFollowupsRouteImport.update({
-  id: '/api/slack-followups',
-  path: '/api/slack-followups',
+const BulkSenderRoute = BulkSenderRouteImport.update({
+  id: '/bulk-sender',
+  path: '/bulk-sender',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiMonthlyOpportunityRefreshWorkerRoute =
-  ApiMonthlyOpportunityRefreshWorkerRouteImport.update({
-    id: '/api/monthly-opportunity-refresh-worker',
-    path: '/api/monthly-opportunity-refresh-worker',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiMonthlyOpportunityRefreshPackageRoute =
-  ApiMonthlyOpportunityRefreshPackageRouteImport.update({
-    id: '/api/monthly-opportunity-refresh-package',
-    path: '/api/monthly-opportunity-refresh-package',
+const ContactDatabaseRoute = ContactDatabaseRouteImport.update({
+  id: '/contact-database',
+  path: '/contact-database',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CreatorsRoute = CreatorsRouteImport.update({
+  id: '/creators',
+  path: '/creators',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DealsRoute = DealsRouteImport.update({
+  id: '/deals',
+  path: '/deals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DiagnosticsRoute = DiagnosticsRouteImport.update({
+  id: '/diagnostics',
+  path: '/diagnostics',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GoalsRoute = GoalsRouteImport.update({
+  id: '/goals',
+  path: '/goals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LeaderboardRoute = LeaderboardRouteImport.update({
+  id: '/leaderboard',
+  path: '/leaderboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PitchingSheetsRoute = PitchingSheetsRouteImport.update({
+  id: '/pitching-sheets',
+  path: '/pitching-sheets',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeamMembersRoute = TeamMembersRouteImport.update({
+  id: '/team-members',
+  path: '/team-members',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBulkFollowUpWorkerRoute = ApiBulkFollowUpWorkerRouteImport.update({
+  id: '/api/bulk-follow-up-worker',
+  path: '/api/bulk-follow-up-worker',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBulkOutreachLabelSyncRoute =
+  ApiBulkOutreachLabelSyncRouteImport.update({
+    id: '/api/bulk-outreach-label-sync',
+    path: '/api/bulk-outreach-label-sync',
     getParentRoute: () => rootRouteImport,
   } as any)
 const ApiMonthlyOpportunityRefreshRoute =
@@ -134,21 +117,43 @@ const ApiMonthlyOpportunityRefreshRoute =
     path: '/api/monthly-opportunity-refresh',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiBulkOutreachLabelSyncRoute =
-  ApiBulkOutreachLabelSyncRouteImport.update({
-    id: '/api/bulk-outreach-label-sync',
-    path: '/api/bulk-outreach-label-sync',
+const ApiMonthlyOpportunityRefreshPackageRoute =
+  ApiMonthlyOpportunityRefreshPackageRouteImport.update({
+    id: '/api/monthly-opportunity-refresh-package',
+    path: '/api/monthly-opportunity-refresh-package',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiBulkFollowUpWorkerRoute = ApiBulkFollowUpWorkerRouteImport.update({
-  id: '/api/bulk-follow-up-worker',
-  path: '/api/bulk-follow-up-worker',
+const ApiMonthlyOpportunityRefreshWorkerRoute =
+  ApiMonthlyOpportunityRefreshWorkerRouteImport.update({
+    id: '/api/monthly-opportunity-refresh-worker',
+    path: '/api/monthly-opportunity-refresh-worker',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiSlackFollowupsRoute = ApiSlackFollowupsRouteImport.update({
+  id: '/api/slack-followups',
+  path: '/api/slack-followups',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiSlackLinkAlertsSlotRoute = ApiSlackLinkAlertsSlotRouteImport.update({
-  id: '/$slot',
-  path: '/$slot',
-  getParentRoute: () => ApiSlackLinkAlertsRoute,
+const ApiSlackLinkAlertsRoute = ApiSlackLinkAlertsRouteImport.update({
+  id: '/api/slack-link-alerts',
+  path: '/api/slack-link-alerts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWeeklyGmailOutreachReportRoute =
+  ApiWeeklyGmailOutreachReportRouteImport.update({
+    id: '/api/weekly-gmail-outreach-report',
+    path: '/api/weekly-gmail-outreach-report',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiAiPersonalReportRoute = ApiAiPersonalReportRouteImport.update({
+  id: '/api/ai/personal-report',
+  path: '/api/ai/personal-report',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthCallbackRoute = ApiAuthCallbackRouteImport.update({
+  id: '/api/auth/callback',
+  path: '/api/auth/callback',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiCalendlyRemindersWebhookRoute =
   ApiCalendlyRemindersWebhookRouteImport.update({
@@ -156,15 +161,10 @@ const ApiCalendlyRemindersWebhookRoute =
     path: '/api/calendly-reminders/webhook',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiAuthCallbackRoute = ApiAuthCallbackRouteImport.update({
-  id: '/api/auth/callback',
-  path: '/api/auth/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAiPersonalReportRoute = ApiAiPersonalReportRouteImport.update({
-  id: '/api/ai/personal-report',
-  path: '/api/ai/personal-report',
-  getParentRoute: () => rootRouteImport,
+const ApiSlackLinkAlertsSlotRoute = ApiSlackLinkAlertsSlotRouteImport.update({
+  id: '/$slot',
+  path: '/$slot',
+  getParentRoute: () => ApiSlackLinkAlertsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -362,81 +362,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/team-members': {
-      id: '/team-members'
-      path: '/team-members'
-      fullPath: '/team-members'
-      preLoaderRoute: typeof TeamMembersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/pitching-sheets': {
-      id: '/pitching-sheets'
-      path: '/pitching-sheets'
-      fullPath: '/pitching-sheets'
-      preLoaderRoute: typeof PitchingSheetsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/leaderboard': {
-      id: '/leaderboard'
-      path: '/leaderboard'
-      fullPath: '/leaderboard'
-      preLoaderRoute: typeof LeaderboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/goals': {
-      id: '/goals'
-      path: '/goals'
-      fullPath: '/goals'
-      preLoaderRoute: typeof GoalsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/diagnostics': {
-      id: '/diagnostics'
-      path: '/diagnostics'
-      fullPath: '/diagnostics'
-      preLoaderRoute: typeof DiagnosticsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/deals': {
-      id: '/deals'
-      path: '/deals'
-      fullPath: '/deals'
-      preLoaderRoute: typeof DealsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/creators': {
-      id: '/creators'
-      path: '/creators'
-      fullPath: '/creators'
-      preLoaderRoute: typeof CreatorsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/contact-database': {
-      id: '/contact-database'
-      path: '/contact-database'
-      fullPath: '/contact-database'
-      preLoaderRoute: typeof ContactDatabaseRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/bulk-sender': {
-      id: '/bulk-sender'
-      path: '/bulk-sender'
-      fullPath: '/bulk-sender'
-      preLoaderRoute: typeof BulkSenderRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/brand-finder': {
-      id: '/brand-finder'
-      path: '/brand-finder'
-      fullPath: '/brand-finder'
-      preLoaderRoute: typeof BrandFinderRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assets': {
-      id: '/assets'
-      path: '/assets'
-      fullPath: '/assets'
-      preLoaderRoute: typeof AssetsRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/active-brands': {
@@ -446,60 +376,81 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ActiveBrandsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/assets': {
+      id: '/assets'
+      path: '/assets'
+      fullPath: '/assets'
+      preLoaderRoute: typeof AssetsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/weekly-gmail-outreach-report': {
-      id: '/api/weekly-gmail-outreach-report'
-      path: '/api/weekly-gmail-outreach-report'
-      fullPath: '/api/weekly-gmail-outreach-report'
-      preLoaderRoute: typeof ApiWeeklyGmailOutreachReportRouteImport
+    '/brand-finder': {
+      id: '/brand-finder'
+      path: '/brand-finder'
+      fullPath: '/brand-finder'
+      preLoaderRoute: typeof BrandFinderRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/slack-link-alerts': {
-      id: '/api/slack-link-alerts'
-      path: '/api/slack-link-alerts'
-      fullPath: '/api/slack-link-alerts'
-      preLoaderRoute: typeof ApiSlackLinkAlertsRouteImport
+    '/bulk-sender': {
+      id: '/bulk-sender'
+      path: '/bulk-sender'
+      fullPath: '/bulk-sender'
+      preLoaderRoute: typeof BulkSenderRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/slack-followups': {
-      id: '/api/slack-followups'
-      path: '/api/slack-followups'
-      fullPath: '/api/slack-followups'
-      preLoaderRoute: typeof ApiSlackFollowupsRouteImport
+    '/contact-database': {
+      id: '/contact-database'
+      path: '/contact-database'
+      fullPath: '/contact-database'
+      preLoaderRoute: typeof ContactDatabaseRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/monthly-opportunity-refresh-worker': {
-      id: '/api/monthly-opportunity-refresh-worker'
-      path: '/api/monthly-opportunity-refresh-worker'
-      fullPath: '/api/monthly-opportunity-refresh-worker'
-      preLoaderRoute: typeof ApiMonthlyOpportunityRefreshWorkerRouteImport
+    '/creators': {
+      id: '/creators'
+      path: '/creators'
+      fullPath: '/creators'
+      preLoaderRoute: typeof CreatorsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/monthly-opportunity-refresh-package': {
-      id: '/api/monthly-opportunity-refresh-package'
-      path: '/api/monthly-opportunity-refresh-package'
-      fullPath: '/api/monthly-opportunity-refresh-package'
-      preLoaderRoute: typeof ApiMonthlyOpportunityRefreshPackageRouteImport
+    '/deals': {
+      id: '/deals'
+      path: '/deals'
+      fullPath: '/deals'
+      preLoaderRoute: typeof DealsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/monthly-opportunity-refresh': {
-      id: '/api/monthly-opportunity-refresh'
-      path: '/api/monthly-opportunity-refresh'
-      fullPath: '/api/monthly-opportunity-refresh'
-      preLoaderRoute: typeof ApiMonthlyOpportunityRefreshRouteImport
+    '/diagnostics': {
+      id: '/diagnostics'
+      path: '/diagnostics'
+      fullPath: '/diagnostics'
+      preLoaderRoute: typeof DiagnosticsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/bulk-outreach-label-sync': {
-      id: '/api/bulk-outreach-label-sync'
-      path: '/api/bulk-outreach-label-sync'
-      fullPath: '/api/bulk-outreach-label-sync'
-      preLoaderRoute: typeof ApiBulkOutreachLabelSyncRouteImport
+    '/goals': {
+      id: '/goals'
+      path: '/goals'
+      fullPath: '/goals'
+      preLoaderRoute: typeof GoalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/leaderboard': {
+      id: '/leaderboard'
+      path: '/leaderboard'
+      fullPath: '/leaderboard'
+      preLoaderRoute: typeof LeaderboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pitching-sheets': {
+      id: '/pitching-sheets'
+      path: '/pitching-sheets'
+      fullPath: '/pitching-sheets'
+      preLoaderRoute: typeof PitchingSheetsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/team-members': {
+      id: '/team-members'
+      path: '/team-members'
+      fullPath: '/team-members'
+      preLoaderRoute: typeof TeamMembersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/bulk-follow-up-worker': {
@@ -509,18 +460,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiBulkFollowUpWorkerRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/slack-link-alerts/$slot': {
-      id: '/api/slack-link-alerts/$slot'
-      path: '/$slot'
-      fullPath: '/api/slack-link-alerts/$slot'
-      preLoaderRoute: typeof ApiSlackLinkAlertsSlotRouteImport
-      parentRoute: typeof ApiSlackLinkAlertsRoute
+    '/api/bulk-outreach-label-sync': {
+      id: '/api/bulk-outreach-label-sync'
+      path: '/api/bulk-outreach-label-sync'
+      fullPath: '/api/bulk-outreach-label-sync'
+      preLoaderRoute: typeof ApiBulkOutreachLabelSyncRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/api/calendly-reminders/webhook': {
-      id: '/api/calendly-reminders/webhook'
-      path: '/api/calendly-reminders/webhook'
-      fullPath: '/api/calendly-reminders/webhook'
-      preLoaderRoute: typeof ApiCalendlyRemindersWebhookRouteImport
+    '/api/monthly-opportunity-refresh': {
+      id: '/api/monthly-opportunity-refresh'
+      path: '/api/monthly-opportunity-refresh'
+      fullPath: '/api/monthly-opportunity-refresh'
+      preLoaderRoute: typeof ApiMonthlyOpportunityRefreshRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/monthly-opportunity-refresh-package': {
+      id: '/api/monthly-opportunity-refresh-package'
+      path: '/api/monthly-opportunity-refresh-package'
+      fullPath: '/api/monthly-opportunity-refresh-package'
+      preLoaderRoute: typeof ApiMonthlyOpportunityRefreshPackageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/monthly-opportunity-refresh-worker': {
+      id: '/api/monthly-opportunity-refresh-worker'
+      path: '/api/monthly-opportunity-refresh-worker'
+      fullPath: '/api/monthly-opportunity-refresh-worker'
+      preLoaderRoute: typeof ApiMonthlyOpportunityRefreshWorkerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/slack-followups': {
+      id: '/api/slack-followups'
+      path: '/api/slack-followups'
+      fullPath: '/api/slack-followups'
+      preLoaderRoute: typeof ApiSlackFollowupsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/slack-link-alerts': {
+      id: '/api/slack-link-alerts'
+      path: '/api/slack-link-alerts'
+      fullPath: '/api/slack-link-alerts'
+      preLoaderRoute: typeof ApiSlackLinkAlertsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/weekly-gmail-outreach-report': {
+      id: '/api/weekly-gmail-outreach-report'
+      path: '/api/weekly-gmail-outreach-report'
+      fullPath: '/api/weekly-gmail-outreach-report'
+      preLoaderRoute: typeof ApiWeeklyGmailOutreachReportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/ai/personal-report': {
+      id: '/api/ai/personal-report'
+      path: '/api/ai/personal-report'
+      fullPath: '/api/ai/personal-report'
+      preLoaderRoute: typeof ApiAiPersonalReportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/callback': {
@@ -530,12 +523,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/ai/personal-report': {
-      id: '/api/ai/personal-report'
-      path: '/api/ai/personal-report'
-      fullPath: '/api/ai/personal-report'
-      preLoaderRoute: typeof ApiAiPersonalReportRouteImport
+    '/api/calendly-reminders/webhook': {
+      id: '/api/calendly-reminders/webhook'
+      path: '/api/calendly-reminders/webhook'
+      fullPath: '/api/calendly-reminders/webhook'
+      preLoaderRoute: typeof ApiCalendlyRemindersWebhookRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/api/slack-link-alerts/$slot': {
+      id: '/api/slack-link-alerts/$slot'
+      path: '/$slot'
+      fullPath: '/api/slack-link-alerts/$slot'
+      preLoaderRoute: typeof ApiSlackLinkAlertsSlotRouteImport
+      parentRoute: typeof ApiSlackLinkAlertsRoute
     }
   }
 }
