@@ -107,3 +107,21 @@ The link-alert route is checked at the UTC hours that cover both GMT and BST. It
 Link alerts use the separate `SLACK_LINK_ALERT_USER_TOKEN`; the DM unreply workflow continues using `SLACK_USER_TOKEN`. The link-alert token must have `channels:read`, `channels:history`, `groups:read`, `groups:history`, `im:read`, `im:history`, and `users:read`. The Slack user connected by `SLACK_LINK_ALERT_USER_TOKEN` must already belong to every private channel being monitored.
 
 For local testing only, you can set `SLACK_FOLLOWUP_THRESHOLD_MINUTES=1` before starting the dev server. Production ignores this and keeps the real 24-hour threshold.
+
+### Weekly report Gmail quota handling
+
+The weekly report spaces requests using Gmail's current per-method quota costs
+(40 units for metadata threads, 120 for full threads) at 60 units/second, leaving
+headroom below the 6,000 units/minute per-user limit. Concurrent report reads in
+one Node worker share the same queue. A quota response pauses that queue and
+honors `Retry-After`, with bounded 10/30/60-second fallback backoff. Full thread
+reads are cached for one report run; metadata excludes ineligible threads before
+body downloads.
+
+This budget is local to a Node worker, not a distributed lock. Other Gmail tools
+or simultaneous runs on separate workers still share Google's mailbox quota.
+Large mailboxes may need a resumable background report to fit the hosting
+function duration; pacing does not extend Vercel's execution limit. Do not
+reconnect Gmail for a quota error. Check Google Cloud quota usage first.
+
+Quota regression tests: `node --experimental-strip-types --test tests/unit/gmail-read-budget.test.mjs`.
