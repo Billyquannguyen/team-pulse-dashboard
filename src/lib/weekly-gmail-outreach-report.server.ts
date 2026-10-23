@@ -1,4 +1,6 @@
 import "@tanstack/react-start/server-only";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { createGmailReadBudget, gmailReadCost, gmailRetryDelay } from "./gmail-read-budget";
 import { getMasterGmailAccessToken } from "@/lib/gmail-oauth.server";
 import {
   classifyBrandInboundConversations,
@@ -125,7 +127,9 @@ const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_REPORT_DAYS = 7;
 const THREAD_FETCH_CONCURRENCY = 5;
 const THREAD_FETCH_BATCH_DELAY_MS = 500;
-const GMAIL_RATE_LIMIT_RETRY_DELAYS_MS = [10_000, 30_000];
+const GMAIL_RATE_LIMIT_RETRY_DELAYS_MS = [10_000, 30_000, 60_000];
+const gmailReadBudget = createGmailReadBudget();
+const fullThreadCache = new AsyncLocalStorage<Map<string, Promise<GmailThread>>>();
 const MAX_UNTAGGED_INBOUND_CANDIDATES = 50;
 const MAX_STALE_BRAND_INBOUND_CANDIDATES = 200;
 const MAX_AI_EMAIL_TEXT_LENGTH = 1_200;
@@ -300,6 +304,7 @@ async function gmailGet<T>(accessToken: string, path: string, params?: URLSearch
   }
 
   for (let attempt = 0; attempt <= GMAIL_RATE_LIMIT_RETRY_DELAYS_MS.length; attempt += 1) {
+    await gmailReadBudget.wait(gmailReadCost(path, params));
     const response = await fetch(url.toString(), {
       method: "GET",
       cache: "no-store",
@@ -309,8 +314,7 @@ async function gmailGet<T>(accessToken: string, path: string, params?: URLSearch
       signal: AbortSignal.timeout(20_000),
     });
     const payload = (await response.json().catch(() => null)) as
-      | (T & { error?: { message?: string } })
-      | null;
+      (T & { error?: { message?: string } }) | null;
 
     if (response.ok) return (payload ?? {}) as T;
 
@@ -321,7 +325,8 @@ async function gmailGet<T>(accessToken: string, path: string, params?: URLSearch
         console.warn(
           `[weekly-gmail-report] Gmail quota reached; retrying in ${retryDelay / 1_000}s (${path}).`,
         );
-        await sleep(retryDelay);
+        const delay = gmailRetryDelay(response.headers.get("retry-after"), retryDelay);
+        gmailReadBudget.pause(delay);
         continue;
       }
       throw new GmailRateLimitError(message);
@@ -398,7 +403,16 @@ async function getGmailThread(accessToken: string, threadId: string) {
 async function getFullGmailThread(accessToken: string, threadId: string) {
   const params = new URLSearchParams();
   params.set("format", "full");
-  return gmailGet<GmailThread>(accessToken, `threads/${encodeURIComponent(threadId)}`, params);
+  const cache = fullThreadCache.getStore();
+  const cached = cache?.get(threadId);
+  if (cached) return cached;
+  const request = gmailGet<GmailThread>(
+    accessToken,
+    `threads/${encodeURIComponent(threadId)}`,
+    params,
+  );
+  cache?.set(threadId, request);
+  return request;
 }
 
 async function loadGmailThreads(
@@ -429,13 +443,25 @@ async function loadGmailThreads(
   return threads;
 }
 
-async function loadFullGmailThreads(accessToken: string, threadIds: string[]) {
+async function loadFullGmailThreads(
+  accessToken: string,
+  threadIds: string[],
+  eligible?: (thread: GmailThread) => boolean,
+) {
   const threads: GmailThread[] = [];
 
   for (let index = 0; index < threadIds.length; index += THREAD_FETCH_CONCURRENCY) {
     const batch = threadIds.slice(index, index + THREAD_FETCH_CONCURRENCY);
     threads.push(
-      ...(await Promise.all(batch.map((threadId) => getFullGmailThread(accessToken, threadId)))),
+      ...(
+        await Promise.all(
+          batch.map(async (threadId) => {
+            // Metadata is cheaper than full bodies. Reject irrelevant conversations first.
+            if (eligible && !eligible(await getGmailThread(accessToken, threadId))) return null;
+            return getFullGmailThread(accessToken, threadId);
+          }),
+        )
+      ).filter((thread): thread is GmailThread => thread !== null),
     );
     if (index + THREAD_FETCH_CONCURRENCY < threadIds.length) {
       await sleep(THREAD_FETCH_BATCH_DELAY_MS);
@@ -734,7 +760,11 @@ async function collectMissingMemberTagAlerts({
     query,
     MAX_UNTAGGED_INBOUND_CANDIDATES,
   );
-  const threads = await loadFullGmailThreads(accessToken, threadIds);
+  const threads = await loadFullGmailThreads(
+    accessToken,
+    threadIds,
+    (thread) => !hasAnyMemberLabel(thread, memberLabelIds),
+  );
   const candidates: MissingMemberTagCandidate[] = [];
 
   for (const thread of threads) {
@@ -784,9 +814,7 @@ async function collectMissingMemberTagAlerts({
     if (!decision.report || decision.confidence !== "high") continue;
     const candidate = candidateIndex.get(decision.candidateId);
     const creator = creatorIndex.get(decision.creatorId);
-    const member = creator
-      ? memberForDashboardOwner(creator.ownerName, members)
-      : null;
+    const member = creator ? memberForDashboardOwner(creator.ownerName, members) : null;
     if (!candidate || !creator || !member) continue;
     alerts.set(candidate.candidateId, {
       candidateId: candidate.candidateId,
@@ -851,7 +879,6 @@ async function collectOverdueTaggedBrandInbound({
     query,
     MAX_STALE_BRAND_INBOUND_CANDIDATES,
   );
-  const threads = await loadFullGmailThreads(accessToken, threadIds);
   const membersByLabelId = new Map(
     members
       .map((member) => {
@@ -860,6 +887,16 @@ async function collectOverdueTaggedBrandInbound({
       })
       .filter((entry): entry is readonly [string, TeamMemberConfig] => entry !== null),
   );
+  const threads = await loadFullGmailThreads(accessToken, threadIds, (thread) => {
+    const latest = getDeliveredThreadMessages(thread).at(-1);
+    if (!latest || (latest.labelIds ?? []).includes("SENT")) return false;
+    const timestamp = getMessageTimestamp(latest);
+    return (
+      timestamp > 0 &&
+      timestamp <= staleBeforeMs &&
+      Array.from(getThreadLabelIds(thread)).some((id) => membersByLabelId.has(id))
+    );
+  });
   const candidates: BrandInboundCandidate[] = [];
 
   for (const thread of threads) {
@@ -1163,13 +1200,9 @@ function buildVietnameseReport(
         )} | Brand mới ${formatNumber(item.brandOutreachSent)} | Booked ${formatNumber(
           item.bookedCalls,
         )} | Brand inbound >48h ${
-          unresolvedBrandInboundScanCompleted
-            ? formatNumber(item.missedInbound)
-            : "không xác định"
+          unresolvedBrandInboundScanCompleted ? formatNumber(item.missedInbound) : "không xác định"
         } | Thiếu tag ${
-          missingTagScanCompleted
-            ? formatNumber(item.invalidTaggingThreads)
-            : "không xác định"
+          missingTagScanCompleted ? formatNumber(item.invalidTaggingThreads) : "không xác định"
         }`,
       );
     }
@@ -1247,13 +1280,17 @@ async function postGmailRateLimitErrorToDiscord() {
     [
       "**Báo cáo Gmail Outreach hằng tuần: Gmail tạm giới hạn lượt đọc**",
       "Gmail đang giới hạn số yêu cầu trong thời gian ngắn. Đây không phải lỗi kết nối hoặc quyền truy cập.",
-      "Báo cáo đã thử lại tự động nhưng vẫn bị giới hạn. Chờ một phút rồi chạy lại; không cần reconnect Gmail.",
+      "Báo cáo đã thử lại tự động nhưng vẫn bị giới hạn. Kiểm tra quota trong Google Cloud trước khi chạy lại; không cần reconnect Gmail.",
     ].join("\n"),
     [],
   );
 }
 
 export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult> {
+  return fullThreadCache.run(new Map(), runWeeklyGmailOutreachReportInternal);
+}
+
+async function runWeeklyGmailOutreachReportInternal(): Promise<WeeklyReportResult> {
   const members = await getWeeklyOutreachReportMembers();
   const days = getReportDays();
   const now = new Date();
@@ -1427,7 +1464,7 @@ export async function runWeeklyGmailOutreachReport(): Promise<WeeklyReportResult
       memberCount: members.length,
       totals,
       openRouterUsed: Boolean(
-        narrative.modelUsed || missingTagModelUsed || unresolvedBrandInboundModelUsed
+        narrative.modelUsed || missingTagModelUsed || unresolvedBrandInboundModelUsed,
       ),
       openRouterModel:
         narrative.modelUsed || missingTagModelUsed || unresolvedBrandInboundModelUsed,
